@@ -1,0 +1,7 @@
+Emoji 面板图形来源（仅用于本机预览，输入内容仍为 Unicode）
+Twemoji: https://github.com/jdecked/twemoji — CC BY 4.0
+OpenMoji: https://github.com/hfg-gmuend/openmoji — CC BY-SA 4.0
+Fluent Emoji: https://github.com/microsoft/fluentui-emoji — MIT
+Fluent 3D 精简资源包: https://github.com/lobehub/fluent-emoji — MIT
+仅筛选本项目 EmojiCatalog 中的图形。
+各套图形的许可全文位于 emoji_styles/licenses。

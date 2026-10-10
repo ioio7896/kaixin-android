@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="accessibility_cursor_left" type="id" />
+    <item name="accessibility_cursor_right" type="id" />
+    <item name="accessibility_selection" type="id" />
+</resources>

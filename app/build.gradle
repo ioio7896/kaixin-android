@@ -1,0 +1,119 @@
+plugins {
+    id "com.android.application"
+}
+
+// Configure the relocated output directory before AGP resolves its generated
+// default ProGuard files. Setting this after the android block leaves R8
+// pointing at app/build even though all intermediates live under root/build.
+layout.buildDirectory = rootProject.layout.buildDirectory.dir("offline-ime-app")
+
+android {
+    namespace "com.example.offlineime"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.example.offlineime"
+        minSdk 26
+        targetSdk 35
+        versionCode 16
+        versionName "0.3.7"
+        testInstrumentationRunner "com.example.offlineime.FrontendStabilityInstrumentation"
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            // 使用本目录已有的、带来源说明的离线词库；不会访问网络。
+            assets.srcDirs += ["../lexicon"]
+        }
+    }
+}
+
+def releaseSigning = [
+        storeFile: providers.environmentVariable("IME_RELEASE_STORE_FILE").orNull,
+        storePassword: providers.environmentVariable("IME_RELEASE_STORE_PASSWORD").orNull,
+        keyAlias: providers.environmentVariable("IME_RELEASE_KEY_ALIAS").orNull,
+        keyPassword: providers.environmentVariable("IME_RELEASE_KEY_PASSWORD").orNull
+]
+def hasReleaseSigning = releaseSigning.values().every { it != null && !it.trim().isEmpty() }
+if (hasReleaseSigning) {
+    def signing = android.signingConfigs.create("release") {
+        storeFile = file(releaseSigning.storeFile)
+        storePassword = releaseSigning.storePassword
+        keyAlias = releaseSigning.keyAlias
+        keyPassword = releaseSigning.keyPassword
+    }
+    android.buildTypes.release.signingConfig = signing
+}
+
+tasks.register("verifyReleaseSigning") {
+    doLast {
+        if (!hasReleaseSigning) {
+            throw new GradleException("Set IME_RELEASE_STORE_FILE, IME_RELEASE_STORE_PASSWORD, IME_RELEASE_KEY_ALIAS and IME_RELEASE_KEY_PASSWORD to build a signed release.")
+        }
+        if (!file(releaseSigning.storeFile).isFile()) {
+            throw new GradleException("IME_RELEASE_STORE_FILE does not point to a keystore file.")
+        }
+    }
+}
+tasks.configureEach { task ->
+    if (task.name == "assembleRelease" || task.name == "bundleRelease") {
+        task.dependsOn("verifyReleaseSigning")
+    }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
+}
+
+def generatedLexiconDb = layout.projectDirectory.file("src/main/assets/databases/pinyin.db")
+tasks.register("buildLexiconDatabase", Exec) {
+    inputs.files(fileTree("../lexicon") { include "**/*.txt" })
+    inputs.file("../tools/build_lexicon_db.py")
+    inputs.file("src/main/java/com/example/offlineime/PinyinDictionary.java")
+    outputs.file(generatedLexiconDb)
+    commandLine "python", "../tools/build_lexicon_db.py", generatedLexiconDb.asFile.absolutePath
+}
+tasks.named("preBuild").configure { dependsOn("buildLexiconDatabase") }
+
+// Gradle's Windows test worker can misdecode non-ASCII paths in its generated
+// @argfile. Route the test classpath through an ASCII-path manifest JAR so
+// tests also run when the checkout directory contains Chinese characters.
+tasks.withType(Test).configureEach { testTask ->
+    if (System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
+            && projectDir.absolutePath.find(/[^\x00-\x7F]/)) {
+        doFirst {
+            def originalClasspath = testTask.classpath.files
+            def projectHash = Integer.toHexString(rootProject.projectDir.absolutePath.hashCode())
+            def classpathJar = new File(
+                    System.getProperty("java.io.tmpdir"),
+                    "offline-ime-${projectHash}-${testTask.name}-classpath.jar")
+
+            def manifest = new java.util.jar.Manifest()
+            manifest.mainAttributes.put(java.util.jar.Attributes.Name.MANIFEST_VERSION, "1.0")
+            manifest.mainAttributes.put(
+                    java.util.jar.Attributes.Name.CLASS_PATH,
+                    originalClasspath.collect { it.toURI().toASCIIString() }.join(" "))
+            classpathJar.withOutputStream { output ->
+                new java.util.jar.JarOutputStream(output, manifest).close()
+            }
+            testTask.classpath = files(classpathJar)
+        }
+    }
+}
