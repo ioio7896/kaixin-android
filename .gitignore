@@ -1,0 +1,27 @@
+# Local Android/Gradle state
+.gradle/
+.idea/
+__pycache__/
+local.properties
+build/
+app/build/
+/app/src/main/assets/databases/pinyin.db
+
+# Device captures, emulator output, and generated diagnostic bundles
+artifacts/
+diagnostics/
+test-artifacts/
+
+# Local snapshots and one-off backups
+backups/
+.publish-staging/
+AGENTS.md
+
+# Generated packages and machine-specific files
+*.apk
+*.aab
+*.iml
+*.hprof
+*.log
+*.py[cod]
+

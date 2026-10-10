@@ -1,0 +1,208 @@
+{
+  "source": "G:\\code1\\开心输入法\\lexicon",
+  "target": "G:\\code1\\开心输入法and\\lexicon",
+  "unique_readings_before": 177451,
+  "unique_readings_after": 207864,
+  "added_readings": 30413,
+  "added_words": 30412,
+  "added_by_word_length": {
+    "1": 12,
+    "2": 17,
+    "3": 29836,
+    "4": 413,
+    "5": 91,
+    "6": 29,
+    "7": 8,
+    "8": 7
+  },
+  "files": [
+    {
+      "path": "core/kaixin_explicit.txt",
+      "desktop_rows": 41,
+      "merged_rows": 55,
+      "sha256": "d790c6d167ff1741cf52cf2fe1bb9c1b808550bfae7bf10ec5b015b8b5187930"
+    },
+    {
+      "path": "core/kaixin_polyphone.txt",
+      "desktop_rows": 38,
+      "merged_rows": 145,
+      "sha256": "af3742b1af7e7ffa7df4989e0d1ad6e0c37d285b88712442ecf6c601a4cc02f7"
+    },
+    {
+      "path": "core/kaixin_pronunciation_aliases.txt",
+      "desktop_rows": 123,
+      "merged_rows": 123,
+      "sha256": "b20197f2ad22dd3be1d07685fce20bbdaea6dd4ff5d10c9002cc0e82352bc6b9"
+    },
+    {
+      "path": "en/kaixin_common_english.txt",
+      "desktop_rows": 20000,
+      "merged_rows": 20000,
+      "sha256": "3635b8c6283c68e5807452d96c5b7ea0481d4bf991634b23c39c6a1295960334"
+    },
+    {
+      "path": "zh/kaixin_recall.txt",
+      "desktop_rows": 15,
+      "merged_rows": 15,
+      "sha256": "8271f27e829b40614aea39828fb55805411ebae4f26296d3b0ece09f89f38365"
+    },
+    {
+      "path": "zh/life_common_2char_125000.txt",
+      "desktop_rows": 125000,
+      "merged_rows": 125000,
+      "sha256": "9481ecfc68c6dad11e04b131702b758c6cfa4994dd0aa291893eb8bf444e6767"
+    },
+    {
+      "path": "zh/life_common_3char.txt",
+      "desktop_rows": 49765,
+      "merged_rows": 49765,
+      "sha256": "5063f1cfe3a871da20ff0f0f4c4075b55003aa895d17992154a2a7638e37cdd7"
+    },
+    {
+      "path": "zh/life_common_4char.txt",
+      "desktop_rows": 5000,
+      "merged_rows": 5000,
+      "sha256": "a7737daac9b2283b3b7bc8aaf69bbb09f48c81d30743f01f62c774346e9e44aa"
+    },
+    {
+      "path": "zh/life_common_phrases.txt",
+      "desktop_rows": 2000,
+      "merged_rows": 2000,
+      "sha256": "f101e3d340ae2c89f9076a5b9a12dc89ae59160311ca786d25becb7445ad0c68"
+    },
+    {
+      "path": "zh/single_char_common_8105.txt",
+      "desktop_rows": 8105,
+      "merged_rows": 8105,
+      "sha256": "cce1cae8c76803afa785b6e2075279b68508c40e498977d7ae50167755069863"
+    },
+    {
+      "path": "zh-ext/animals.txt",
+      "desktop_rows": 500,
+      "merged_rows": 500,
+      "sha256": "25668d75f815af35a422157ed40c2b1b84a77914a81138dd6affc760db9d581f"
+    },
+    {
+      "path": "zh-ext/daily_communication.txt",
+      "desktop_rows": 400,
+      "merged_rows": 5329,
+      "sha256": "cdef7d9f3340fda40c1fa2bc9cae6fd0b0af1856e5e00f11e61a508dcaae7a54"
+    },
+    {
+      "path": "zh-ext/geography_admin.txt",
+      "desktop_rows": 4220,
+      "merged_rows": 4220,
+      "sha256": "4a3a97045965a1a4b9bb33e5b757412e85af40e65be5544a5b1ceecc1d2cabd8"
+    },
+    {
+      "path": "zh-ext/hangzhou_local.txt",
+      "desktop_rows": 1374,
+      "merged_rows": 1374,
+      "sha256": "f8c99c460033613047568f636b8f502c749e8c492a4e06cbec1305bf5ec5ea82"
+    },
+    {
+      "path": "zh-ext/medicine.txt",
+      "desktop_rows": 400,
+      "merged_rows": 400,
+      "sha256": "9be13dd92a1e9fc591955143c364b7427f6644fb716919d28a26d20ff998a878"
+    },
+    {
+      "path": "zh-ext/people_names.txt",
+      "desktop_rows": 2106,
+      "merged_rows": 2106,
+      "sha256": "a76309da0eae311c7fe33f6694ac722a6059c5691b4d3cb22c4f6ebbddd2390e"
+    },
+    {
+      "path": "zh-ext/professional_architecture.txt",
+      "desktop_rows": 61,
+      "merged_rows": 61,
+      "sha256": "237eec75bdf9410af64d38ba6cf2f736420a9983a6161f5279662f509c3a3626"
+    },
+    {
+      "path": "zh-ext/professional_biology.txt",
+      "desktop_rows": 60,
+      "merged_rows": 60,
+      "sha256": "5a275b5712ee9e87790d487f22065f1111f4fc149fefb20cea4c8ee5c667e63b"
+    },
+    {
+      "path": "zh-ext/professional_chemistry.txt",
+      "desktop_rows": 60,
+      "merged_rows": 60,
+      "sha256": "48d4da421d5422f92f5cd6f68ad315f7cde128e1d1bb9c2b01e062695835a9f3"
+    },
+    {
+      "path": "zh-ext/professional_computing.txt",
+      "desktop_rows": 62,
+      "merged_rows": 62,
+      "sha256": "612a27cb81808e0c4e0a248c7ec1057c71c57d0b9cccd43587d1c70529b60a2a"
+    },
+    {
+      "path": "zh-ext/professional_finance.txt",
+      "desktop_rows": 61,
+      "merged_rows": 61,
+      "sha256": "f9d0d3da571c84480b70a58b8f1ded6a8e4b82914a3d08a0ebdeb1ea5794bce9"
+    },
+    {
+      "path": "zh-ext/professional_geography.txt",
+      "desktop_rows": 61,
+      "merged_rows": 61,
+      "sha256": "c2121daa7a6119bcfc7117b95479b8f99437d247549d3ba2c25c5906b5bf20a8"
+    },
+    {
+      "path": "zh-ext/professional_history.txt",
+      "desktop_rows": 62,
+      "merged_rows": 62,
+      "sha256": "f0c599f78b3acf1caeea56f344b287f73c834f56e4ecbc29bd1f41388ac318b7"
+    },
+    {
+      "path": "zh-ext/professional_law.txt",
+      "desktop_rows": 60,
+      "merged_rows": 60,
+      "sha256": "f0c6a7bb525b4e9c08f6deef095e832ae0b8e7b2731c7639c6621d0cec3eba80"
+    },
+    {
+      "path": "zh-ext/professional_math.txt",
+      "desktop_rows": 60,
+      "merged_rows": 60,
+      "sha256": "60789131226f6cbcddb2b2e8635894bef4287ca67a9a44fb1857c6b930fc3004"
+    },
+    {
+      "path": "zh-ext/professional_medical.txt",
+      "desktop_rows": 60,
+      "merged_rows": 60,
+      "sha256": "d0d36678b01e92b1151c15dca45cbcf99239bd4ff916f347319ad79c2e448897"
+    },
+    {
+      "path": "zh-ext/professional_music.txt",
+      "desktop_rows": 66,
+      "merged_rows": 66,
+      "sha256": "12af18c0a705d6e3d09620044f45928d98ea191555ac6cf48746b941b37e62ff"
+    },
+    {
+      "path": "zh-ext/professional_philosophy.txt",
+      "desktop_rows": 62,
+      "merged_rows": 62,
+      "sha256": "fd1583cf8710cfcf396ffc6dfd1592156f330907109d093ae4eae6084330fd55"
+    },
+    {
+      "path": "zh-ext/professional_physics.txt",
+      "desktop_rows": 60,
+      "merged_rows": 60,
+      "sha256": "23ec061232d3a1051f8f2a0692716a312853fa71332fbf95bdf48bd379ccaa74"
+    },
+    {
+      "path": "zh-ext/technology.txt",
+      "desktop_rows": 485,
+      "merged_rows": 5658,
+      "sha256": "0a837ada1033b583fe2ffa5f87db6a55927321340c4c2cf046785a21fab3bdd9"
+    },
+    {
+      "path": "zh/life_short_hot_2char.txt",
+      "merged_rows": 627
+    },
+    {
+      "path": "zh/life_short_hot_3to4char.txt",
+      "merged_rows": 658
+    }
+  ]
+}

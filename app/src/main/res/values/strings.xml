@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">开心离线输入法</string>
+    <string name="ime_name">开心离线输入法</string>
+    <string name="settings_title">输入法设置</string>
+    <string name="about_version_text">开心离线输入法\n版本：%1$s\n所有候选和用户数据均在本机处理。</string>
+</resources>
