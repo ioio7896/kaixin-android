@@ -39,8 +39,6 @@ build/offline-ime-app/outputs/apk/debug/app-debug.apk
 
 项目原创代码采用 MIT 许可证，见 [LICENSE](LICENSE)。词库、字典和图片可能使用不同许可证，请查看 [第三方资源说明](THIRD_PARTY_NOTICES.md) 以及各资源目录中的声明。
 
-特别提醒：随项目提供的微信表情缩略图仅限个人学习和非商业用途；商业使用需要另行获得授权。
-
 ## 反馈和参与
 
 欢迎在 GitHub 提交问题或改进建议。提交词库或资源时，请一并说明来源和许可证。
