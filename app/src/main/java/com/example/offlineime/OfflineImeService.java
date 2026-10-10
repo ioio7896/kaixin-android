@@ -1759,12 +1759,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                     resetSelectionMode();
                     return;
                 }
-                CharSequence before = connection.getTextBeforeCursor(WeChatEmojiCatalog.maxTokenLength(), 0);
-                int emojiLength = WeChatEmojiCatalog.trailingTokenLength(before);
-                if (emojiLength > 0) {
-                    connection.deleteSurroundingText(emojiLength, 0);
-                    return;
-                }
                 if (!connection.deleteSurroundingTextInCodePoints(1, 0)) connection.deleteSurroundingText(1, 0);
             } finally {
                 connection.endBatchEdit();
@@ -2814,10 +2808,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         for (String s : EmojiCatalog.recent(p)) if (!s.isEmpty() && !s.equals(emoji)) list.add(s);
         list.add(0, emoji); while (list.size() > 32) list.remove(list.size() - 1);
         p.edit().putString("recent_v2", new org.json.JSONArray(list).toString()).apply();
-    }
-
-    boolean isWeChatEditor() {
-        return editorInfo != null && "com.tencent.mm".equals(editorInfo.packageName);
     }
 
     private boolean isDarkMode() {

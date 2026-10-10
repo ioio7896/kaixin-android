@@ -1882,7 +1882,6 @@ public final class KeyboardView extends LinearLayout {
 
     private String selectedEmojiCategory = "最近";
     private String selectedEmojiStyle = EmojiStyleAssets.SYSTEM;
-    private boolean emojiHostIsWeChat;
     private boolean emojiPanelShown;
     private ScrollView emojiContent;
     private LinearLayout emojiGrid;
@@ -1894,11 +1893,6 @@ public final class KeyboardView extends LinearLayout {
         String savedStyle = getContext().getSharedPreferences("emoji", Context.MODE_PRIVATE)
                 .getString("style", EmojiStyleAssets.SYSTEM);
         selectedEmojiStyle = EmojiStyleAssets.known(savedStyle) ? savedStyle : EmojiStyleAssets.SYSTEM;
-        boolean weChat = ((OfflineImeService) getContext()).isWeChatEditor();
-        if (emojiHostIsWeChat != weChat) {
-            selectedEmojiCategory = weChat ? "微信" : "最近";
-            emojiHostIsWeChat = weChat;
-        }
         showEmoji(selectedEmojiCategory);
     }
     public void showEmoji(String category) {
@@ -1964,13 +1958,9 @@ public final class KeyboardView extends LinearLayout {
             tab.setBackground(roundRect(active ? theme.function : Color.TRANSPARENT, 12));
         }
         if (emojiHint == null || emojiGrid == null || emojiContent == null) return;
-        boolean weChat = "微信".equals(category);
         boolean styled = !EmojiStyleAssets.SYSTEM.equals(selectedEmojiStyle);
-        emojiHint.setVisibility(weChat || styled ? VISIBLE : GONE);
-        if (weChat) emojiHint.setText(((OfflineImeService) getContext()).isWeChatEditor()
-                ? "微信小黄脸 · 长按收藏 · 不受样式设置影响"
-                : "微信小黄脸 · 其他应用可能显示文字标记");
-        else if ("颜文字".equals(category) && styled) emojiHint.setText("颜文字不受样式设置影响");
+        emojiHint.setVisibility(styled ? VISIBLE : GONE);
+        if ("颜文字".equals(category) && styled) emojiHint.setText("颜文字不受样式设置影响");
         else if (styled) emojiHint.setText("样式仅改变本机预览 · 发送标准 Emoji · 缺图回退系统");
         String[] values = emojiValues(category);
         emojiGrid.removeAllViews();
@@ -2037,7 +2027,7 @@ public final class KeyboardView extends LinearLayout {
         for (int i = 0; i < categories.length; i++) {
             final String value = categories[i];
             boolean wordTab = "最近".equals(value) || "收藏".equals(value)
-                    || "微信".equals(value) || "颜文字".equals(value);
+                    || "颜文字".equals(value);
             TextView tab = new TextView(getContext());
             tab.setText(EmojiCatalog.categoryLabel(value));
             tab.setTextSize(wordTab ? 14 : 20);
@@ -2085,12 +2075,6 @@ public final class KeyboardView extends LinearLayout {
         if (emojiStyleAssets == null) emojiStyleAssets = new EmojiStyleAssets(getContext());
         for (int i = from; i < to; i++) {
             final String emoji = values[i];
-            if (WeChatEmojiCatalog.contains(emoji)) {
-                LayoutParams params = new LayoutParams(0, -1, 1f);
-                params.setMargins(dp(1), dp(1), dp(1), dp(1));
-                row.addView(createWeChatEmojiTile(emoji), params);
-                continue;
-            }
             Bitmap artwork = emojiStyleAssets.get(selectedEmojiStyle, emoji);
             View button;
             if (artwork != null) {
@@ -2122,46 +2106,6 @@ public final class KeyboardView extends LinearLayout {
             row.addView(new View(getContext()), new LayoutParams(0, -1, 1f));
         }
         grid.addView(row, new LayoutParams(-1, dp(64)));
-    }
-
-    private View createWeChatEmojiTile(String token) {
-        final String name = WeChatEmojiCatalog.name(token);
-        LinearLayout tile = new LinearLayout(getContext());
-        tile.setOrientation(VERTICAL);
-        tile.setGravity(Gravity.CENTER);
-        tile.setPadding(dp(1), dp(5), dp(1), dp(3));
-        tile.setBackground(new android.graphics.drawable.RippleDrawable(
-                android.content.res.ColorStateList.valueOf(blendColor(theme.background, theme.accent, 0.22f)),
-                null, roundRect(Color.WHITE, 10)));
-        android.widget.ImageView image = new android.widget.ImageView(getContext());
-        image.setImageDrawable(WeChatEmojiCatalog.icon(getContext(), token, dp(30)));
-        image.setScaleType(android.widget.ImageView.ScaleType.FIT_CENTER);
-        image.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        tile.addView(image, new LayoutParams(dp(30), dp(30)));
-        TextView label = new TextView(getContext());
-        label.setText(name);
-        label.setTextSize(10);
-        label.setTextColor(theme.text);
-        label.setIncludeFontPadding(false);
-        label.setGravity(Gravity.CENTER);
-        label.setSingleLine(true);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        label.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LayoutParams labelParams = new LayoutParams(-1, -2);
-        labelParams.topMargin = dp(4);
-        tile.addView(label, labelParams);
-        tile.setContentDescription("微信表情，" + name + "，长按收藏");
-        tile.setOnClickListener(v -> callback.onKey("表情:" + token));
-        tile.setOnLongClickListener(v -> {
-            boolean favorite = getContext().getSharedPreferences("emoji", Context.MODE_PRIVATE)
-                    .getBoolean("favorite_" + token, false);
-            RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), name, theme);
-            menu.item(favorite ? "取消收藏" : "加入收藏", token, null, false, false,
-                    () -> callback.onKey("收藏表情:" + token));
-            showCardMenu(tile, menu);
-            return true;
-        });
-        return tile;
     }
 
     /** 颜文字使用独立的双列大卡片，避免长字符串被 Emoji 网格压缩或裁切。 */

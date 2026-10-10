@@ -745,7 +745,6 @@ public final class SettingsActivity extends Activity {
                 + "\n\n拼音生成许可\n" + readBundledText("category-LICENSE.pypinyin.md")
                 + "\n\n单字读音数据许可\n" + readBundledText("zh/LICENSE.pinyin-data.md")
                 + "\n中文词库各数据源的再分发条件须以对应来源和许可为准。公开发布前请核实全部词库的授权，并随应用提供适用的完整许可文本。"
-                + "\n\n微信小黄脸表情\n" + readBundledText("emoji/wechat/NOTICE.txt")
                 + "\n\nEmoji 面板样式\n" + readBundledText("emoji_styles/NOTICE.txt")
                 + "\nTwemoji 图形许可\n" + readBundledText("emoji_styles/licenses/twemoji.txt")
                 + "\nOpenMoji 图形许可\n" + readBundledText("emoji_styles/licenses/openmoji.txt")

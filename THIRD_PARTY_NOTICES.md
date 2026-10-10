@@ -16,11 +16,6 @@ assets. In particular:
   Emoji (MIT), and the Fluent Emoji subset from LobeHub (MIT). See
   `app/src/main/assets/emoji_styles/NOTICE.txt` and the license texts in its
   `licenses/` directory.
-- WeChat emoji thumbnails: the upstream notice in
-  `app/src/main/assets/emoji/wechat/NOTICE.txt` limits use to personal,
-  non-commercial purposes and says commercial use requires authorization.
-  These thumbnails are not covered by the root MIT license.
-
 Check the notices in the asset and data directories before redistributing those
 materials or including them in a commercial build.
 
