@@ -3,7 +3,7 @@ package com.example.offlineime;
 /** Offline, categorized symbols for the dedicated symbol picker. */
 final class SymbolCatalog {
     static final String[] CATEGORIES = {
-            "常用", "中文", "英文", "括号", "数学", "序号",
+            "常用", "最近", "中文", "英文", "括号", "数学", "序号",
             "箭头", "货币", "单位", "特殊", "希腊", "音乐"
     };
 

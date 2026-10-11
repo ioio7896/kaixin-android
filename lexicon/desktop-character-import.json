@@ -5,19 +5,19 @@
   "pinyin_data_version": "0.13.0",
   "sources": [
     {
-      "path": "G:\\code1\\开心输入法\\lexicon\\zh\\single_char_common_8105.txt",
+      "path": "desktop/lexicon/zh/single_char_common_8105.txt",
       "sha256": "cce1cae8c76803afa785b6e2075279b68508c40e498977d7ae50167755069863"
     },
     {
-      "path": "C:\\Users\\Administrator\\.cargo\\registry\\src\\index.crates.io-1949cf8c6b5b557f\\pinyin-0.10.0\\pinyin-data\\pinyin.txt",
+      "path": "pinyin-0.10.0/pinyin-data/pinyin.txt",
       "sha256": "b240322a1dbe7bb4abffb1889cdbbb3f124bc3242d27ea40a10f51596c41db50"
     },
     {
-      "path": "G:\\code1\\开心输入法\\data_sources\\kaixin\\pronunciation_aliases.tsv",
+      "path": "desktop/data_sources/kaixin/pronunciation_aliases.tsv",
       "sha256": "0f02157dab25eeca3552e0963d8203d1fee584e5bfd6e20d88f610c2462a49fd"
     },
     {
-      "path": "G:\\code1\\开心输入法\\data_sources\\kaixin\\pronunciation_exclusions.tsv",
+      "path": "desktop/data_sources/kaixin/pronunciation_exclusions.tsv",
       "sha256": "e10c95ce4999b9e3d252e91f4c8c28b9ca512f88632f61b08b30e33be3de1a0f"
     }
   ],

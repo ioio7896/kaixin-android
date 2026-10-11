@@ -10,14 +10,26 @@ layout.buildDirectory = rootProject.layout.buildDirectory.dir("offline-ime-app")
 android {
     namespace "com.example.offlineime"
     compileSdk 35
+    ndkVersion "27.2.12479018"
 
     defaultConfig {
         applicationId "com.example.offlineime"
         minSdk 26
         targetSdk 35
-        versionCode 17
-        versionName "0.3.8"
+        versionCode 21
+        versionName "0.5.1"
         testInstrumentationRunner "com.example.offlineime.FrontendStabilityInstrumentation"
+        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }
+        externalNativeBuild {
+            cmake { arguments "-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" }
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file("src/main/cpp/handwriting/CMakeLists.txt")
+            version "3.22.1"
+        }
     }
 
     buildFeatures {
@@ -82,7 +94,7 @@ dependencies {
     testImplementation "junit:junit:4.13.2"
 }
 
-def generatedLexiconDb = layout.projectDirectory.file("src/main/assets/databases/pinyin.db")
+def generatedLexiconDb = rootProject.layout.buildDirectory.file("lexicon-source/pinyin.db").get()
 tasks.register("buildLexiconDatabase", Exec) {
     inputs.files(fileTree("../lexicon") { include "**/*.txt" })
     inputs.file("../tools/build_lexicon_db.py")
@@ -90,7 +102,42 @@ tasks.register("buildLexiconDatabase", Exec) {
     outputs.file(generatedLexiconDb)
     commandLine "python", "../tools/build_lexicon_db.py", generatedLexiconDb.asFile.absolutePath
 }
-tasks.named("preBuild").configure { dependsOn("buildLexiconDatabase") }
+tasks.register("compressLexiconDatabase", Exec) {
+    dependsOn("buildLexiconDatabase")
+    inputs.file(generatedLexiconDb)
+    inputs.file("../tools/compress_lexicon.py")
+    outputs.file("src/main/assets/databases/pinyin.bin")
+    commandLine "python", "../tools/compress_lexicon.py", generatedLexiconDb.asFile.absolutePath, layout.projectDirectory.file("src/main/assets/databases/pinyin.bin").asFile.absolutePath
+}
+tasks.named("preBuild").configure { dependsOn("compressLexiconDatabase") }
+
+// Packaging integrity only: do not run recognition or code tests here.
+tasks.register("verifyHandwritingAssets") {
+    def expected = [
+        "model.ncnn.param": "8c4d0e594d8a4644fb97411d2b6335f55fed2e1b37057bc88fced724295902a3",
+        "model.ncnn.bin": "86a4802e3c8b2ddf1180f3de361546517d708674381e58b3d10b766dc8fba49e",
+        "charset.json": "31f5700027c8692122cec5281d12c6382506b36d56075331cd73718f624d4ed2",
+        "extended/PP_OCRv5_mobile_rec.ncnn.param": "f52a6586ac3338d8c350db0c9f3c55ff2ecd3763327f9bc7f0efc091f8a63e74",
+        "extended/PP_OCRv5_mobile_rec.ncnn.bin": "49d9907a55ba20fa6637f9f788f66ab00793bc8ce57a733a09dbe86b9a2e3db0",
+        "extended/characters.json": "3576fbef951b52f0e9f4126286c54823b8612c86fabda10702b77cfe51438381"
+    ]
+    inputs.files(expected.keySet().collect { file("src/main/assets/handwriting/${it}") })
+    doLast {
+        expected.each { name, checksum ->
+            def asset = file("src/main/assets/handwriting/${name}")
+            if (!asset.isFile()) throw new GradleException("Missing bundled handwriting asset: ${name}")
+            def digest = java.security.MessageDigest.getInstance("SHA-256")
+            asset.withInputStream { stream ->
+                byte[] buffer = new byte[16384]
+                int count
+                while ((count = stream.read(buffer)) != -1) digest.update(buffer, 0, count)
+            }
+            if (digest.digest().encodeHex().toString() != checksum)
+                throw new GradleException("Bundled handwriting asset checksum mismatch: ${name}")
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn("verifyHandwritingAssets") }
 
 // Gradle's Windows test worker can misdecode non-ASCII paths in its generated
 // @argfile. Route the test classpath through an ASCII-path manifest JAR so

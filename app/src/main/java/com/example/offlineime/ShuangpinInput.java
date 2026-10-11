@@ -64,6 +64,7 @@ final class ShuangpinInput {
         for (List<String> values : result.values()) Collections.sort(values);
         return result;
     }
+    void unlock(int start) { locks.remove(start); cachedPathKey = ""; }
     void clear() { raw = ""; locks.clear(); }
     void sync(String value) {
         if (raw.equals(value)) return;
@@ -97,7 +98,6 @@ final class ShuangpinInput {
                 || !encode(reading).equals(input.substring(start, end))) return false;
         locks.put(start, reading); return true;
     }
-    void unlock(int start) { locks.remove(start); }
     boolean selected(int start, String reading) { return reading.equals(locks.get(start)); }
     static List<String> choices(String entered) {
         if (entered.length() == 2) return new ArrayList<>(PAIRS.getOrDefault(entered, Collections.emptyList()));

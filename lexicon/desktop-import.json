@@ -1,6 +1,6 @@
 {
-  "source": "G:\\code1\\开心输入法\\lexicon",
-  "target": "G:\\code1\\开心输入法and\\lexicon",
+  "source": "desktop/lexicon",
+  "target": "android/lexicon",
   "unique_readings_before": 177451,
   "unique_readings_after": 207864,
   "added_readings": 30413,

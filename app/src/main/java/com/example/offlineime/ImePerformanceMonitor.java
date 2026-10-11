@@ -40,6 +40,13 @@ final class ImePerformanceMonitor {
                 + " mode=" + (t9 ? "t9" : "alpha") + " elapsed=" + elapsed + "ms candidates=" + count);
         record(currentPhase * 2 + (t9 ? 1 : 0), metric, elapsed);
     }
+    private static int budgetMs(String metric) {
+        if (metric.startsWith("ui_") || metric.equals("candidate_measure")) return 8;
+        if (metric.equals("queue_wait")) return 16;
+        if (metric.equals("first_selectable") || metric.equals("first_visible") || metric.equals("fast_candidates")) return 50;
+        if (metric.equals("input_view_ready")) return 200;
+        return 150;
+    }
     private static synchronized void record(int phase, String metric, long elapsed) {
         int index = -1;
         for (int i = 0; i < METRICS.length; i++) if (METRICS[i].equals(metric)) { index = i; break; }
@@ -50,6 +57,8 @@ final class ImePerformanceMonitor {
         long[] sorted = samples[phase][index].clone(); java.util.Arrays.sort(sorted);
         String summary = metric + " phase=" + (phase < 2 ? "cold" : "warm") + " mode=" + (phase % 2 == 1 ? "t9" : "alpha")
                 + " p50=" + sorted[49] + "ms p95=" + sorted[94] + "ms p99=" + sorted[98] + "ms";
-        if (sorted[94] > 16 || sorted[98] > 30) Log.w(TAG, summary); else Log.d(TAG, summary);
+        int budget = budgetMs(metric);
+        if (sorted[94] > budget || sorted[98] > budget * 2) Log.w(TAG, summary + " budget=" + budget + "ms");
+        else Log.d(TAG, summary);
     }
 }

@@ -71,7 +71,16 @@ public final class KeyboardTheme {
     private KeyboardTheme(int b, int k, int f, int a, int t, float r, float fs, float g, boolean dark) { background=b; key=k; function=f; accent=a; text=t; radius=r; font=fs; gap=g; isDark=dark; }
     public static KeyboardTheme from(Context c, boolean dark) {
         SharedPreferences p = c.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        dark = resolveDark(c);
         return forSkin(c, p.getString("theme", "system"), dark, p.getBoolean("high_contrast", false));
+    }
+
+    static boolean resolveDark(Context c) {
+        SharedPreferences p = c.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        String mode = p.getString("appearance_mode", p.contains("dark") ? (p.getBoolean("dark", false) ? "dark" : "light") : "system");
+        return "dark".equals(mode) || "system".equals(mode)
+                && (c.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
+                == android.content.res.Configuration.UI_MODE_NIGHT_YES;
     }
 
     static KeyboardTheme forSkin(Context c, String id, boolean dark, boolean highContrast) {

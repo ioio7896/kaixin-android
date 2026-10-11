@@ -14,7 +14,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DB = ROOT / "app" / "src" / "main" / "assets" / "databases" / "pinyin.db"
+DEFAULT_DB = ROOT / "build" / "lexicon-source" / "pinyin.db"
 PERSONAL_HALF_LIFE_DAYS = 21.0
 SKIP_HALF_LIFE_DAYS = 14.0
 CONTEXT_HALF_LIFE_DAYS = 30.0

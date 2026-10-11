@@ -1,0 +1,34 @@
+PP-OCRv5 Mobile recognition model
+Copyright PaddlePaddle Authors. Model and original character dictionary: Apache-2.0.
+License text: LICENSE-PaddleOCR.txt.
+Official model: https://huggingface.co/PaddlePaddle/PP-OCRv5_mobile_rec
+Source: https://github.com/PaddlePaddle/PaddleOCR
+Dictionary/source license revision: dab3fe35379033fdcb2d0e9572fac0b36c9a9ebf
+
+NCNN-converted model files, unmodified, from:
+https://github.com/nihui/ncnn-android-ppocrv5
+Pinned revision: 671ac4a72299a86ddee160131ba88fed748df425
+Paths: app/src/main/assets/PP_OCRv5_mobile_rec.ncnn.param and .bin.
+The conversion procedure is documented in that repository and in Tencent/ncnn's
+official ppocrv5 example. Original model terms remain Apache-2.0.
+
+characters.json is a JSON representation of the official 18,383 dictionary
+entries, matched in order against the NCNN example's ppocrv5_dict.h at the
+same conversion revision. Class zero is CTC blank; an ASCII space is appended
+as in PaddleOCR's use_space_char configuration, for 18,385 output classes.
+15,907 dictionary entries are Han characters; remaining entries include Latin,
+Japanese, punctuation, symbols and emoji. This is not full Unicode Han coverage.
+
+SHA256:
+PP_OCRv5_mobile_rec.ncnn.param
+f52a6586ac3338d8c350db0c9f3c55ff2ecd3763327f9bc7f0efc091f8a63e74
+PP_OCRv5_mobile_rec.ncnn.bin
+49d9907a55ba20fa6637f9f788f66ab00793bc8ce57a733a09dbe86b9a2e3db0
+characters.json
+3576fbef951b52f0e9f4126286c54823b8612c86fabda10702b77cfe51438381
+
+Preprocessing and decoding are original integration code, following the published
+48-pixel-high BGR [-1,1] input and CTC output specifications. The app does not
+include OpenCV, text detection or document OCR; it renders the captured pen
+strokes directly and recognizes a single horizontal handwriting line.
+No accuracy or speed evaluation was run for this app integration.

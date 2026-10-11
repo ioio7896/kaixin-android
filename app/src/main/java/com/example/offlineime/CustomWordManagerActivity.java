@@ -296,11 +296,14 @@ public final class CustomWordManagerActivity extends Activity {
                 int duplicates = 0; for (String name : names) if (custom.containsKey(name)) duplicates++;
                 int overlap = duplicates;
                 List<String> preview = new ArrayList<>(names);
-                String details = "包含 " + names.size() + " 个词，其中 " + overlap + " 个词已存在，将合并读音和别名。\n\n"
+                String details = "包含 " + names.size() + " 个词，其中 " + overlap + " 个词已存在；新增 " + (names.size() - overlap) + " 个。可合并读音和别名，或覆盖同名词；其他词保持不变。\n\n"
                         + String.join("、", preview.subList(0, Math.min(12, preview.size())));
                 postUi(() -> { busy = false; new AlertDialog.Builder(this).setTitle("导入预览").setMessage(details)
                         .setPositiveButton("合并导入", (d, which) -> runOperation(() -> {
                             if (!CustomWordStore.importWords(getApplicationContext(), words)) throw new IllegalStateException("导入失败，原词库已保留"); return "已导入 " + names.size() + " 个词";
+                        })).setNeutralButton("覆盖同名词", (d, which) -> runOperation(() -> {
+                            if (!CustomWordStore.importWords(getApplicationContext(), words, true)) throw new IllegalStateException("导入失败，原词库已保留");
+                            return "已导入 " + names.size() + " 个词（覆盖同名词）";
                         })).setNegativeButton("取消", null).show(); });
             } catch (Exception error) { postUi(() -> { busy = false; toast(password == null ? "词库格式不正确，未导入" : "口令错误或备份文件损坏，未导入"); }); }
             finally { if (password != null) Arrays.fill(password, '\0'); }

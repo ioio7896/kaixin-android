@@ -114,7 +114,8 @@ final class UserContextModel {
         final long now = System.currentTimeMillis();
         ArrayList<PinyinDictionary.Entry> result = new ArrayList<>(candidates.size());
         for (PinyinDictionary.Entry entry : candidates) {
-            result.add(entry.withScore(entry.score + contextBonus(prior2, prior1, entry.word, now)));
+            result.add(entry.withPersonalization(entry.personalBonus,
+                    contextBonus(prior2, prior1, entry.word, now)));
         }
         // The service applies the single final ordering after every score source
         // (corpus, personal history and context) has contributed.

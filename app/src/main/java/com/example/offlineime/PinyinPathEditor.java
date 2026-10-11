@@ -289,6 +289,7 @@ final class PinyinPathEditor {
     }
     void clear() { locks.clear(); focus = -1; snapshot = ""; }
     void automatic() { locks.clear(); focus = -1; }
+    void unlock(int start) { locks.removeIf(lock -> lock.start == start); focus = start; }
     boolean hasLocks() { return !locks.isEmpty(); }
     int focus() { return focus; }
     void focus(int start) { focus = start; }
@@ -408,6 +409,25 @@ final class PinyinPathEditor {
                 }
             }
         }
+        // Offer every legal entered prefix at this boundary, including longer
+        // syllables absent from the corpus path shortlist. Never cross a lock.
+        int boundary = raw.length();
+        for (Part part : query(raw, nine).parts)
+            if (part.locked && part.start > focus.start) boundary = Math.min(boundary, part.start);
+        for (int end = focus.start + 1; end <= Math.min(boundary, focus.start + 6); end++) {
+            String fragment = raw.substring(focus.start, end);
+            if (fragment.indexOf('\'') >= 0) break;
+            for (String reading : enteredReadings(fragment, nine, "")) {
+                boolean duplicate = false;
+                for (Segment prior : result)
+                    if (prior.end == end && prior.reading.equals(reading)) { duplicate = true; break; }
+                if (!duplicate) result.add(new Segment(focus.start, end, reading, fragment.length(), false));
+            }
+        }
+        result.sort((a, b) -> {
+            int order = PinyinDisplayOrder.READINGS.compare(a.reading, b.reading);
+            return order != 0 ? order : Integer.compare(b.end, a.end);
+        });
         return result;
     }
     private static boolean align(String raw, boolean numeric, List<String> tokens,

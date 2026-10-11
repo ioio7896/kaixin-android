@@ -5,7 +5,7 @@ import sqlite3
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-db = sqlite3.connect(root / "app/src/main/assets/databases/pinyin.db")
+db = sqlite3.connect(root / "build/lexicon-source/pinyin.db")
 pool = [(word, reading.split()) for word, reading in db.execute(
     "SELECT word,syllables FROM pronunciations WHERE score>=4000 ORDER BY word,syllables")
     if re.fullmatch(r"[\u4e00-\u9fff]{2,8}", word)

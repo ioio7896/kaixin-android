@@ -30,14 +30,18 @@ final class KeyboardSkinPreview extends View {
         super.onDraw(canvas);
         float padding = dp(6);
         float width = getWidth() - 2 * padding;
-        float header = dp(18);
+        android.content.SharedPreferences preferences = getContext().getSharedPreferences("settings", android.content.Context.MODE_PRIVATE);
+        int candidateSize = 17;
+        try { candidateSize = Integer.parseInt(preferences.getString("candidate_font_size", "17")); }
+        catch (RuntimeException ignored) { }
+        float header = dp(Math.max(18, candidateSize * 1.1f));
         float rowHeight = (getHeight() - 2 * padding - header) / 3;
         if (width <= 0 || rowHeight <= 0) return;
         paint.setColor(theme.background);
         canvas.drawRoundRect(0, 0, getWidth(), getHeight(), dp(10), dp(10), paint);
         paint.setColor(theme.accent);
         paint.setTextAlign(Paint.Align.LEFT);
-        paint.setTextSize(Math.min(dp(11), width / 16));
+        paint.setTextSize(Math.min(dp(candidateSize * 0.65f), width / 16));
         canvas.drawText("你好   输入   开心", padding, padding + header * 0.7f, paint);
         float gap = Math.min(dp(theme.gap), rowHeight / 8);
         for (int row = 0; row < ROWS.length; row++) {

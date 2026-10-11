@@ -117,7 +117,7 @@ def main():
         write_rows(output / relative, comments, rows)
         files.append({"path": relative.as_posix(), "merged_rows": len(rows)})
     added = set(merged) - set(before)
-    report = {"source": str(source), "target": str(target), "unique_readings_before": len(before),
+    report = {"source": "desktop/lexicon", "target": "android/lexicon", "unique_readings_before": len(before),
               "unique_readings_after": len(merged), "added_readings": len(added),
               "added_words": len({word for word, reading in added} - {word for word, reading in before}),
               "added_by_word_length": {str(n): sum(len(word) == n for word, reading in added)

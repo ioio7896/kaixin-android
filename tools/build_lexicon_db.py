@@ -12,7 +12,7 @@ version_match = re.search(r"LEXICON_VERSION\s*=\s*(\d+)", dictionary_source.read
 if version_match is None:
     raise ValueError("PinyinDictionary has no lexicon version")
 lexicon_version = version_match.group(1)
-output = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "app/src/main/assets/databases/pinyin.db"
+output = Path(sys.argv[1]) if len(sys.argv) > 1 else root / "build/lexicon-source/pinyin.db"
 output.parent.mkdir(parents=True, exist_ok=True)
 if output.exists():
     output.unlink()
