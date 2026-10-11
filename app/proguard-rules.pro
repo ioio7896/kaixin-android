@@ -1,1 +1,3 @@
-# 当前版本不依赖反射框架；保留此文件便于后续启用 R8。
+# JNI entry points are resolved by their class and method names.
+-keep class com.example.offlineime.NeuralHandwritingModel { native <methods>; }
+-keep class com.example.offlineime.ExtendedHandwritingModel { native <methods>; }

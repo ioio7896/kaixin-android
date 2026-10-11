@@ -51,7 +51,7 @@ public final class KeyButton extends Button {
         int id;
         float startX, startY;
         boolean consumed, swipeUpArmed, trackpad;
-        int trackpadSteps;
+        int trackpadSteps, repeats;
         Runnable hold;
         OrderedKeyInput.Press press;
     }
@@ -448,6 +448,13 @@ public final class KeyButton extends Button {
     private void beginTrackpad(Touch touch) {
         if (touch == null || touch.trackpad) return;
         touch.trackpad = true;
+        if (getContext().getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("gesture_hints", true)) {
+            android.content.SharedPreferences tips = getContext().getSharedPreferences("gesture_tips", Context.MODE_PRIVATE);
+            if (!tips.getBoolean("trackpad", false)) {
+                tips.edit().putBoolean("trackpad", true).apply();
+                android.widget.Toast.makeText(getContext(), "左右滑动移动光标，上滑切换选择；编辑面板也可使用方向键", android.widget.Toast.LENGTH_LONG).show();
+            }
+        }
         touch.consumed = true;
         removeCallbacks(touch.hold);
         inputOrder.finish(touch.press, null);
@@ -458,7 +465,7 @@ public final class KeyButton extends Button {
         if (touches.get(touch.id) != touch || touch.consumed || !isAttachedToWindow()) return;
         if (repeatDelete) {
             performClick();
-            if (touches.get(touch.id) == touch) postDelayed(touch.hold, 70);
+            if (touches.get(touch.id) == touch) postDelayed(touch.hold, Math.max(42, 95 - (++touch.repeats) * 4));
         } else if (trackpadMove != null) {
             // Holding Space enters cursor control without committing a space
             // or consuming the gesture as an unrelated long-click action.

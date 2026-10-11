@@ -5,7 +5,10 @@ __pycache__/
 local.properties
 build/
 app/build/
+.cxx/
+app/.cxx/
 /app/src/main/assets/databases/pinyin.db
+/app/src/main/assets/databases/pinyin.bin
 
 # Device captures, emulator output, and generated diagnostic bundles
 artifacts/
@@ -24,4 +27,18 @@ AGENTS.md
 *.hprof
 *.log
 *.py[cod]
+
+# Credentials and signing material
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+
+# Local website preview and downloads
+website-preview/
 

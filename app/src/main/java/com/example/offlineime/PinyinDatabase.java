@@ -71,6 +71,11 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         }
     }
 
+    private static InputStream openBundledDatabase(Context context) throws IOException {
+        try { return new java.util.zip.GZIPInputStream(context.getAssets().open("databases/pinyin.bin"), 64 * 1024); }
+        catch (java.io.FileNotFoundException missing) { return context.getAssets().open("databases/pinyin.db"); }
+    }
+
     private static void installBundledDatabase(Context context, int lexiconVersion) {
         File target = context.getDatabasePath("pinyin.db");
         if (matchesBundledVersion(target, lexiconVersion)) return;
@@ -78,7 +83,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         if (parent != null && !parent.exists() && !parent.mkdirs()) return;
         File temporary = new File(parent, "pinyin.db.installing");
         try {
-            try (InputStream input = context.getAssets().open("databases/pinyin.db");
+            try (InputStream input = openBundledDatabase(context);
                  FileOutputStream output = new FileOutputStream(temporary)) {
                 byte[] buffer = new byte[64 * 1024];
                 int read;
@@ -298,9 +303,13 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 exactArgs.add(leadingReading); exactArgs.add(leadingPattern);
             }
             int exactLimit = Math.max(96, Math.min(256, resultLimit * 4));
+            // Recall matching two-character words before three-character heat fills the scan cap.
+            String exactOrder = CandidateRanker.isThreeLetterInput(input)
+                    ? "CASE WHEN length(word)=2 AND score>=4000 THEN 0 ELSE 1 END, score DESC, word"
+                    : "score DESC, word";
             try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
                     exactWhere.toString(), exactArgs.toArray(new String[0]), null, null,
-                    "score DESC, word", Integer.toString(exactLimit))) {
+                    exactOrder, Integer.toString(exactLimit))) {
                 while (cursor.moveToNext()) {
                     QueryWork.check();
                     String reading = cursor.getString(2);
@@ -319,7 +328,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         // Once complete readings fill the strip, neither full nor initials
         // prefix ranges can outrank them; avoid both scans on this hot path.
         if (primaryWords.size() >= firstScreenTarget)
-            return rankFlexible(out, abbreviation, resultLimit);
+            return rankFlexible(out, abbreviation, resultLimit, input);
         if (prefix && (full || constraint != null)) {
             List<String> prefixArgs = new ArrayList<>();
             prefixArgs.add(plain); prefixArgs.add(prefixUpperBound(plain));
@@ -344,7 +353,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         }
         // With no completion requested the equality phase already scanned all
         // initials keys. Do not run that same SQL again for composition edges.
-        if (!prefix || !shortInput) return rankFlexible(out, abbreviation, resultLimit);
+        if (!prefix || !shortInput) return rankFlexible(out, abbreviation, resultLimit, input);
         int expansionLimit = Math.max(64, Math.min(192, resultLimit * 3));
         try (Cursor cursor = select("pronunciations",
                 new String[]{"word", "score", "syllables"}, where.toString(), args.toArray(new String[0]),
@@ -359,7 +368,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                         .withInput(constraint == null ? input.length() : constraint.raw.length(), pronunciation));
             }
         }
-        return rankFlexible(out, abbreviation, resultLimit);
+        return rankFlexible(out, abbreviation, resultLimit, input);
     }
 
     /** Full syllable edges need only the indexed code/digits equality query,
@@ -391,11 +400,11 @@ final class PinyinDatabase extends SQLiteOpenHelper {
             }
         }
         // Multiple pronunciations of one word still consume only one edge slot.
-        return rankFlexible(out, false, resultLimit);
+        return rankFlexible(out, false, resultLimit, normalized);
     }
 
     private List<PinyinDictionary.Entry> rankFlexible(List<PinyinDictionary.Entry> entries,
-                                                      boolean abbreviation, int limit) {
+                                                      boolean abbreviation, int limit, String input) {
         java.util.Map<String, PinyinDictionary.Entry> unique = new java.util.LinkedHashMap<>();
         for (PinyinDictionary.Entry entry : entries) {
             QueryWork.check();
@@ -408,7 +417,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                     || candidate.rankingTier == prior.rankingTier && candidate.score > prior.score)
                 unique.put(candidate.word, candidate);
         }
-        return CandidateRanker.rankTop(unique.values(), false, limit);
+        return CandidateRanker.rankTop(unique.values(), false, limit, input);
     }
 
     List<String> readings(String word) {

@@ -32,8 +32,8 @@ final class CandidatePanel extends ScrollView {
         setFillViewport(true); setVerticalScrollBarEnabled(true); setScrollbarFadingEnabled(false);
         setScrollBarStyle(SCROLLBARS_INSIDE_OVERLAY);
         setPadding(dp(2), dp(3), dp(2), dp(3));
-        int minWidth = "compact".equals(density) ? 36 : "comfortable".equals(density) ? 52 : 44;
-        int minHeight = "compact".equals(density) ? 38 : "comfortable".equals(density) ? 52 : 44;
+        int minWidth = "comfortable".equals(density) ? 56 : 48;
+        int minHeight = "comfortable".equals(density) ? 56 : 48;
         int padding = "compact".equals(density) ? 5 : "comfortable".equals(density) ? 10 : 8;
         List<PinyinDictionary.Entry> snapshot = new ArrayList<>();
         List<String> labels = new ArrayList<>();

@@ -185,14 +185,15 @@ final class CustomWordStore {
             return words;
         } catch (org.json.JSONException error) { throw new IllegalArgumentException("词库文件格式不正确"); }
     }
-    static boolean importWords(Context context, List<Word> imported) {
+    static boolean importWords(Context context, List<Word> imported) { return importWords(context, imported, false); }
+    static boolean importWords(Context context, List<Word> imported, boolean replaceDuplicates) {
         synchronized (LOCK) {
             if (context.getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false))
                 throw new IllegalStateException("隐私模式下不导入词语");
             Map<String, Word> all = new LinkedHashMap<>(load(context));
             for (Word word : imported) {
                 Word old = all.get(word.text);
-                if (old == null) all.put(word.text, word);
+                if (old == null || replaceDuplicates) all.put(word.text, word);
                 else {
                     LinkedHashSet<String> readings = new LinkedHashSet<>(old.readings), aliases = new LinkedHashSet<>(old.aliases);
                     readings.addAll(word.readings); aliases.addAll(word.aliases);

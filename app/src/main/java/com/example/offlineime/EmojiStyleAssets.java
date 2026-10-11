@@ -23,12 +23,32 @@ final class EmojiStyleAssets {
     static final String[] STYLES = {SYSTEM, TWEMOJI, FLUENT, OPENMOJI};
 
     private final Context context;
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final java.util.concurrent.ThreadPoolExecutor decoder = new java.util.concurrent.ThreadPoolExecutor(
+            1, 1, 5, java.util.concurrent.TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue<>(512), runnable -> {
+                Thread thread = new Thread(() -> { android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND); runnable.run(); }, "offline-emoji-artwork");
+                thread.setDaemon(true); return thread;
+            }, new java.util.concurrent.ThreadPoolExecutor.DiscardPolicy());
+    private volatile int generation;
+    void cancelPending() { generation++; decoder.getQueue().clear(); }
+    void close() { cancelPending(); decoder.shutdownNow(); bitmaps.evictAll(); }
+    void load(String style, String emoji, java.util.function.Consumer<Bitmap> ready) {
+        if (SYSTEM.equals(style) || decoder.isShutdown()) return;
+        int requested = generation;
+        decoder.execute(() -> {
+            if (requested != generation) return;
+            Bitmap bitmap = get(style, emoji);
+            if (bitmap != null && requested == generation) main.post(() -> { if (requested == generation) ready.accept(bitmap); });
+        });
+    }
     private final Map<String, Set<String>> available = new HashMap<>();
     private final LruCache<String, Bitmap> bitmaps = new LruCache<String, Bitmap>(4 * 1024 * 1024) {
         @Override protected int sizeOf(String key, Bitmap value) { return value.getByteCount(); }
     };
 
-    EmojiStyleAssets(Context context) { this.context = context.getApplicationContext(); }
+    EmojiStyleAssets(Context context) { this.context = context.getApplicationContext(); decoder.allowCoreThreadTimeOut(true); }
+
+    void trim() { cancelPending(); bitmaps.evictAll(); }
 
     static String label(String style) {
         switch (style) {

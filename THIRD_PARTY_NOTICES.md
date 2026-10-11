@@ -7,6 +7,15 @@ the MIT license does not relicense them.
 Notices and license texts shipped with the app are kept alongside the relevant
 assets. In particular:
 
+- Handwriting: Ismantic/Handwritten MobileNetV2 INT8 model, character map and
+  derived C preprocessing code (Apache-2.0); Tencent/ncnn runtime (BSD-3-Clause).
+  Pinned versions, source links, modifications and licenses are bundled under
+  `app/src/main/assets/handwriting/`. No CASIA training dataset is distributed.
+- Extended handwriting: PaddleOCR PP-OCRv5 Mobile pretrained recognition model
+  and character dictionary (Apache-2.0), converted to NCNN by nihui's reference
+  Android project. Pinned sources, checksums and license are in
+  `app/src/main/assets/handwriting/extended/`.
+
 - OpenCC dictionaries/configuration: Apache License 2.0, under
   `app/src/main/assets/opencc/`.
 - English word-frequency data: Apache License 2.0, documented in

@@ -50,7 +50,7 @@ public final class SettingsActivity extends Activity {
             for (Runnable binding : paletteBindings.values()) binding.run();
         }
         if (key == null || "theme".equals(key) || "dark".equals(key)
-                || "high_contrast".equals(key) || key.startsWith("key_")) refreshSkinPreview();
+                || "high_contrast".equals(key) || "appearance_mode".equals(key) || key.startsWith("candidate_") || key.startsWith("key_")) refreshSkinPreview();
     };
 
     @Override public void onCreate(Bundle state) {
@@ -123,9 +123,14 @@ public final class SettingsActivity extends Activity {
         addSection(content, "外观反馈");
         addSkinControls(content);
         addSubheading(content, "键盘样式");
-        addSwitch(content, "深色键盘", "dark", false);
-        addSwitch(content, "单手键盘（右侧）", "one_hand", false);
-        addSwitch(content, "浮动键盘样式", "floating", false);
+        addChoice(content, "明暗模式", "appearance_mode", new String[]{"跟随系统", "浅色", "深色"}, new String[]{"system", "light", "dark"}, preferences.getBoolean("dark", false) ? "dark" : "system");
+        addSwitch(content, "高对比度", "high_contrast", false);
+        addChoice(content, "单手键盘", "one_hand_side", new String[]{"关闭", "左侧", "右侧"}, new String[]{"off", "left", "right"}, KeyboardPlacement.side(preferences));
+        addSettingSlider(content, "单手宽度（百分比）", "one_hand_width", 70, 95, preferences.getInt("one_hand_width", 82));
+        addSwitch(content, "大屏分离式键盘（宽屏时生效）", "split_keyboard", false);
+        addSwitch(content, "浮动键盘（可拖动、调节尺寸）", "floating", false);
+        addSettingSlider(content, "浮动宽度", "floating_width", 280, Math.max(280, getResources().getConfiguration().screenWidthDp), preferences.getInt("floating_width", 340));
+        addSettingSlider(content, "浮动高度", "floating_height", 200, 560, preferences.getInt("floating_height", 300));
         addSubheading(content, "尺寸与按键");
         addAppearanceControls(content);
         addSubheading(content, "声音与震动");
@@ -142,6 +147,8 @@ public final class SettingsActivity extends Activity {
                 new String[]{"simplified", "traditional"});
         addChoice(content, "默认中文键盘", "default_layout", new String[]{"26键拼音", "9键拼音"}, new String[]{"qwerty", "nine"});
         addSwitch(content, "中文键盘显示英文候选", "mixed_english", true);
+        addSwitch(content, "中文成对标点", "paired_punctuation", true);
+        addSwitch(content, "显示操作提示", "gesture_hints", true);
         addChoice(content, "26键拼音方案", "pinyin_scheme", new String[]{"全拼 / 简拼", "小鹤双拼"},
                 new String[]{"full", "xiaohe"}, "full");
         addSubheading(content, "拼音与纠错");
@@ -157,13 +164,18 @@ public final class SettingsActivity extends Activity {
         addSubheading(content, "联想与候选");
         addSwitch(content, "整句输入（最多 32 音节）", "sentence_prediction", true);
         addSwitch(content, "下一词联想", "next_word_prediction", true);
+        addChoice(content, "手写停笔等待", "handwriting_delay", new String[]{"快速 250ms", "标准 400ms", "从容 650ms", "慢速 900ms"}, new String[]{"250", "400", "650", "900"}, "400");
+        addSwitch(content, "默认使用连续多字手写", "handwriting_continuous", false);
+        addChoice(content, "多字手写停笔等待", "handwriting_line_delay",
+                new String[]{"快速 650ms", "标准 900ms", "从容 1300ms", "慢速 1800ms"},
+                new String[]{"650", "900", "1300", "1800"}, "900");
         addSwitch(content, "自动提交首选词", "auto_commit", false);
         addChoice(content, "空格键行为", "space_behavior", new String[]{"选择首选词", "输入空格"}, new String[]{"select", "space"});
         addChoice(content, "候选词数量", "candidate_count", new String[]{"6", "9", "12", "15"}, new String[]{"6", "9", "12", "15"});
         addChoice(content, "候选字体", "candidate_font_size", new String[]{"小", "标准", "大", "特大"},
                 new String[]{"15", "17", "19", "21"}, "17");
         addChoice(content, "候选栏高度", "candidate_bar_height", new String[]{"紧凑", "标准", "宽松", "加高"},
-                new String[]{"40", "44", "48", "52"}, "44");
+                new String[]{"44", "48", "52", "56"}, "48");
         addChoice(content, "展开候选页密度", "expanded_candidate_density",
                 new String[]{"紧凑", "标准", "宽松"}, new String[]{"compact", "standard", "comfortable"}, "standard");
         addSection(content, "键盘布局");
@@ -317,7 +329,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout.LayoutParams previewParams = new LinearLayout.LayoutParams(-1, dp(132));
         previewParams.setMargins(dp(12), 0, dp(12), 0);
         parent.addView(skinPreview, previewParams);
-        TextView note = text("13 套配色，均支持深色键盘。选择后重新唤起键盘生效。", 13, palette.textSecondary);
+        TextView note = text("配色、字形与间距实时预览；支持系统明暗模式。单手模式保持原字号。", 13, palette.textSecondary);
         note.setPadding(dp(12), dp(10), dp(12), dp(14));
         parent.addView(note, new LinearLayout.LayoutParams(-1, -2));
         refreshSkinPreview();
@@ -332,7 +344,9 @@ public final class SettingsActivity extends Activity {
         if (skinChoice.getParent() instanceof View)
             ((View) skinChoice.getParent()).setContentDescription(skinChoice.getContentDescription());
         skinPreview.setTheme(KeyboardTheme.from(this, preferences.getBoolean("dark", false)));
-        skinPreview.setContentDescription(selected.label + "键盘预览");
+        skinPreview.setContentDescription(selected.label + "键盘预览，键盘高度" + KeyboardSizing.height(preferences));
+        android.view.ViewGroup.LayoutParams previewSize = skinPreview.getLayoutParams();
+        if (previewSize != null) { previewSize.height = dp(Math.max(110, Math.min(220, KeyboardSizing.height(preferences) / 2))); skinPreview.setLayoutParams(previewSize); }
     }
 
     private void showSkinPicker() {
@@ -340,7 +354,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         String selected = KeyboardTheme.skin(preferences.getString("theme", "system")).id;
-        boolean dark = preferences.getBoolean("dark", false);
+        boolean dark = KeyboardTheme.resolveDark(this);
         for (int start = 0; start < KeyboardTheme.SKINS.size(); start += 2) {
             LinearLayout row = new LinearLayout(this);
             for (int column = 0; column < 2; column++) {
@@ -385,11 +399,27 @@ public final class SettingsActivity extends Activity {
     }
 
     private void addAppearanceControls(LinearLayout parent) {
+        LinearLayout presets = new LinearLayout(this);
+        String[] names = {"紧凑", "标准", "大字"};
+        for (int i = 0; i < names.length; i++) {
+            final int preset = i;
+            Button button = new Button(this); button.setText(names[i]);
+            button.setOnClickListener(v -> {
+                preferences.edit().putInt("key_height", new int[]{270, 300, 380}[preset])
+                        .putInt("key_font", new int[]{18, 20, 24}[preset]).putInt("key_gap", 2).putInt("key_radius", 12)
+                        .putString("candidate_font_size", new String[]{"15", "17", "21"}[preset])
+                        .putString("candidate_bar_height", new String[]{"44", "48", "56"}[preset])
+                        .putString("expanded_candidate_density", preset == 2 ? "comfortable" : "standard").apply();
+                recreate();
+            }); presets.addView(button, new LinearLayout.LayoutParams(0, dp(48), 1));
+        }
+        parent.addView(presets);
+        addSettingSlider(parent, "横屏高度", "key_height_landscape", 180, 360, preferences.getInt("key_height_landscape", 240));
         addSettingSlider(parent, "键盘高度", "key_height", KeyboardSizing.MIN_HEIGHT,
                 KeyboardSizing.MAX_HEIGHT, KeyboardSizing.height(preferences));
         addSettingSlider(parent, "按键字体大小", "key_font", 14, 24, preferences.getInt("key_font", 20));
         addSettingSlider(parent, "按键圆角", "key_radius", 0, 16, preferences.getInt("key_radius", 12));
-        addSettingSlider(parent, "按键间距", "key_gap", 0, 6, preferences.getInt("key_gap", 2));
+        addSettingSlider(parent, "按键间距（单边）", "key_gap", 0, 3, Math.min(3, preferences.getInt("key_gap", 2)));
     }
 
     private void addSettingSlider(LinearLayout parent, String label, String key,
@@ -402,6 +432,9 @@ public final class SettingsActivity extends Activity {
         TextView value = text(Integer.toString(Math.max(minimum, Math.min(maximum, current))), 14, palette.accent);
         bindPalette(value, () -> value.setTextColor(palette.accent));
         heading.addView(value);
+        Button reset = new Button(this); reset.setText("重置"); reset.setContentDescription("重置" + label);
+        reset.setOnClickListener(v -> { preferences.edit().remove(key).apply(); recreate(); });
+        heading.addView(reset, new LinearLayout.LayoutParams(dp(72), dp(48)));
         parent.addView(heading, new LinearLayout.LayoutParams(-1, -2));
         SeekBar slider = new SeekBar(this);
         slider.setPadding(dp(12), 0, dp(12), 0);
@@ -708,12 +741,10 @@ public final class SettingsActivity extends Activity {
 
     private void addSwitch(LinearLayout parent, String label, String key, boolean def) {
         Switch s = new Switch(this); s.setText(label); s.setTextSize(16); s.setTextColor(palette.textPrimary); s.setPadding(dp(12), 0, dp(8), 0);
-        s.setBackgroundColor(palette.surface); s.setChecked(preferences.getBoolean(key, def));
+        s.setMinHeight(dp(48)); s.setBackgroundColor(palette.surface); s.setChecked(preferences.getBoolean(key, def));
         s.setOnCheckedChangeListener((b, checked) -> {
             preferences.edit().putBoolean(key, checked).apply();
-            if ("privacy_mode".equals(key) && checked) {
-                getSharedPreferences("clipboard_history", MODE_PRIVATE).edit().clear().apply();
-            }
+            // Privacy pauses collection; deleting saved history requires the explicit clear action.
         });
         styleSwitch(s);
         LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, -2);
@@ -725,7 +756,7 @@ public final class SettingsActivity extends Activity {
         cleared &= CustomWordStore.clear(this);
         cleared &= SecureLocalStore.clear(this, "context_model", "offline_ime_context");
         cleared &= SecureLocalStore.clear(this, "clipboard_history", "offline_ime_clipboard");
-        for (String preferencesName : new String[]{"blocked_words", "pinyin_path_usage", "emoji"}) {
+        for (String preferencesName : new String[]{"blocked_words", "pinyin_path_usage", "emoji", "symbol_recent", "gesture_tips"}) {
             cleared &= getSharedPreferences(preferencesName, MODE_PRIVATE).edit().clear().commit();
         }
         sendBroadcast(new Intent(UserDataEvents.LOCAL_DATA_CLEARED).setPackage(getPackageName()),

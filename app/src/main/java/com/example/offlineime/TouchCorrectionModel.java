@@ -58,7 +58,7 @@ final class TouchCorrectionModel {
         raw = before.substring(0, start) + before.substring(end);
     }
     List<Variant> variants(String input) {
-        if (!raw.equals(input) || input.length() < 2 || input.length() > 32 || input.indexOf('\'') >= 0)
+        if (!raw.equals(input) || input.length() < 4 || input.length() > 32 || input.indexOf('\'') >= 0)
             return Collections.emptyList();
         ArrayList<Variant> values = new ArrayList<>();
         for (int i = 0; i < samples.size(); i++) {

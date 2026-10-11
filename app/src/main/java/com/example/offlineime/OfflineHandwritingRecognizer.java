@@ -7,7 +7,7 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-/** Offline recognizer combining precise templates with a full five-stroke character index. */
+/** Offline candidate fusion: neural top-k first, templates and stroke index as supplements. */
 final class OfflineHandwritingRecognizer {
     static final class Point {
         final float x;
@@ -20,7 +20,7 @@ final class OfflineHandwritingRecognizer {
     }
 
     private static final int SAMPLE_COUNT = 16;
-    private static final int MAX_STROKES = 30;
+    static final int MAX_STROKES = 64;
     private static final double MAX_SCORE = 0.48;
     private static final double ALTERNATIVE_MARGIN = 0.12;
     private static final List<Template> TEMPLATES = createTemplates();
@@ -28,22 +28,37 @@ final class OfflineHandwritingRecognizer {
     private OfflineHandwritingRecognizer() { }
 
     static List<String> recognize(Context context, List<? extends List<Point>> strokes) {
+        return recognize(context, strokes, Collections.emptyList());
+    }
+
+    static List<String> recognize(Context context, List<? extends List<Point>> strokes,
+                                  List<String> neuralCandidates) {
         if (strokes == null || strokes.isEmpty() || strokes.size() > MAX_STROKES)
             return Collections.emptyList();
-        ArrayList<String> result = new ArrayList<>(12);
-        // The hand-tuned templates remain strongest for very simple glyphs.
-        for (String value : recognize(strokes)) if (!result.contains(value)) result.add(value);
+        ArrayList<String> result = new ArrayList<>(20);
+        boolean traditional = "traditional".equals(context.getSharedPreferences(
+                "settings", Context.MODE_PRIVATE).getString("output_script", "simplified"));
+        for (String value : neuralCandidates) addCandidate(context, result, value, traditional);
+        for (String value : recognize(strokes)) addCandidate(context, result, value, traditional);
         StringBuilder sequence = new StringBuilder(strokes.size());
-        for (List<Point> stroke : strokes) sequence.append(classifyStroke(stroke));
+        for (List<Point> stroke : strokes) {
+            if (Thread.currentThread().isInterrupted()) return Collections.emptyList();
+            sequence.append(classifyStroke(resample(stroke, SAMPLE_COUNT)));
+        }
         for (String value : StrokeInputDictionary.get(context)
                 .suggestCharacters(context, sequence.toString(), 16)) {
-            String displayed = "traditional".equals(context.getSharedPreferences(
-                    "settings", Context.MODE_PRIVATE).getString("output_script", "simplified"))
-                    ? HanConverter.get(context).toTraditional(value) : value;
-            if (!result.contains(displayed)) result.add(displayed);
-            if (result.size() >= 12) break;
+            if (Thread.currentThread().isInterrupted()) return Collections.emptyList();
+            addCandidate(context, result, value, traditional);
+            if (result.size() >= 20) break;
         }
         return result;
+    }
+
+    private static void addCandidate(Context context, List<String> result, String value, boolean traditional) {
+        if (result.size() >= 20) return;
+        String displayed = traditional ? HanConverter.get(context).toTraditional(value)
+                : HanConverter.get(context).toSimplified(value);
+        if (!result.contains(displayed)) result.add(displayed);
     }
 
     static List<String> recognize(List<? extends List<Point>> strokes) {
@@ -55,6 +70,7 @@ final class OfflineHandwritingRecognizer {
 
         ArrayList<ScoredTemplate> matches = new ArrayList<>();
         for (Template template : TEMPLATES) {
+            if (Thread.currentThread().isInterrupted()) return Collections.emptyList();
             if (template.strokes.size() != normalized.size()) continue;
             matches.add(new ScoredTemplate(template.value, score(normalized, template.strokes)));
         }

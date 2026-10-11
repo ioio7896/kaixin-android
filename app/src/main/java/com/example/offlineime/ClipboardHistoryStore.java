@@ -21,6 +21,14 @@ final class ClipboardHistoryStore {
     private static final int DEFAULT_RECENT_LIMIT = 10;
     private static final int DEFAULT_MAX_AGE_DAYS = 7;
     private final Context context;
+    private String cachedBlob;
+    private List<Item> cachedItems;
+    synchronized void releaseMemory() { cachedBlob = null; cachedItems = null; }
+    private static ArrayList<Item> copyItems(List<Item> values) {
+        ArrayList<Item> result = new ArrayList<>();
+        for (Item item : values) result.add(new Item(item.text, item.timestamp, item.pinned));
+        return result;
+    }
 
     static final class Entry {
         final String text;
@@ -126,15 +134,18 @@ final class ClipboardHistoryStore {
     }
 
     synchronized void clear() {
+        releaseMemory();
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit();
     }
 
     private List<Item> readItems() {
         // Legacy migration is needed only when clipboard history is used.
         migratePlaintextHistory();
+        String blob = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("blob", "");
+        if (cachedItems != null && blob.equals(cachedBlob)) return copyItems(cachedItems);
         ArrayList<Item> result = new ArrayList<>();
         String raw = SecureLocalStore.read(context, PREFS, KEY_ALIAS);
-        if (raw.isEmpty()) return result;
+        if (raw.isEmpty()) { cachedBlob = blob; cachedItems = new ArrayList<>(); return result; }
         try {
             JSONArray array = new JSONArray(raw);
             for (int i = 0; i < array.length(); i++) {
@@ -144,6 +155,7 @@ final class ClipboardHistoryStore {
         } catch (Exception error) {
             Log.e(TAG, "history parse failed: " + error.getClass().getSimpleName());
         }
+        cachedBlob = blob; cachedItems = copyItems(result);
         return result;
     }
 
@@ -205,7 +217,10 @@ final class ClipboardHistoryStore {
                 Log.e(TAG, "history encode failed: " + error.getClass().getSimpleName());
             }
         }
-        SecureLocalStore.write(context, PREFS, KEY_ALIAS, array.toString());
+        if (SecureLocalStore.write(context, PREFS, KEY_ALIAS, array.toString())) {
+            cachedBlob = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("blob", "");
+            cachedItems = copyItems(normalized);
+        }
     }
 
     private static Item find(List<Item> items, String text) {

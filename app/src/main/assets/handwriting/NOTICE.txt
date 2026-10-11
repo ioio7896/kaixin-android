@@ -1,0 +1,37 @@
+Offline Chinese handwriting recognizer
+
+Model: Ismantic/Handwritten, MobileNetV2, NCNN INT8, 3755 GB2312 level-1 classes.
+Model card and weights are published under Apache-2.0:
+https://huggingface.co/Ismantic/Handwritten
+Pinned model revision: 99fe1300705f0d2446c057e041d99d3a2cff2419
+Unmodified files: model.ncnn.param, model.ncnn.bin, charset.json,
+release_metadata.json. SHA-256 values are in release_metadata.json and
+app/build.gradle; the build verifies the three model assets before packaging.
+
+The shared C preprocessing implementation is derived from:
+https://github.com/Ismantic/Handwritten
+Revision: 0e83ffe972b71ddbc4a099d06ada2302245cee1d
+Files: src/cpp/preprocess.c and src/cpp/preprocess.h (Apache-2.0).
+Local changes: bounded input validation and allocation-failure handling.
+The rest of the Android integration is original project code.
+License: LICENSE-Handwritten.txt
+
+Training data provenance: CASIA HWDB1.1, as stated by the model publisher.
+No CASIA dataset is included or downloaded by this project. The original data
+has its own terms; the publisher's model license does not relicense the data.
+The upstream model card reports top-1 95.47% / top-10 99.58% for its evaluation.
+These are NOT measurements of this app, this APK, or this integration.
+This 3755-class model is a simplified single-character classifier. The app also
+bundles a separate extended model for native traditional/rare glyphs and line
+recognition; see extended/NOTICE.txt. Output script conversion uses OpenCC.
+
+Runtime: Tencent/ncnn, official CPU Android static library release 20260526.
+https://github.com/Tencent/ncnn/releases/tag/20260526
+Copyright (C) 2017 THL A29 Limited, a Tencent company. All rights reserved.
+License: BSD 3-Clause, see LICENSE-ncnn.txt.
+Archive: ncnn-20260526-android.zip
+SHA-256: 85b18b875488585c2d21360430e0e54abb6c04aa88094b471c20208ab55ff796
+Source and build instructions: https://github.com/Tencent/ncnn/tree/20260526
+
+Models, class map and native runtime are bundled in the APK. There is no
+first-use download, network request, handwriting telemetry or cloud fallback.

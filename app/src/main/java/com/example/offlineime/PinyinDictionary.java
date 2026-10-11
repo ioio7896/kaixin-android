@@ -25,7 +25,7 @@ import java.util.Arrays;
 /** 纯本地词库。词库文件来自本工程 lexicon 目录，加载和查询均不联网。 */
 public final class PinyinDictionary {
     private static final String TAG = "OfflineImeLexicon";
-    private static final int LEXICON_VERSION = 2026100901;
+    private static final int LEXICON_VERSION = 2026101101;
     private final ThreadLocal<Boolean> shuangpinLookup = new ThreadLocal<>();
     List<Entry> suggestShuangpin(String expanded) {
         shuangpinLookup.set(true);
@@ -56,6 +56,10 @@ public final class PinyinDictionary {
         public final int rankingTier;
         public final boolean pinned;
         public final int codePointLength;
+        // Preserve each signal separately so corpus frequencies can be calibrated
+        // without turning personal/context bonuses into fake corpus frequency.
+        int personalBonus;
+        int contextBonus;
         public int consumedLength;
         public String pronunciation = "";
         public String queryText = "";
@@ -67,11 +71,22 @@ public final class PinyinDictionary {
             copy.consumedLength = consumed; copy.pronunciation = reading == null ? "" : reading; copy.queryText = queryText;
             copy.wordSegments = wordSegments;
             copy.inputVersion = inputVersion;
+            copy.personalBonus = personalBonus; copy.contextBonus = contextBonus;
             return copy;
         }
         Entry withScore(int value) {
             Entry copy = new Entry(word, value, matchTier, pinned, corpusScore, rankingTier).withInput(consumedLength, pronunciation);
+            copy.personalBonus = personalBonus; copy.contextBonus = contextBonus;
             copy.queryText = queryText; copy.wordSegments = wordSegments; copy.inputVersion = inputVersion; return copy;
+        }
+
+        Entry withPersonalization(int personal, int contextual) {
+            // Replacement keeps repeated ranking from accumulating old bonuses.
+            long base = (long) score - personalBonus - contextBonus;
+            Entry copy = withScore((int) Math.max(Integer.MIN_VALUE,
+                    Math.min(Integer.MAX_VALUE, base + personal + contextual)));
+            copy.personalBonus = personal; copy.contextBonus = contextual;
+            return copy;
         }
 
         Entry(String word, int score) { this(word, score, TIER_EXACT_FULL, false, score); }
@@ -264,7 +279,7 @@ public final class PinyinDictionary {
             mergeAll(result, shortWords.get(query), TIER_EXACT_SHORT);
             addPrefix(result, shortWords, query, TIER_PREFIX);
         }
-        List<Entry> ranked = CandidateRanker.rankTop(result.values(), numeric && query.length() == 1, 24);
+        List<Entry> ranked = CandidateRanker.rankTop(result.values(), numeric && query.length() == 1, 24, query);
         ArrayList<Entry> ready = new ArrayList<>(ranked.size());
         for (Entry entry : ranked) ready.add(entry.withInput(raw.length(), ""));
         return ready;
@@ -435,7 +450,7 @@ public final class PinyinDictionary {
                                 preference("mixed_pinyin", true), preference("double_initials", true), true) != null) return false;
             return true;
         });
-        return rankResults(result);
+        return CandidateRanker.rankTop(result.values(), false, Integer.MAX_VALUE, segmented);
     }
 
     public List<Entry> suggestT9Fast(String raw) {
@@ -474,13 +489,14 @@ public final class PinyinDictionary {
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
         seedPreviousCandidates(result, "p:" + combinedSignature() + ':' + QueryWork.firstScreen() + ':', segmented, false);
         mergeAll(result, queryInputWords(segmented, true));
+        boolean abbreviation = isAbbreviationQuery(segmented);
         for (UserWordRecord record : matchingUserRecords(segmented, false)) {
             if (record.code.startsWith("@") || record.preferredTier == TIER_FUZZY || "en".equals(record.usageKey) || customWords.containsKey(record.word)) continue;
             String reading = recordReading(record);
             PinyinInput.Match match = PinyinInput.match(segmented, reading, fullEnabled(), shortEnabled(),
                     preference("mixed_pinyin", true), preference("double_initials", true), false);
             if (match != null) merge(result, new Entry(record.word, 0, match.tier, record.pinned, 0,
-                    record.pinned ? TIER_USER : match.tier).withInput(segmented.length(), reading));
+                    record.pinned ? TIER_USER : rankingTier(match.tier, abbreviation)).withInput(segmented.length(), reading));
             else if (fullEnabled() && segmented.equals(record.code))
                 merge(result, new Entry(record.word, 0, TIER_USER, record.pinned).withInput(segmented.length(), reading));
         }
@@ -522,7 +538,8 @@ public final class PinyinDictionary {
         }
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
             mergeCreationPrefixes(result, segmented, false, null);
-        List<Entry> ranked = CandidateRanker.rankTop(result.values(), false, QueryWork.firstScreen() ? 24 : 128);
+        List<Entry> ranked = rankForRecall(result, segmented, false, false,
+                QueryWork.firstScreen() ? 24 : 128);
         for (Entry entry : ranked) entry.queryText = segmented;
         queryCache.put(cacheKey, ranked);
         return ranked;
@@ -542,7 +559,7 @@ public final class PinyinDictionary {
                 ? Collections.emptyList() : corpusCandidates(input, input.matches("[2-9']+"), null, prefix);
         for (Entry entry : found) merge(combined, withShortHotBoost(entry));
         mergeShortHotMatches(combined, input, input.matches("[2-9']+"), null);
-        List<Entry> ranked = CandidateRanker.rankTop(combined.values(), false, 128);
+        List<Entry> ranked = CandidateRanker.rankTop(combined.values(), false, 128, input);
         corpusQueryCache.put(key, ranked);
         return ranked;
     }
@@ -561,6 +578,28 @@ public final class PinyinDictionary {
         QueryWork.check();
         List<Entry> result = Collections.unmodifiableList(found);
         corpusQueryCache.put(key, result); return result;
+    }
+
+    /** Corpus pruning must leave a bounded set of learned words for the service's
+     * final personal/context ranking, even when their base frequency is low. */
+    private List<Entry> rankForRecall(Map<String, Entry> values, String input, boolean numeric,
+                                      boolean preferSingleCharacter, int limit) {
+        List<Entry> ranked = CandidateRanker.rankTop(values.values(), preferSingleCharacter, limit, input);
+        Set<String> included = new java.util.HashSet<>();
+        for (Entry entry : ranked) included.add(entry.word);
+        List<UserWordRecord> learned = new ArrayList<>(matchingUserRecords(input, numeric));
+        learned.sort(Comparator.comparing((UserWordRecord record) -> !record.pinned)
+                .thenComparing(Comparator.comparingInt((UserWordRecord record) -> record.count).reversed())
+                .thenComparing(Comparator.comparingLong((UserWordRecord record) -> record.lastUsed).reversed()));
+        int retained = 0;
+        for (UserWordRecord record : learned) {
+            QueryWork.check();
+            Entry entry = values.get(record.word);
+            if (entry == null || record.count <= 0 && !record.pinned || !included.add(record.word)) continue;
+            ranked.add(entry);
+            if (++retained >= 32) break;
+        }
+        return ranked;
     }
 
     /** Cached corpus edges only; context and personal scores are applied during
@@ -796,6 +835,7 @@ public final class PinyinDictionary {
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
         boolean full = fullEnabled(), shortInput = shortEnabled();
         boolean mixed = preference("mixed_pinyin", true), doubles = preference("double_initials", true);
+        boolean abbreviation = !query.numeric && isAbbreviationQuery(query.raw);
         List<Entry> characters = singleCharacters.lookup(query.raw, query.numeric, query, full, shortInput, doubles, true, QueryWork.firstScreen() ? 32 : 128);
         mergeAll(result, characters);
         for (Entry entry : QueryWork.firstScreen() && primaryCandidateCount(characters) >= 15
@@ -805,7 +845,8 @@ public final class PinyinDictionary {
         for (UserWordRecord record : matchingUserRecords(query.raw, query.numeric)) {
             String reading = recordReading(record);
             PinyinInput.Match match = query.match(reading, full, shortInput, mixed, doubles, true);
-            if (match != null) merge(result, new Entry(record.word, 0, match.tier, record.pinned)
+            if (match != null) merge(result, new Entry(record.word, 0, match.tier, record.pinned, 0,
+                    record.pinned ? TIER_USER : rankingTier(match.tier, abbreviation))
                     .withInput(query.raw.length(), reading));
         }
         mergeCustomWords(result, query.raw, query.numeric, query);
@@ -828,7 +869,8 @@ public final class PinyinDictionary {
         }
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
             mergeCreationPrefixes(result, query.raw, query.numeric, query);
-        List<Entry> ranked = CandidateRanker.rankTop(result.values(), false, QueryWork.firstScreen() ? 24 : 128);
+        List<Entry> ranked = rankForRecall(result, query.raw, query.numeric, false,
+                QueryWork.firstScreen() ? 24 : 128);
         for (Entry entry : ranked) entry.queryText = query.raw;
         queryCache.put(cacheKey, ranked);
         return ranked;
@@ -1030,7 +1072,8 @@ public final class PinyinDictionary {
         mergeCustomWords(result, query, true, null);
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
             mergeCreationPrefixes(result, query, true, null);
-        List<Entry> ranked = rankT9Results(result, query.length());
+        List<Entry> ranked = rankForRecall(result, query, true, query.length() == 1,
+                QueryWork.firstScreen() ? 24 : 128);
         for (Entry entry : ranked) entry.queryText = query;
         queryCache.put(cacheKey, ranked);
         return ranked;
@@ -1040,20 +1083,6 @@ public final class PinyinDictionary {
     List<Entry> suggestForCommit(String raw, boolean nineDigits) {
         return nineDigits ? suggestT9(raw) : suggest(raw);
     }
-
-    private List<Entry> rankT9Results(Map<String, Entry> values, int digitCount) {
-        int limit = QueryWork.firstScreen() ? 24 : 128;
-        if (digitCount == 1 || digitCount > 3)
-            return CandidateRanker.rankTop(values.values(), digitCount == 1, limit);
-        List<Entry> ranked = new ArrayList<>(values.values());
-        ranked.sort(Comparator.comparingInt((Entry entry) -> entry.rankingTier)
-                .thenComparingInt(entry -> entry.codePointLength == 1 ? 0 : 1)
-                .thenComparing(Comparator.comparingInt((Entry entry) -> entry.score).reversed())
-                .thenComparing(entry -> entry.word));
-        if (ranked.size() > limit) return new ArrayList<>(ranked.subList(0, limit));
-        return ranked;
-    }
-
 
     /** English completion candidates sourced from lexicon/en. */
     public List<Entry> suggestEnglish(String raw) {
@@ -1145,7 +1174,7 @@ public final class PinyinDictionary {
         }
     }
 
-    /** Stable local ranking: frequency first, then longer phrases, then lexical order. */
+    /** Shared ordering by match quality, calibrated frequency and local preferences. */
     private List<Entry> rankResults(Map<String, Entry> values) {
         return CandidateRanker.rank(values.values());
     }
@@ -1440,11 +1469,13 @@ public final class PinyinDictionary {
         ArrayList<Entry> result = new ArrayList<>(source.size());
         for (Entry entry : source) {
             QueryWork.check();
-            int boost = personalBoost(entry.pronunciation.isEmpty() ? normalizedCode : normalizeStoredCode(entry.pronunciation), entry.word, normalizedUsageKey, now)
-                    + contextBonuses.getOrDefault(entry.word, 0);
+            int personal = personalBoost(entry.pronunciation.isEmpty() ? normalizedCode : normalizeStoredCode(entry.pronunciation), entry.word, normalizedUsageKey, now);
+            int contextual = contextBonuses.getOrDefault(entry.word, 0);
             boolean pinned = entry.pinned || isPinnedForInput(normalizedCode, entry);
-            Entry copy = pinned ? new Entry(entry.word, entry.score + boost, entry.matchTier, true, entry.corpusScore, TIER_USER)
-                    .withInput(entry.consumedLength, entry.pronunciation) : entry.withScore(entry.score + boost);
+            Entry copy = pinned ? new Entry(entry.word, entry.score - entry.personalBonus - entry.contextBonus,
+                    entry.matchTier, true, entry.corpusScore, TIER_USER)
+                    .withInput(entry.consumedLength, entry.pronunciation) : entry;
+            copy = copy.withPersonalization(personal, contextual);
             copy.queryText = entry.queryText; copy.wordSegments = entry.wordSegments; result.add(copy);
         }
         return result;
@@ -1733,7 +1764,7 @@ public final class PinyinDictionary {
             PinyinInput.Match match = PinyinInput.match(digits, reading, fullEnabled(), shortEnabled(),
                     preference("mixed_pinyin", true), preference("double_initials", true), true);
             if (match != null) merge(result, new Entry(record.word, 0, match.tier, record.pinned, 0,
-                    record.pinned ? TIER_USER : match.tier).withInput(digits.length(), reading));
+                    record.pinned ? TIER_USER : rankingTier(match.tier, false)).withInput(digits.length(), reading));
         }
     }
 

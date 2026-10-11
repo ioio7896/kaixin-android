@@ -253,7 +253,10 @@ final class ClipboardPanel extends LinearLayout {
         content.setMaxLines(2);
         content.setEllipsize(android.text.TextUtils.TruncateAt.END);
         TextView metadata = new TextView(getContext());
-        metadata.setText((entry.pinned ? "已固定 · " : "") + clipboardTime(entry.timestamp));
+        int retention = getIntPreference(renderSettings, "clipboard_retention_days", 7);
+        String expiry = entry.pinned ? " · 固定保留" : retention == 0 ? " · 永久保留"
+                : " · 剩余" + Math.max(1, (int) Math.ceil((entry.timestamp + retention * 86400000L - System.currentTimeMillis()) / 86400000.0)) + "天";
+        metadata.setText(clipboardTime(entry.timestamp) + expiry + " · " + entry.text.codePointCount(0, entry.text.length()) + "字");
         metadata.setTextSize(10);
         metadata.setTextColor(blendColor(theme.text, theme.key, 0.40f));
         preview.addView(content, new LayoutParams(-1, -2));
@@ -285,6 +288,13 @@ final class ClipboardPanel extends LinearLayout {
         RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "剪贴板操作", theme);
         menu.item(entry.pinned ? "取消固定" : "固定", entry.pinned ? null : "保留这条剪贴板内容", null,
                 false, false, () -> callback.onKey("固定:" + entry.text));
+        menu.item("查看完整内容", "长文本可滚动查看", null, false, false, () -> {
+            RoundedCardPopup preview = RoundedCardPopup.keyboard(getContext(), "剪贴板内容", theme);
+            ScrollView scroll = new ScrollView(getContext()); TextView text = new TextView(getContext());
+            text.setText(entry.text); text.setTextSize(16); text.setTextColor(theme.text); text.setPadding(dp(12), dp(12), dp(12), dp(12));
+            scroll.addView(text); scroll.setLayoutParams(new LinearLayout.LayoutParams(-1, dp(160))); preview.content(scroll);
+            preview.item("粘贴", null, null, false, false, () -> callback.onKey("粘贴历史" + entry.text)); menus.accept(anchor, preview);
+        });
         menu.divider().item("删除", null, null, false, true,
                 () -> callback.onKey("删除剪贴板:" + entry.text));
         menus.accept(anchor, menu);
