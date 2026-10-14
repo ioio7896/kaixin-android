@@ -405,7 +405,7 @@ public final class SettingsActivity extends Activity {
             final int preset = i;
             Button button = new Button(this); button.setText(names[i]);
             button.setOnClickListener(v -> {
-                preferences.edit().putInt("key_height", new int[]{270, 300, 380}[preset])
+                preferences.edit().putInt("key_height", new int[]{250, 270, 340}[preset])
                         .putInt("key_font", new int[]{18, 20, 24}[preset]).putInt("key_gap", 2).putInt("key_radius", 12)
                         .putString("candidate_font_size", new String[]{"15", "17", "21"}[preset])
                         .putString("candidate_bar_height", new String[]{"44", "48", "56"}[preset])
@@ -752,7 +752,7 @@ public final class SettingsActivity extends Activity {
     }
 
     private boolean clearLocalPersonalData() {
-        boolean cleared = SecureLocalStore.clear(this, "user_words", "offline_ime_words");
+        boolean cleared = PinyinDictionary.clearStoredUserWords(this);
         cleared &= CustomWordStore.clear(this);
         cleared &= SecureLocalStore.clear(this, "context_model", "offline_ime_context");
         cleared &= SecureLocalStore.clear(this, "clipboard_history", "offline_ime_clipboard");

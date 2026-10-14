@@ -43,8 +43,10 @@ final class KeyFeedback {
 
     void press(View view) {
         if (hapticLevel > 0) {
+            // Keep every key pulse short so successive presses stay distinct.
+            // LONG_PRESS lingers and feels smeared during rapid typing.
             int feedback = hapticLevel == 1 ? HapticFeedbackConstants.CLOCK_TICK
-                    : hapticLevel == 3 ? HapticFeedbackConstants.LONG_PRESS
+                    : hapticLevel == 3 ? HapticFeedbackConstants.VIRTUAL_KEY
                     : HapticFeedbackConstants.KEYBOARD_TAP;
             view.performHapticFeedback(feedback);
         }

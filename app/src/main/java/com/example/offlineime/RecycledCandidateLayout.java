@@ -19,6 +19,7 @@ final class RecycledCandidateLayout extends ViewGroup {
     private final Binder binder;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final ArrayList<Rect> bounds = new ArrayList<>();
+    private final ArrayList<Integer> rowStarts = new ArrayList<>();
     private final SparseArray<TextView> attached = new SparseArray<>();
     private final ArrayDeque<TextView> pool = new ArrayDeque<>();
     private final int minimumWidth, cellHeight, horizontalPadding, gap;
@@ -60,7 +61,8 @@ final class RecycledCandidateLayout extends ViewGroup {
     }
     private void geometry(int width) {
         if (geometryWidth == width) return;
-        geometryWidth = width; bounds.clear(); rows = 0;
+        geometryWidth = width; bounds.clear(); rowStarts.clear(); rows = 0;
+        if (!words.isEmpty()) rowStarts.add(0);
         int left = 0, top = 0, first = 0;
         for (int i = 0; i < words.size(); i++) {
             int desired = Math.max(minimumWidth, (int) Math.ceil(paint.measureText(words.get(i))) + horizontalPadding * 2);
@@ -68,6 +70,7 @@ final class RecycledCandidateLayout extends ViewGroup {
             if (left > 0 && left + cellWidth > width) {
                 fillRow(first, i, width - (left - gap));
                 first = i; left = 0; top += cellHeight + gap; rows++;
+                rowStarts.add(i);
             }
             bounds.add(new Rect(left, top, left + cellWidth, top + cellHeight));
             left += cellWidth + gap;
@@ -98,7 +101,11 @@ final class RecycledCandidateLayout extends ViewGroup {
                 if (pool.size() < 48) pool.addLast(view);
             }
         }
-        for (int position = 0; position < words.size(); position++) {
+        int firstRow = Math.min(rows, Math.max(0, (fromY - cellHeight + cellHeight + gap - 1) / (cellHeight + gap)));
+        int endRow = Math.min(rows, toY / (cellHeight + gap) + 1);
+        int firstPosition = firstRow < rows ? rowStarts.get(firstRow) : words.size();
+        int endPosition = endRow < rows ? rowStarts.get(endRow) : words.size();
+        for (int position = firstPosition; position < endPosition; position++) {
             Rect rect = bounds.get(position);
             if (rect.bottom < fromY || rect.top > toY) continue;
             TextView view = attached.get(position);

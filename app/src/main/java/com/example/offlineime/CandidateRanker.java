@@ -5,7 +5,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.PriorityQueue;
 
-/** Deterministic ranking with frequent short words first among complete matches. */
+/** Deterministic ranking with well-matched common characters before short words. */
 final class CandidateRanker {
     private static final int COMMON_CORPUS_SCORE = 4000;
     private static final int COMMON_RANK_SCORE = corpusScore(COMMON_CORPUS_SCORE);
@@ -86,6 +86,26 @@ final class CandidateRanker {
                 && containsHan(entry.word);
     }
 
+    private static boolean isFrequentMatchingCharacter(PinyinDictionary.Entry entry, String input) {
+        if (entry.codePointLength != 1 || entry.corpusScore < COMMON_CORPUS_SCORE
+                || !containsHan(entry.word) || entry.rankingTier >= 35) return false;
+        if (entry.matchTier == PinyinDictionary.TIER_EXACT_FULL
+                || entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
+                || entry.matchTier == PinyinDictionary.TIER_MIXED) return true;
+        if (entry.matchTier != PinyinDictionary.TIER_PREFIX) return false;
+        String query = input == null || input.isEmpty() ? entry.queryText : input;
+        if (query == null) return false;
+        query = query.replace("'", "");
+        String reading = entry.pronunciation;
+        if (reading == null || reading.isEmpty() || query.length() < 2) return false;
+        if (query.charAt(0) >= '2' && query.charAt(0) <= '9')
+            reading = PinyinDictionary.toT9(reading);
+        // Promote a substantial single-syllable prefix, never a partial-input
+        // character or a broad one-key prefix with little spelling evidence.
+        return reading.startsWith(query) && query.length() * 2 >= reading.length()
+                && entry.consumedLength >= query.length();
+    }
+
     static int pageSize(int requested) {
         return Math.max(1, Math.min(15, requested));
     }
@@ -126,7 +146,7 @@ final class CandidateRanker {
             for (PinyinDictionary.Entry entry : source) {
                 QueryWork.check();
                 if (entry == null || entry.word == null) continue;
-                RankedEntry ranked = new RankedEntry(entry, preferTwoCharacters);
+                RankedEntry ranked = new RankedEntry(entry, preferTwoCharacters, input);
                 if (best.size() < limit) best.add(ranked);
                 else if (ranking.compare(ranked, best.peek()) < 0) {
                     best.poll();
@@ -141,7 +161,7 @@ final class CandidateRanker {
         ArrayList<RankedEntry> out = new ArrayList<>();
         for (PinyinDictionary.Entry entry : source) {
             QueryWork.check();
-            if (entry != null && entry.word != null) out.add(new RankedEntry(entry, preferTwoCharacters));
+            if (entry != null && entry.word != null) out.add(new RankedEntry(entry, preferTwoCharacters, input));
         }
         out.sort(ranking);
         QueryWork.check();
@@ -158,15 +178,18 @@ final class CandidateRanker {
         final PinyinDictionary.Entry entry;
         final int score;
         final int incomplete;
+        final int singleCharacterPriority;
         final int shortWordPriority;
         final int twoCharacterPriority;
 
-        RankedEntry(PinyinDictionary.Entry entry, boolean preferTwoCharacters) {
+        RankedEntry(PinyinDictionary.Entry entry, boolean preferTwoCharacters, String input) {
             this.entry = entry;
             score = rankingScore(entry) - matchPenalty(entry);
-            // A high-frequency prefix must not displace a candidate consuming the full input.
+            // General prefixes stay behind complete matches; well-matched common
+            // single characters receive their own priority before this comparison.
             incomplete = entry.matchTier == PinyinDictionary.TIER_PREFIX
                     || entry.rankingTier >= 35 && entry.matchTier != PinyinDictionary.TIER_COMPOSED ? 1 : 0;
+            singleCharacterPriority = isFrequentMatchingCharacter(entry, input) ? 0 : 1;
             shortWordPriority = incomplete == 0 && isFrequentShortWord(entry) ? 0 : 1;
             // Three letters can match two syllables via zh/ch/sh or mixed spelling.
             // Keep frequent complete two-character matches ahead of three-character heat.
@@ -189,7 +212,8 @@ final class CandidateRanker {
                 ? Comparator.comparingInt((RankedEntry value) -> value.entry.codePointLength == 1 ? 0 : 1)
                         .thenComparingInt(value -> value.entry.pinned ? 0 : 1)
                 : Comparator.comparingInt((RankedEntry value) -> value.entry.pinned ? 0 : 1);
-        return ranking.thenComparingInt(value -> value.incomplete)
+        return ranking.thenComparingInt(value -> value.singleCharacterPriority)
+                .thenComparingInt(value -> value.incomplete)
                 .thenComparingInt(value -> value.shortWordPriority)
                 .thenComparingInt(value -> value.twoCharacterPriority)
                 .thenComparing(Comparator.comparingInt((RankedEntry value) -> value.score).reversed())

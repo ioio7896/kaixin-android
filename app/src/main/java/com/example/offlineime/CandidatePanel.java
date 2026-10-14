@@ -3,7 +3,6 @@ package com.example.offlineime;
 import android.content.Context;
 import android.view.Gravity;
 import android.view.MotionEvent;
-import android.view.View;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import java.util.ArrayList;
@@ -14,7 +13,6 @@ final class CandidatePanel extends ScrollView {
     interface Host {
         void style(TextView view, String word, boolean first);
         void select(PinyinDictionary.Entry entry);
-        void menu(View anchor, PinyinDictionary.Entry entry);
         void touching(boolean active);
     }
     private final Host host;
@@ -55,8 +53,7 @@ final class CandidatePanel extends ScrollView {
                 view.setFocusable(true);
                 view.setContentDescription((position == 0 ? "首选候选词 " : "候选词 ") + entry.word);
                 view.setOnClickListener(v -> host.select(entry));
-                view.setOnLongClickListener(v -> { host.menu(view, entry); return true; });
-                AccessibilitySupport.longClick(view, "候选词操作");
+                view.setLongClickable(false);
             });
             addView(grid, new LayoutParams(-1, -2));
         }
