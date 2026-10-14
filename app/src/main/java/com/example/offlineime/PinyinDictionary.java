@@ -178,7 +178,7 @@ public final class PinyinDictionary {
     private final Map<String, UserWordRecord> userWordRecords = new ConcurrentHashMap<>();
     private final Map<String, String> userReadings = new ConcurrentHashMap<>();
     private final Set<String> pinnedWords = ConcurrentHashMap.newKeySet();
-    private volatile Map<String, List<UserWordRecord>> userSearchIndex = Collections.emptyMap();
+    private volatile Map<String, List<UserWordRecord>> userSearchIndex = new ConcurrentHashMap<>();
     private volatile Map<String, CustomWordStore.Word> customWords = Collections.emptyMap();
     private volatile Map<String, List<CustomWordStore.Word>> customSearchIndex = Collections.emptyMap();
     private volatile UserContextModel sentenceContext;
@@ -223,11 +223,23 @@ public final class PinyinDictionary {
     private volatile String settingsKey = "default";
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener settingsListener =
             (preferences, key) -> cacheSettings();
-    private final ByteBudgetCache<List<Entry>> queryCache = new ByteBudgetCache<>(8 * 1024 * 1024, 1024, ByteBudgetCache::entries);
-    private final ByteBudgetCache<List<Entry>> corpusQueryCache = new ByteBudgetCache<>(8 * 1024 * 1024, 2048, ByteBudgetCache::entries);
+    private static final class Recall {
+        final String input;
+        final List<Entry> entries;
+        Recall(String input, List<Entry> entries) { this.input = input; this.entries = entries; }
+    }
+    private final ByteBudgetCache<Recall> queryCache = new ByteBudgetCache<>(8 * 1024 * 1024, 1024,
+            value -> 48 + value.input.length() * 2 + ByteBudgetCache.entries(value.entries), 0);
+    private List<Entry> recalled(String key) {
+        Recall value = queryCache.get(key); return value == null ? null : value.entries;
+    }
+    private void cacheRecall(String key, String input, List<Entry> entries, long revision) {
+        if (!QueryWork.wasLimited()) queryCache.putIfUnchanged(key, new Recall(input, entries), revision);
+    }
+    private final ByteBudgetCache<List<Entry>> corpusQueryCache = new ByteBudgetCache<>(8 * 1024 * 1024, 2048, ByteBudgetCache::entries, 2);
     // Corpus fragments have a separate budget so whole-input and correction
     // queries cannot evict the syllables reused while typing or backspacing.
-    private final ByteBudgetCache<List<Entry>> compositionWordCache = new ByteBudgetCache<>(8 * 1024 * 1024, 2048, ByteBudgetCache::entries);
+    private final ByteBudgetCache<List<Entry>> compositionWordCache = new ByteBudgetCache<>(8 * 1024 * 1024, 2048, ByteBudgetCache::entries, 2);
     private final ByteBudgetCache<List<List<String>>> pinyinPathCache = new ByteBudgetCache<>(2 * 1024 * 1024, 1024, ByteBudgetCache::paths);
 
     public PinyinDictionary(AssetManager assets) { this(assets, null); }
@@ -479,12 +491,13 @@ public final class PinyinDictionary {
     }
 
     public List<Entry> suggest(String raw) {
+        long recallRevision = queryCache.revision();
         QueryWork.check();
         String segmented = normalizeForSegmentation(raw);
         if (segmented.isEmpty() || segmented.length() > 192 || (!fullEnabled() && !shortEnabled())) return Collections.emptyList();
         if (database == null || !loaded || !databaseReady) return suggestFast(segmented);
         String cacheKey = "p:" + combinedSignature() + ':' + QueryWork.firstScreen() + ':' + segmented;
-        List<Entry> cached = queryCache.get(cacheKey);
+        List<Entry> cached = recalled(cacheKey);
         if (cached != null) return cached;
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
         seedPreviousCandidates(result, "p:" + combinedSignature() + ':' + QueryWork.firstScreen() + ':', segmented, false);
@@ -541,7 +554,7 @@ public final class PinyinDictionary {
         List<Entry> ranked = rankForRecall(result, segmented, false, false,
                 QueryWork.firstScreen() ? 24 : 128);
         for (Entry entry : ranked) entry.queryText = segmented;
-        queryCache.put(cacheKey, ranked);
+        cacheRecall(cacheKey, segmented, ranked, recallRevision);
         return ranked;
     }
 
@@ -560,7 +573,7 @@ public final class PinyinDictionary {
         for (Entry entry : found) merge(combined, withShortHotBoost(entry));
         mergeShortHotMatches(combined, input, input.matches("[2-9']+"), null);
         List<Entry> ranked = CandidateRanker.rankTop(combined.values(), false, 128, input);
-        corpusQueryCache.put(key, ranked);
+        if (!QueryWork.wasLimited()) corpusQueryCache.put(key, ranked);
         return ranked;
     }
     private List<Entry> corpusCandidates(String input, boolean numeric, PinyinPathEditor.Query constraint, boolean prefix) {
@@ -577,7 +590,7 @@ public final class PinyinDictionary {
                         preference("double_initials", true), prefix);
         QueryWork.check();
         List<Entry> result = Collections.unmodifiableList(found);
-        corpusQueryCache.put(key, result); return result;
+        if (!QueryWork.wasLimited()) corpusQueryCache.put(key, result); return result;
     }
 
     /** Corpus pruning must leave a bounded set of learned words for the service's
@@ -632,7 +645,7 @@ public final class PinyinDictionary {
         for (int end = input.length() - 1; end >= floor; end--) {
             String previous = input.substring(0, end).replaceAll("'+$", "");
             if (previous.isEmpty()) continue;
-            List<Entry> cached = queryCache.get(cachePrefix + previous);
+            List<Entry> cached = recalled(cachePrefix + previous);
             if (cached == null) continue;
             for (Entry entry : cached) {
                 QueryWork.check();
@@ -827,10 +840,11 @@ public final class PinyinDictionary {
     }
 
     List<Entry> suggestConstrained(PinyinPathEditor.Query query) {
+        long recallRevision = queryCache.revision();
         QueryWork.check();
         if (database == null || !loaded || !databaseReady || query.raw.isEmpty()) return Collections.emptyList();
         String cacheKey = "constraint:" + combinedSignature() + ':' + QueryWork.firstScreen() + ':' + query.numeric + ':' + query.raw + ':' + query.key;
-        List<Entry> cached = queryCache.get(cacheKey);
+        List<Entry> cached = recalled(cacheKey);
         if (cached != null) return cached;
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
         boolean full = fullEnabled(), shortInput = shortEnabled();
@@ -872,7 +886,7 @@ public final class PinyinDictionary {
         List<Entry> ranked = rankForRecall(result, query.raw, query.numeric, false,
                 QueryWork.firstScreen() ? 24 : 128);
         for (Entry entry : ranked) entry.queryText = query.raw;
-        queryCache.put(cacheKey, ranked);
+        cacheRecall(cacheKey, query.raw, ranked, recallRevision);
         return ranked;
     }
 
@@ -1004,7 +1018,7 @@ public final class PinyinDictionary {
             List<Entry> phrases = corpusQueryCache.get(key);
             if (phrases == null) {
                 phrases = Collections.unmodifiableList(database.creationPhrases(raw, numeric, constraint));
-                QueryWork.check(); corpusQueryCache.put(key, phrases);
+                QueryWork.check(); if (!QueryWork.wasLimited()) corpusQueryCache.put(key, phrases);
             }
             result.addAll(phrases);
         }
@@ -1035,11 +1049,12 @@ public final class PinyinDictionary {
 
     /** 真正的 9 键候选：按拼音字母的 T9 映射反查本地词库。 */
     public List<Entry> suggestT9(String digits) {
+        long recallRevision = queryCache.revision();
         QueryWork.check();
         String query = normalize(digits).replaceAll("[^2-9]", "");
         if (query.isEmpty() || (!fullEnabled() && !shortEnabled())) return Collections.emptyList();
         String cacheKey = "t:" + combinedSignature() + ':' + QueryWork.firstScreen() + ":" + query;
-        List<Entry> cached = queryCache.get(cacheKey);
+        List<Entry> cached = recalled(cacheKey);
         if (cached != null) return cached;
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
         seedPreviousCandidates(result, "t:" + combinedSignature() + ':' + QueryWork.firstScreen() + ':', query, true);
@@ -1075,7 +1090,7 @@ public final class PinyinDictionary {
         List<Entry> ranked = rankForRecall(result, query, true, query.length() == 1,
                 QueryWork.firstScreen() ? 24 : 128);
         for (Entry entry : ranked) entry.queryText = query;
-        queryCache.put(cacheKey, ranked);
+        cacheRecall(cacheKey, query, ranked, recallRevision);
         return ranked;
     }
 
@@ -1086,10 +1101,11 @@ public final class PinyinDictionary {
 
     /** English completion candidates sourced from lexicon/en. */
     public List<Entry> suggestEnglish(String raw) {
+        long recallRevision = queryCache.revision();
         QueryWork.check();
         String query = normalize(raw).replaceAll("[^a-z]", "");
         if (query.isEmpty()) return Collections.emptyList();
-        List<Entry> cached = queryCache.get("e:" + query);
+        List<Entry> cached = recalled("e:" + query);
         if (cached != null) return cached;
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
         mergeUserAll(result, englishUserIndex.get(query), TIER_EXACT_FULL);
@@ -1098,7 +1114,7 @@ public final class PinyinDictionary {
         addPrefix(result, englishIndex, query, TIER_PREFIX);
         if (database != null && loaded && databaseReady) mergeAll(result, database.queryEnglish(query, 64));
         List<Entry> ranked = rankResults(result);
-        queryCache.put("e:" + query, ranked);
+        cacheRecall("e:" + query, query, ranked, recallRevision);
         return ranked;
     }
 
@@ -1388,8 +1404,51 @@ public final class PinyinDictionary {
         learnSelection(code, word, "*", null, TIER_EXACT_FULL);
     }
 
-    synchronized void learnSelection(String code, String word, String usageKey,
-                        String skippedWord, int sourceTier) {
+    static final class Selection {
+        final String code, word, usage, skipped;
+        final int tier;
+        Selection(String code, String word, String usage, String skipped, int tier) {
+            this.code = code; this.word = word; this.usage = usage; this.skipped = skipped; this.tier = tier;
+        }
+    }
+    private volatile long userMutation;
+
+    void learnSelection(String code, String word, String usageKey, String skippedWord, int sourceTier) {
+        long revision = context == null ? 0 : context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                .getLong("user_words_revision", 0);
+        learnSelections(Collections.singletonList(new Selection(code, word, usageKey, skippedWord, sourceTier)), revision);
+    }
+
+    LearningChange learnSelections(List<Selection> selections, long expectedStoreRevision) {
+        LearningChange change = new LearningChange();
+        Map<String, UserWordRecord> snapshot;
+        long mutation, revision;
+        synchronized (this) {
+            reloadManagedWords();
+            if (context == null || expectedStoreRevision != context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                    .getLong("user_words_revision", 0)) return change;
+            for (Selection selection : selections)
+                applySelection(selection.code, selection.word, selection.usage, selection.skipped, selection.tier, change);
+            if (change.words.isEmpty()) return change;
+            mutation = ++userMutation;
+            revision = managedRevision;
+            snapshot = new LinkedHashMap<>(userWordRecords);
+            queryCache.removeIf((key, value) -> change.affects(value.input, value.entries));
+            sentenceDecoder.clear();
+        }
+        // Serialization, Keystore and both durable commits run without the dictionary monitor.
+        // The store lock plus revision check prevent a late snapshot from undoing a clear/edit.
+        synchronized (PinyinDictionary.class) {
+            if (mutation == userMutation && revision == context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                    .getLong("user_words_revision", 0)) {
+                if (!writeUserWords(context, snapshot)) Log.w(TAG, "learning persistence failed");
+            }
+        }
+        return change;
+    }
+
+    private void applySelection(String code, String word, String usageKey,
+                        String skippedWord, int sourceTier, LearningChange change) {
         code = normalizeStoredCode(code);
         word = word == null ? "" : word.replace('\t', ' ').replace('\n', ' ').trim();
         usageKey = normalizeUsageKey(usageKey);
@@ -1409,6 +1468,9 @@ public final class PinyinDictionary {
                 old != null && old.pinned ? TIER_USER : normalizeUserTier(sourceTier));
         userWordRecords.put(key, updated);
         if (sourceTier != TIER_FUZZY) addUser(updated);
+        updateUserSearchRecord(updated, old, change);
+        change.words.add(word);
+        change.reading(code);
         if (!"en".equals(usageKey)) {
             String sharedKey = userRecordKey("@word", word, "*");
             UserWordRecord shared = userWordRecords.get(sharedKey);
@@ -1427,10 +1489,9 @@ public final class PinyinDictionary {
                     previous == null ? normalizeUserTier(sourceTier) : previous.preferredTier);
             userWordRecords.put(skippedKey, rejected);
             addUser(rejected);
+            updateUserSearchRecord(rejected, previous, change);
+            change.words.add(skippedWord);
         }
-        rebuildUserSearchIndex();
-        writeUserWords(context, userWordRecords);
-        queryCache.clear();
     }
 
     void addCustomWord(String code, String word) {
@@ -1438,6 +1499,7 @@ public final class PinyinDictionary {
     }
 
     synchronized void addCustomWord(String code, String word, String usageKey) {
+        userMutation++;
         code = normalizeStoredCode(code);
         word = word == null ? "" : word.replace('\t', ' ').replace('\n', ' ').trim();
         usageKey = normalizeUsageKey(usageKey);
@@ -1507,6 +1569,7 @@ public final class PinyinDictionary {
     }
 
     synchronized void adjustPreference(String input, String word, String action) {
+        userMutation++;
         if (context == null) return;
         CustomWordStore.Word explicit = customWords.get(word);
         if (explicit != null && !"delete".equals(action)) {
@@ -1576,14 +1639,26 @@ public final class PinyinDictionary {
         if (context == null || !loaded) return;
         long revision = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getLong("user_words_revision", 0);
         if (revision == managedRevision) return;
+        userMutation++;
         userIndex.clear(); userT9Index.clear(); englishUserIndex.clear(); userWordRecords.clear(); userReadings.clear();
         loadUserEntries(); queryCache.clear();
         // A canceled rebuild must be retried by the next candidate query.
         managedRevision = revision;
     }
 
+    static synchronized boolean clearStoredUserWords(Context context) {
+        if (!SecureLocalStore.clear(context, "user_words", "offline_ime_words")) return false;
+        android.content.SharedPreferences prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        long revision = Math.max(System.currentTimeMillis(), prefs.getLong("user_words_revision", 0) + 1);
+        prefs.edit().putLong("user_words_revision", revision).apply();
+        return true;
+    }
+
     public synchronized void clearUserWords() {
-        if (context != null) SecureLocalStore.clear(context, "user_words", "offline_ime_words");
+        userMutation++;
+        synchronized (PinyinDictionary.class) {
+            if (context != null) clearStoredUserWords(context);
+        }
         userWordRecords.clear();
         customWords = Collections.emptyMap(); customSearchIndex = Collections.emptyMap();
         userIndex.clear();
@@ -1680,34 +1755,59 @@ public final class PinyinDictionary {
         for (UserWordRecord record : userWordRecords.values()) {
             QueryWork.check();
             if (record.pinned) pinned.add(record.word);
-            if (record.code.startsWith("@") || "en".equals(record.usageKey)
-                    || record.preferredTier == TIER_FUZZY || customWords.containsKey(record.word)) continue;
-            String reading = recordReading(record).toLowerCase(Locale.ROOT);
-            String full = reading.replaceAll("[^a-z]", "");
-            if (full.isEmpty()) full = normalizeStoredCode(record.code).replace("'", "");
-            StringBuilder initials = new StringBuilder();
-            for (String syllable : reading.split("[ ']+"))
-                if (!syllable.isEmpty() && syllable.charAt(0) >= 'a' && syllable.charAt(0) <= 'z')
-                    initials.append(syllable.charAt(0));
-            indexUserPrefixes(staged, "p:", full, record);
-            indexUserPrefixes(staged, "p:", initials.toString(), record);
-            indexUserPrefixes(staged, "9:", toT9(full), record);
-            indexUserPrefixes(staged, "9:", toT9(initials.toString()), record);
-            // A learned/custom pronunciation must support the same arbitrary
-            // full-pinyin + initials mixing as the bundled lexicon. Keep these
-            // aliases as exact keys so lookups stay indexed without multiplying
-            // every alias into another prefix tree.
-            for (String alias : userMixedInputCodes(reading)) {
-                indexUserExact(staged, "p:" + alias, record);
-                indexUserExact(staged, "9:" + toT9(alias), record);
-            }
+            indexSearchRecord(staged, record);
         }
         Map<String, List<UserWordRecord>> published = new HashMap<>();
         for (Map.Entry<String, LinkedHashMap<String, UserWordRecord>> item : staged.entrySet())
             published.put(item.getKey(), Collections.unmodifiableList(new ArrayList<>(item.getValue().values())));
-        userSearchIndex = Collections.unmodifiableMap(published);
+        userSearchIndex = new ConcurrentHashMap<>(published);
         pinnedWords.clear();
         pinnedWords.addAll(pinned);
+    }
+
+    private void indexSearchRecord(Map<String, LinkedHashMap<String, UserWordRecord>> staged, UserWordRecord record) {
+        if (record.code.startsWith("@") || "en".equals(record.usageKey)
+                || record.preferredTier == TIER_FUZZY || customWords.containsKey(record.word)) return;
+        String reading = recordReading(record).toLowerCase(Locale.ROOT);
+        String full = reading.replaceAll("[^a-z]", "");
+        if (full.isEmpty()) full = normalizeStoredCode(record.code).replace("'", "");
+        StringBuilder initials = new StringBuilder();
+        for (String syllable : reading.split("[ ']+"))
+            if (!syllable.isEmpty() && syllable.charAt(0) >= 'a' && syllable.charAt(0) <= 'z')
+                initials.append(syllable.charAt(0));
+        indexUserPrefixes(staged, "p:", full, record);
+        indexUserPrefixes(staged, "p:", initials.toString(), record);
+        indexUserPrefixes(staged, "9:", toT9(full), record);
+        indexUserPrefixes(staged, "9:", toT9(initials.toString()), record);
+        // A learned/custom pronunciation must support the same arbitrary
+        // full-pinyin + initials mixing as the bundled lexicon. Keep these
+        // aliases as exact keys so lookups stay indexed without multiplying
+        // every alias into another prefix tree.
+        for (String alias : userMixedInputCodes(reading)) {
+            indexUserExact(staged, "p:" + alias, record);
+            indexUserExact(staged, "9:" + toT9(alias), record);
+        }
+    }
+
+    private void updateUserSearchRecord(UserWordRecord record, UserWordRecord previous, LearningChange change) {
+        if ("en".equals(record.usageKey)) { change.reading(record.code); return; }
+        Map<String, LinkedHashMap<String, UserWordRecord>> changed = new HashMap<>();
+        Map<String, LinkedHashMap<String, UserWordRecord>> before = new HashMap<>();
+        indexSearchRecord(changed, record);
+        if (previous != null) indexSearchRecord(before, previous);
+        Set<String> keys = new LinkedHashSet<>(before.keySet()); keys.addAll(changed.keySet());
+        String recordKey = userRecordKey(record.code, record.word, record.usageKey);
+        for (String key : keys) {
+            change.inputKeys.add(key.substring(2));
+            List<UserWordRecord> prior = userSearchIndex.get(key);
+            List<UserWordRecord> next = prior == null ? new ArrayList<>() : new ArrayList<>(prior);
+            next.removeIf(value -> userRecordKey(value.code, value.word, value.usageKey).equals(recordKey));
+            if (changed.containsKey(key)) next.add(record);
+            if (next.isEmpty()) userSearchIndex.remove(key);
+            else userSearchIndex.put(key, Collections.unmodifiableList(next));
+        }
+        if (record.pinned) pinnedWords.add(record.word);
+        change.reading(recordReading(record));
     }
 
     private static void indexUserPrefixes(

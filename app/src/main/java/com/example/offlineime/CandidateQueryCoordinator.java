@@ -28,6 +28,7 @@ final class CandidateQueryCoordinator {
     static final class Ticket {
         final int generation;
         final CancellationSignal cancellation = new CancellationSignal();
+        final QueryWork.StageData stages = new QueryWork.StageData();
         Ticket(int generation) { this.generation = generation; }
     }
     Ticket next() {

@@ -35,6 +35,13 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                           String groupBy, String having, String orderBy, String limit) {
         QueryWork.check();
         long started = ImePerformanceMonitor.start();
+        if ("pronunciations".equals(table) && groupBy == null && having == null && limit != null && limit.matches("[0-9]+")) {
+            int count = Integer.parseInt(limit);
+            String key = java.util.Arrays.deepToString(new Object[]{table, columns, selection, args, orderBy});
+            return QueryWork.selectRows(key, columns, count, offset -> QueryWork.timedCursor(
+                    getReadableDatabase().query(false, table, columns, selection, args, groupBy, having, orderBy,
+                            offset + "," + (count - offset), QueryWork.signal()), started));
+        }
         return QueryWork.timedCursor(getReadableDatabase().query(false, table, columns, selection, args,
                 groupBy, having, orderBy, limit, QueryWork.signal()), started);
     }
@@ -312,6 +319,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                     exactOrder, Integer.toString(exactLimit))) {
                 while (cursor.moveToNext()) {
                     QueryWork.check();
+                    if (out.size() >= firstScreenTarget && QueryWork.shouldYield(out.size())) break;
                     String reading = cursor.getString(2);
                     PinyinInput.Match match = constraint == null
                             ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, false)
@@ -329,6 +337,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         // prefix ranges can outrank them; avoid both scans on this hot path.
         if (primaryWords.size() >= firstScreenTarget)
             return rankFlexible(out, abbreviation, resultLimit, input);
+        if (QueryWork.shouldYield(out.size())) return rankFlexible(out, abbreviation, resultLimit, input);
         if (prefix && (full || constraint != null)) {
             List<String> prefixArgs = new ArrayList<>();
             prefixArgs.add(plain); prefixArgs.add(prefixUpperBound(plain));
@@ -353,7 +362,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         }
         // With no completion requested the equality phase already scanned all
         // initials keys. Do not run that same SQL again for composition edges.
-        if (!prefix || !shortInput) return rankFlexible(out, abbreviation, resultLimit, input);
+        if (!prefix || !shortInput || QueryWork.shouldYield(out.size())) return rankFlexible(out, abbreviation, resultLimit, input);
         int expansionLimit = Math.max(64, Math.min(192, resultLimit * 3));
         try (Cursor cursor = select("pronunciations",
                 new String[]{"word", "score", "syllables"}, where.toString(), args.toArray(new String[0]),

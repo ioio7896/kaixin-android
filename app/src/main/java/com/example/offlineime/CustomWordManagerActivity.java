@@ -223,7 +223,7 @@ public final class CustomWordManagerActivity extends Activity {
                         .setMessage(which == 0 ? "主动保存的词、读音和别名会保留。" : "主动保存的词及这些词的旧学习记录会删除。")
                         .setPositiveButton("清除", (confirm, button) -> runOperation(() -> {
                             if (which == 0) {
-                                if (!SecureLocalStore.clear(getApplicationContext(), "user_words", "offline_ime_words")) throw new IllegalStateException("清除失败");
+                                if (!PinyinDictionary.clearStoredUserWords(getApplicationContext())) throw new IllegalStateException("清除失败");
                             } else {
                                 Map<String, CustomWordStore.Word> words = CustomWordStore.load(getApplicationContext());
                                 if (!CustomWordStore.clear(getApplicationContext())) throw new IllegalStateException("清除失败");

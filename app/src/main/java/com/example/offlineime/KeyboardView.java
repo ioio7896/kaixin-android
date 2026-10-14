@@ -36,7 +36,6 @@ import java.util.Set;
 public final class KeyboardView extends LinearLayout {
     private static final int HEADER_HEIGHT_DP = 48;
     private static final int CANDIDATE_HEIGHT_DP = HEADER_HEIGHT_DP;
-    private static final int PATH_HEIGHT_DP = 24;
     private static final int TOOL_BUTTON_SIZE_DP = 48;
     private static final String ENGLISH_SWIPE_LETTERS = "qwertyuiopasdfghjklzxcvbnm";
     private static final String ENGLISH_SWIPE_SYMBOLS = "1234567890@#$%&-+()!?'\"/,.";
@@ -57,7 +56,7 @@ public final class KeyboardView extends LinearLayout {
     private ToneGenerator toneGenerator;
     private final Handler interactionHandler = new Handler(Looper.getMainLooper());
     private KeyboardTheme theme;
-    /** Visibility changes inside this fixed header never resize the key rows. */
+    /** Candidate words and toolbar share one fixed-height header row. */
     private final FrameLayout header = new FrameLayout(getContext());
     private View expandedHeaderTitle;
     private final LinearLayout toolbarRow = new LinearLayout(getContext());
@@ -66,11 +65,6 @@ public final class KeyboardView extends LinearLayout {
     private final HorizontalScrollView candidateScroll;
     private final LinearLayout candidates = new LinearLayout(getContext());
     private final TextView expandCandidates = new TextView(getContext());
-    private final HorizontalScrollView pathScroll;
-    private final LinearLayout pathRow = new LinearLayout(getContext());
-    private final TextView selectedPinyinPath = new TextView(getContext());
-    private final LinearLayout paths = new LinearLayout(getContext());
-    private final ArrayList<PathChipSlot> pathChipPool = new ArrayList<>();
     private ScrollView ninePathScroll;
     private LinearLayout ninePathPanel;
     private String renderedNinePathInput;
@@ -164,17 +158,6 @@ public final class KeyboardView extends LinearLayout {
         NinePathSlot(TextView view) { this.view = view; }
     }
 
-    private static final class PathChipSlot {
-        final TextView view;
-        String label = "";
-        String action = "";
-        String pressedAction;
-        String description = "";
-        int textColor;
-
-        PathChipSlot(TextView view) { this.view = view; }
-    }
-
     public KeyboardView(Context context, Callback callback) {
         super(context);
         renderSettings = context.getSharedPreferences("settings", Context.MODE_PRIVATE);
@@ -221,6 +204,7 @@ public final class KeyboardView extends LinearLayout {
         toolbarRow.setPadding(dp(8), 0, dp(8), 0);
         candidateBar.setOrientation(HORIZONTAL);
         candidateBar.setGravity(Gravity.CENTER_VERTICAL);
+        candidateBar.setBaselineAligned(false);
         candidateScroll = new HorizontalScrollView(context) {
             private boolean tracking;
             @Override protected void onScrollChanged(int x, int y, int oldX, int oldY) {
@@ -264,45 +248,9 @@ public final class KeyboardView extends LinearLayout {
         expandCandidates.setOnClickListener(view -> callback.onCandidateExpand());
         candidateBar.addView(expandCandidates, new LayoutParams(dp(48), -1));
         int candidateHeight = candidateHeightDp();
-        FrameLayout.LayoutParams candidateParams = new FrameLayout.LayoutParams(-1, dp(candidateHeight), Gravity.TOP);
-        candidateParams.topMargin = dp(PATH_HEIGHT_DP);
-        header.addView(candidateBar, candidateParams);
-        pathScroll = new HorizontalScrollView(context) {
-            private boolean tracking;
-            @Override public boolean dispatchTouchEvent(MotionEvent event) {
-                int action = event.getActionMasked();
-                if (action == MotionEvent.ACTION_DOWN) { tracking = true; pathTouches++; }
-                try { return super.dispatchTouchEvent(event); }
-                finally {
-                    if (tracking && (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)) {
-                        tracking = false;
-                        pathTouches = Math.max(0, pathTouches - 1);
-                        post(() -> ((OfflineImeService) getContext()).refreshPinyinPaths());
-                    }
-                }
-            }
-        };
-        pathScroll.setHorizontalScrollBarEnabled(false);
-        paths.setOrientation(HORIZONTAL);
-        pathScroll.addView(paths, new LayoutParams(-1, dp(PATH_HEIGHT_DP)));
-        pathRow.setOrientation(HORIZONTAL);
-        pathRow.setGravity(Gravity.CENTER_VERTICAL);
-        selectedPinyinPath.setTextSize(13);
-        selectedPinyinPath.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
-        selectedPinyinPath.setPadding(dp(12), 0, dp(8), 0);
-        selectedPinyinPath.setSingleLine(true);
-        selectedPinyinPath.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        selectedPinyinPath.setMaxWidth(dp(180));
-        selectedPinyinPath.setBackgroundColor(Color.TRANSPARENT);
-        selectedPinyinPath.setAlpha(0.8f);
-        selectedPinyinPath.setVisibility(GONE);
-        selectedPinyinPath.setOnClickListener(view ->
-                showPinyinEditMenu(view, selectedPinyinPath.getText().toString()));
-        pathRow.addView(selectedPinyinPath, new LayoutParams(-2, -1));
-        pathRow.addView(pathScroll, new LayoutParams(0, -1, 1f));
-        header.addView(pathRow, new FrameLayout.LayoutParams(-1, dp(PATH_HEIGHT_DP), Gravity.TOP));
+        header.addView(candidateBar, new FrameLayout.LayoutParams(-1, dp(candidateHeight), Gravity.TOP));
         header.addView(toolbarRow, new FrameLayout.LayoutParams(-1, dp(candidateHeight), Gravity.TOP));
-        addView(header, new LayoutParams(-1, dp(candidateHeight + PATH_HEIGHT_DP)));
+        addView(header, new LayoutParams(-1, dp(candidateHeight)));
         addView(composing, new LayoutParams(-1, dp(30)));
         // The window can measure us before the first posted refresh runs.
         applyLayoutPreferences();
@@ -378,7 +326,7 @@ public final class KeyboardView extends LinearLayout {
         renderedCandidateInput = input;
         renderPinyinPaths(mode, input);
         boolean typing = !input.isEmpty() || !words.isEmpty();
-        // 拼音已在候选栏中体现；空闲时该不可见占位只负责稳定顶部高度。
+        // Only explicitly entered word creation uses the separate draft row.
         showWordCreationStatus(((OfflineImeService) getContext()).wordCreationStatus());
         if (candidateSurfaceChanged) {
         bindingCandidateStrip = true;
@@ -387,10 +335,15 @@ public final class KeyboardView extends LinearLayout {
         int pageSize = CandidateRanker.pageSize(getIntPreference(settings, "candidate_count", 6));
         int page = Math.min(candidatePage, CandidateRanker.pageCount(words.size(), pageSize) - 1);
         nextCandidateStripIndex = page * pageSize;
-        for (CandidateSlot slot : candidatePool) slot.view.setVisibility(GONE);
         int initialCount = candidateInputChanged || candidatePage != renderedCandidatePage
                 ? 15 : Math.max(15, previousCount);
         appendCandidateStripBatch(words, mode, candidateSurfaceReady, initialCount);
+        for (int i = visibleCandidateIndexes.size(); i < candidatePool.size(); i++) {
+            CandidateSlot slot = candidatePool.get(i);
+            slot.entry = slot.pressedEntry = null;
+            slot.candidateIndex = -1;
+            if (slot.view.getVisibility() != GONE) slot.view.setVisibility(GONE);
+        }
         if (expandCandidates.getCurrentTextColor() != fg) expandCandidates.setTextColor(fg);
         // The expanded page is useful even when a reading constraint leaves
         // fewer candidates than the horizontal strip can hold.
@@ -456,10 +409,8 @@ public final class KeyboardView extends LinearLayout {
             else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) slot.pressedEntry = null;
             return false;
         });
-        item.setOnLongClickListener(view -> {
-            if (slot.candidateIndex >= 0) showCandidateMenu(item, slot.pressedEntry == null ? slot.entry : slot.pressedEntry);
-            return slot.candidateIndex >= 0;
-        });
+        // Candidate touches only select words; holding must never open an editing menu.
+        item.setLongClickable(false);
         return slot;
     }
 
@@ -531,25 +482,6 @@ public final class KeyboardView extends LinearLayout {
 
     void showWordMenu(RoundedCardPopup menu) {
         showCardMenu(composing.getVisibility() == VISIBLE ? composing : header, menu);
-    }
-
-    private void showCandidateMenu(View anchor, PinyinDictionary.Entry entry) {
-        if (entry == null) return;
-        RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), entry.word, theme);
-        OfflineImeService service = (OfflineImeService) getContext();
-        if (entry.matchTier == PinyinDictionary.TIER_FUZZY) menu.item("按读音匹配：" + entry.pronunciation.replace((char)39, ' '), "可在拼音路径菜单选择原文上屏", null, false, false, () -> { });
-        menu.item("不再推荐", "屏蔽此词，可在设置中恢复", null, false, false, () -> callback.onKey("屏蔽词:" + entry.word));
-        menu.item("保存为自定义词", entry.pronunciation.replace('\'', ' '), null, false, false,
-                () -> service.offerSaveCandidate(entry));
-        menu.item("编辑词条／读音", "读音、别名与固定状态分别设置", null, false, false,
-                () -> service.editCandidateWord(entry));
-        menu.item("固定候选", "优先显示这个词", null, false, false,
-                () -> callback.onKey("词偏好:pin:" + entry.word));
-        menu.item("降低优先级", null, null, false, false,
-                () -> callback.onKey("词偏好:lower:" + entry.word));
-        menu.divider().item("删除学习记录", null, null, false, true,
-                () -> callback.onKey("词偏好:delete:" + entry.word));
-        showCardMenu(anchor, menu);
     }
 
     private void showPinyinEditMenu(View anchor, String path) {
@@ -637,7 +569,6 @@ public final class KeyboardView extends LinearLayout {
 
     private void bindCandidateSlot(CandidateSlot slot, int candidateIndex, String word,
                                    String description, boolean first, int foreground, int gap) {
-        if (!slot.hasStyle) AccessibilitySupport.longClick(slot.view, "候选词操作");
         slot.candidateIndex = candidateIndex;
         if (slot.view.isAccessibilityFocused() && !word.equals(slot.word)) {
             slot.view.performAccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS, null);
@@ -981,15 +912,20 @@ public final class KeyboardView extends LinearLayout {
         addLetterRow("qwertyuiop", shift, false, english);
         addLetterRow("asdfghjkl", shift, true, english);
         LinearLayout third = new KeyTouchRow(getContext());
-        KeyButton shiftKey = addKey(third, "⇧", "⇧", 1.5f);
-        ((LayoutParams) shiftKey.getLayoutParams()).leftMargin += dp(nineKeyHorizontalGap());
+        third.setBaselineAligned(false);
+        // All three rows share ten letter units (twelve in split mode).
+        // Small outer insets keep the wider function keys visually balanced.
+        addQwertyInset(third, 0.1f);
+        KeyButton shiftKey = addKey(third, "⇧", "⇧", 1.4f,
+                nineKeyHorizontalGap(), nineKeyVerticalGap());
         shiftKey.setShiftState(shift, ((OfflineImeService) getContext()).capsLockEnabled(), theme);
         for (char letter : "zxcvbnm".toCharArray()) {
             if (letter == 'b' && KeyboardPlacement.split(getContext(), renderSettings)) third.addView(new View(getContext()), new LayoutParams(0, 1, 2f));
             addQwertyLetter(third, letter, shift, english);
         }
-        KeyButton deleteKey = addKey(third, "⌫", "⌫", 1.5f);
-        ((LayoutParams) deleteKey.getLayoutParams()).rightMargin += dp(nineKeyHorizontalGap());
+        addKey(third, "⌫", "⌫", 1.4f,
+                nineKeyHorizontalGap(), nineKeyVerticalGap());
+        addQwertyInset(third, 0.1f);
         addView(third, new LayoutParams(-1, 0, 1f));
         addSogouBottomRow(english, true);
     }
@@ -1025,16 +961,17 @@ public final class KeyboardView extends LinearLayout {
     private void addSogouBottomRow(boolean english, boolean equalLetterRows) {
         LinearLayout bottom = new KeyTouchRow(getContext());
         bottom.setGravity(Gravity.CENTER);
+        bottom.setBaselineAligned(false);
         int horizontalGap = nineKeyHorizontalGap();
         int verticalGap = nineKeyVerticalGap();
         String editorKind = ((OfflineImeService) getContext()).editorLayoutKind();
         boolean compact = KeyboardPlacement.width(getContext(), renderSettings) < 340;
-        addKey(bottom, compact ? "符" : "符号", "符号", english ? 10f : 12f, horizontalGap, verticalGap);
+        addKey(bottom, compact ? "符" : "符号", "符号", english ? 11f : 12f, horizontalGap, verticalGap);
         if (english && "email".equals(editorKind))
-            addKey(bottom, "@", "@", 12f, horizontalGap, verticalGap);
+            addKey(bottom, "@", "@", 11f, horizontalGap, verticalGap);
         else if (english && "uri".equals(editorKind))
-            addKey(bottom, "/", "/", 12f, horizontalGap, verticalGap);
-        else addKey(bottom, "123", "123", english ? 12f : 15f, horizontalGap, verticalGap);
+            addKey(bottom, "/", "/", 11f, horizontalGap, verticalGap);
+        else addKey(bottom, "123", "123", english ? 11f : equalLetterRows ? 12f : 14f, horizontalGap, verticalGap);
         if (english) {
             boolean wordMode = ((OfflineImeService) getContext()).englishWordMode();
             KeyButton toggle = addKey(bottom, wordMode ? "词" : "字", "英文输入模式",
@@ -1042,32 +979,33 @@ public final class KeyboardView extends LinearLayout {
             toggle.setContentDescription(wordMode ? "英文单词模式，点击切换为字母模式"
                     : "英文字母模式，点击切换为单词模式");
         }
-        addKey(bottom, english ? "Space" : "空格", "空格", english ? 40f : 42f, horizontalGap, verticalGap);
+        addKey(bottom, english ? "Space" : "空格", "空格", english ? 44f : equalLetterRows ? 48f : 46f, horizontalGap, verticalGap);
         if (english && ("email".equals(editorKind) || "uri".equals(editorKind)))
             addKey(bottom, "email".equals(editorKind) ? "." : ".com",
-                    "email".equals(editorKind) ? "." : ".com", 12f, horizontalGap, verticalGap);
-        else addKey(bottom, "中/英", "中英", english ? 12f : 13f, horizontalGap, verticalGap);
+                    "email".equals(editorKind) ? "." : ".com", 11f, horizontalGap, verticalGap);
+        else addKey(bottom, "中/英", "中英", english ? 11f : 12f, horizontalGap, verticalGap);
         String action = ((OfflineImeService) getContext()).editorActionLabel();
-        addKey(bottom, action, "回车", 18f, horizontalGap, verticalGap);
+        addKey(bottom, action, "回车", english ? 15f : 16f, horizontalGap, verticalGap);
         addView(bottom, equalLetterRows ? new LayoutParams(-1, 0, 1f) : new LayoutParams(-1, bottomKeyHeight()));
     }
 
     private void addLetterRow(String letters, boolean upper, boolean inset, boolean english) {
         LinearLayout row = new KeyTouchRow(getContext());
-        if (inset) addHalfKeyInset(row);
+        row.setBaselineAligned(false);
+        if (inset) addQwertyInset(row, 0.5f);
         for (int index = 0; index < letters.length(); index++) {
             if (index == (letters.length() + 1) / 2 && KeyboardPlacement.split(getContext(), renderSettings))
                 row.addView(new View(getContext()), new LayoutParams(0, 1, 2f));
             char letter = letters.charAt(index);
             addQwertyLetter(row, letter, upper, english);
         }
-        if (inset) addHalfKeyInset(row);
+        if (inset) addQwertyInset(row, 0.5f);
         addView(row, new LayoutParams(-1, 0, 1f));
     }
 
-    private void addHalfKeyInset(LinearLayout row) {
-        LayoutParams inset = new LayoutParams(0, 1, 0.5f);
-        // Account for the two missing half-key gutters, keeping all letter cells
+    private void addQwertyInset(LinearLayout row, float weight) {
+        LayoutParams inset = new LayoutParams(0, 1, weight);
+        // Account for the missing outer gutters, keeping all letter cells
         // at the same width as the first row even with visible key margins.
         inset.leftMargin = dp(nineKeyHorizontalGap());
         row.addView(new View(getContext()), inset);
@@ -1078,7 +1016,8 @@ public final class KeyboardView extends LinearLayout {
         String display = upper ? value.toUpperCase(Locale.ROOT) : value;
         if (!english && ((OfflineImeService) getContext()).isShuangpin()) display = shuangpinHint(letter) + "\n" + display;
         String action = upper ? value.toUpperCase(Locale.ROOT) : value;
-        KeyButton button = addKey(row, display, action, 1f);
+        KeyButton button = addKey(row, display, action, 1f,
+                nineKeyHorizontalGap(), nineKeyVerticalGap());
         if (!english) {
             button.setInputLetter(letter);
             letterButtons.add(button);
@@ -1133,7 +1072,7 @@ public final class KeyboardView extends LinearLayout {
         LinearLayout body = new LinearLayout(getContext());
         body.setOrientation(HORIZONTAL);
         ninePathScroll = createNinePathPanel();
-        int pathWidth = Math.max(52, Math.min(76, KeyboardPlacement.width(getContext(), renderSettings) / 5));
+        int pathWidth = Math.max(44, Math.min(56, KeyboardPlacement.width(getContext(), renderSettings) / 8));
         LayoutParams strip = new LayoutParams(dp(pathWidth), -1);
         // The sidebar uses the same outer gutters as the grid and bottom row.
         strip.setMargins(dp(nineKeyHorizontalGap()), 0, dp(nineKeyHorizontalGap()), 0);
@@ -1143,13 +1082,13 @@ public final class KeyboardView extends LinearLayout {
         addNineGridRow(grid, new String[]{"1\n@/.", "2\nABC", "3\nDEF"}, new String[]{"标点", "2", "3"}, 0);
         addNineGridRow(grid, new String[]{"4\nGHI", "5\nJKL", "6\nMNO"}, new String[]{"4", "5", "6"}, 0);
         addNineGridRow(grid, new String[]{"7\nPQRS", "8\nTUV", "9\nWXYZ"}, new String[]{"7", "8", "9"}, 0);
-        body.addView(grid, new LayoutParams(0, -1, 78f));
+        body.addView(grid, new LayoutParams(0, -1, 82f));
         LinearLayout right = new LinearLayout(getContext());
         right.setOrientation(VERTICAL);
         addNineSideKey(right, "⌫", false);
         addNineSideKey(right, "重输", false);
         addNineSideKey(right, "分词", false);
-        body.addView(right, new LayoutParams(0, -1, 22f));
+        body.addView(right, new LayoutParams(0, -1, 18f));
         addView(body, new LayoutParams(-1, 0, 1f));
         addSogouBottomRow(false);
     }
@@ -1362,170 +1301,16 @@ public final class KeyboardView extends LinearLayout {
     }
 
     private void renderPinyinPaths(OfflineImeService.Mode mode, String input) {
+        // Nine-key choices belong to the keyboard's side panel; no extra header
+        // row is added while composing, so key heights remain stable.
+        if (mode != OfflineImeService.Mode.NINE || candidateListShown || pathTouches > 0) return;
         OfflineImeService service = (OfflineImeService) getContext();
-        boolean pinyinMode = mode == OfflineImeService.Mode.PINYIN
-                || mode == OfflineImeService.Mode.NINE;
-        // Show the current entered reading in the header's upper-left space,
-        // including on the nine-key layout where choices sit beside the keys.
-        String current = pinyinMode && !input.isEmpty() ? service.currentPinyinPath() : "";
-        String headerLabel = current.isEmpty() ? "" : "拼音 " + current;
-        if (!headerLabel.contentEquals(selectedPinyinPath.getText())) selectedPinyinPath.setText(headerLabel);
-        selectedPinyinPath.setTextColor(theme.text);
-        selectedPinyinPath.setContentDescription("当前拼音路径 " + current);
-        selectedPinyinPath.setEnabled(service.candidateSurfaceReady());
-        selectedPinyinPath.setVisibility(current.isEmpty() ? GONE : VISIBLE);
-        if (!input.isEmpty() && pinyinMode && !service.candidateSurfaceReady()) {
-            // Preserve the last complete path frame during rapid input. When
-            // typing starts from idle or the layout changes, clear shortcuts
-            // once and wait for the complete candidate/path snapshot.
-            if (renderedPathInput.isEmpty() || renderedPathMode != mode) {
-                hidePathChipsFrom(0);
-                pathScroll.setVisibility(INVISIBLE);
-                for (NinePathSlot slot : ninePathChoicePool) slot.view.setVisibility(GONE);
-            }
-            return;
-        }
-        renderedPathMode = mode;
-        renderedPathInput = input;
-        // Normal T9 input uses the left vertical path list. Horizontal choices
-        // belong to the expanded candidate page; keep the fixed header height.
-        if (mode == OfflineImeService.Mode.NINE && !candidateListShown) {
-            hidePathChipsFrom(0);
-            pathScroll.setVisibility(INVISIBLE);
-            if (pathTouches == 0) renderNinePathChoices(input);
-            return;
-        }
-        if (pathTouches > 0) return;
-        int nextChip = 0;
-        if (input.isEmpty()) {
-            hidePathChipsFrom(nextChip);
-            pathScroll.setVisibility(GONE);
-            return;
-        }
-        if (mode != OfflineImeService.Mode.PINYIN && mode != OfflineImeService.Mode.NINE) {
-            hidePathChipsFrom(nextChip);
-            pathScroll.setVisibility(INVISIBLE);
-            return;
-        }
-        if (mode == OfflineImeService.Mode.PINYIN) {
-            String active = service.activePinyinPath();
-            java.util.LinkedHashSet<String> labels = new java.util.LinkedHashSet<>();
-            for (List<String> path : service.pinyinPaths(input)) {
-                String label = String.join("·", path);
-                if (!label.replace("·", "").equals(input.replace("'", ""))) continue;
-                if (!labels.add(label)) continue;
-                bindPathChoice(nextChip++, label, label.equals(active));
-            }
-            hidePathChipsFrom(nextChip);
-            pathScroll.setVisibility(nextChip == 0 ? INVISIBLE : VISIBLE);
-            pathScroll.setContentDescription("拼音路径，左右滑动，点击切换候选读音");
-            return;
-        }
-        List<PinyinPathEditor.Segment> segments = service.pinyinSegments();
-        if (candidateListShown) {
-            PinyinPathEditor.Segment focused = service.focusedPinyinSegment();
-            for (String reading : service.pinyinSyllableChoices(focused)) {
-                List<String> syllables = new ArrayList<>();
-                for (PinyinPathEditor.Segment segment : segments)
-                    syllables.add(segment.start == focused.start ? reading : service.pinyinDisplayReading(segment));
-                bindPathChip(nextChip++, String.join("·", syllables),
-                        "选择音节:" + input + ":" + focused.start + ":" + focused.end + ":" + reading,
-                        service.pinyinReadingSelected(focused, reading));
-            }
-            // Complete syllables and legal prefixes share the same selection
-            // surface; every displayed letter comes from an entered key.
-            if (!service.pinyinPathLocked()) {
-                java.util.Set<String> offered = new java.util.LinkedHashSet<>();
-                for (List<String> path : service.pinyinPaths(input)) {
-                    String label = String.join("·", path);
-                    if (path.size() < 2 || !PinyinDictionary.toT9(String.join("", path)).equals(input.replace("'", ""))
-                            || !offered.add(label)) continue;
-                    bindPathChoice(nextChip++, label, false);
-                }
-            }
-            if (nextChip > 0) {
-                hidePathChipsFrom(nextChip);
-                pathScroll.setVisibility(VISIBLE);
-                pathScroll.setContentDescription("拼音路径，左右滑动，点击切换候选读音");
-                return;
-            }
-        }
-        for (PinyinPathEditor.Segment segment : segments) {
-            // No raw input fallback: T9 codes are never labels or descriptions.
-            if (!segment.reading.matches("[a-z]+")) continue;
-            String label = (segment.locked ? "✓ " : "") + service.pinyinDisplayReading(segment);
-            bindPathChip(nextChip++, label,
-                    "编辑音节:" + input + ":" + segment.start, service.pinyinSegmentFocused(segment));
-        }
-        hidePathChipsFrom(nextChip);
-        pathScroll.setVisibility(nextChip == 0 ? INVISIBLE : VISIBLE);
-    }
-
-    private void hidePathChipsFrom(int index) {
-        for (int i = index; i < pathChipPool.size(); i++)
-            pathChipPool.get(i).view.setVisibility(GONE);
-    }
-
-    private void bindPathChip(int index, String label, String action, boolean selected) {
-        while (pathChipPool.size() <= index) {
-            TextView chip = new TextView(getContext());
-            chip.setTextSize(12);
-            chip.setGravity(Gravity.CENTER);
-            chip.setMinHeight(dp(PATH_HEIGHT_DP));
-            chip.setPadding(dp(10), 0, dp(10), 0);
-            GradientDrawable background = new GradientDrawable();
-            background.setColor(Color.TRANSPARENT);
-            background.setCornerRadius(dp(UiTokens.RADIUS_CONTROL));
-            chip.setBackground(background);
-            PathChipSlot slot = new PathChipSlot(chip);
-            chip.setOnTouchListener((view, event) -> {
-                trackPathTouch(event);
-                if (event.getActionMasked() == MotionEvent.ACTION_DOWN) slot.pressedAction = slot.action;
-                else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) slot.pressedAction = null;
-                return false;
-            });
-            chip.setOnClickListener(view -> {
-                activatePathAction(chip, slot.pressedAction == null ? slot.action : slot.pressedAction);
-                slot.pressedAction = null;
-            });
-            chip.setOnLongClickListener(view -> { showPinyinEditMenu(chip, slot.action); return true; });
-            AccessibilitySupport.longClick(chip, "编辑其他音节");
-            LayoutParams params = new LayoutParams(-2, -1);
-            params.setMargins(dp(2), dp(1), dp(2), dp(1));
-            paths.addView(chip, params);
-            pathChipPool.add(slot);
-        }
-        PathChipSlot slot = pathChipPool.get(index);
-        if (!label.equals(slot.label)) {
-            slot.view.setText(label);
-            slot.label = label;
-        }
-        slot.action = action;
-        int textColor = selected ? theme.accent : theme.text;
-        if (slot.textColor != textColor) {
-            slot.view.setTextColor(textColor);
-            slot.textColor = textColor;
-        }
-        AccessibilitySupport.selected(slot.view, selected);
-        slot.view.setBackground(roundRect(selected ? blendColor(theme.key, theme.accent, 0.12f)
-                : Color.TRANSPARENT, UiTokens.RADIUS_CONTROL));
-        slot.view.setTypeface(android.graphics.Typeface.DEFAULT,
-                selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
-        String description = (selected ? "当前拼音 " : "编辑拼音 ") + label;
-        if (!description.equals(slot.description)) {
-            slot.view.setContentDescription(description);
-            slot.description = description;
-        }
-        if (slot.view.getVisibility() != VISIBLE) slot.view.setVisibility(VISIBLE);
-    }
-
-    private void bindPathChoice(int index, String label, boolean selected) {
-        bindPathChip(index, label, "选择完整路径:" + ((OfflineImeService) getContext()).pinyinRawInput() + ":" + label, selected);
-        PathChipSlot slot = pathChipPool.get(index);
-        String description = (selected ? "当前拼音路径 " : "选择拼音路径 ") + label;
-        if (!description.equals(slot.description)) {
-            slot.view.setContentDescription(description);
-            slot.description = description;
+        if (input.isEmpty() || service.candidateSurfaceReady()) {
+            renderNinePathChoices(input);
+            renderedPathMode = mode;
+            renderedPathInput = input;
+        } else if (renderedPathInput.isEmpty() || renderedPathMode != mode) {
+            for (NinePathSlot slot : ninePathChoicePool) slot.view.setVisibility(GONE);
         }
     }
 
@@ -1776,7 +1561,6 @@ public final class KeyboardView extends LinearLayout {
         removeRows();
         expandedCandidateKey = pageKey;
         renderPinyinPaths(mode, input);
-        if (!sameSelection) pathScroll.scrollTo(0, 0);
 
         int count = words == null ? 0 : words.size();
         ArrayList<Integer> order = new ArrayList<>(count);
@@ -1798,7 +1582,6 @@ public final class KeyboardView extends LinearLayout {
         countLabel.setContentDescription("共" + count + "个候选词");
         header.addView(countLabel, new LayoutParams(dp(64), -1));
         FrameLayout.LayoutParams titleParams = new FrameLayout.LayoutParams(-1, dp(candidateHeightDp()), Gravity.TOP);
-        titleParams.topMargin = dp(PATH_HEIGHT_DP);
         this.header.addView(header, titleParams);
         expandedHeaderTitle = header;
 
@@ -1809,7 +1592,6 @@ public final class KeyboardView extends LinearLayout {
                 styleCandidate(view, word, first, theme.text, 0, false);
             }
             public void select(PinyinDictionary.Entry entry) { callback.onCandidateEntry(entry); }
-            public void menu(View anchor, PinyinDictionary.Entry entry) { showCandidateMenu(anchor, entry); }
             public void touching(boolean active) {
                 expandedCandidatesTouched = active;
                 if (!active && expandedPageRefreshPending && activeMenu == null) service.refreshPinyinPaths();
@@ -1857,7 +1639,10 @@ public final class KeyboardView extends LinearLayout {
         actionsParams.leftMargin = dp(UiTokens.SPACE_XS);
         body.addView(actions, actionsParams);
         addView(body, new LayoutParams(-1, 0, 4f));
-        addBottom(new String[]{"返回"});
+        if (((OfflineImeService) getContext()).hasWordSaveActions()) {
+            addBottomMappedFixed(new String[]{"词语操作", "返回"},
+                    new String[]{"造词菜单", "返回"}, bottomKeyHeight());
+        } else addBottom(new String[]{"返回"});
     }
 
     /** Keep the cross square and centered when height, rotation or insets change. */
@@ -2375,16 +2160,8 @@ public final class KeyboardView extends LinearLayout {
 
     private void hideComposingHeader() {
         candidateBar.setVisibility(GONE);
-        pathScroll.setVisibility(INVISIBLE);
-        selectedPinyinPath.setVisibility(GONE);
         composing.setVisibility(GONE);
-        // Panels do not use the reading-path row. Reclaim its height for the
-        // canvas/content while preserving the toolbar and candidate hit area.
-        ViewGroup.LayoutParams params = header.getLayoutParams();
-        if (params != null && params.height != dp(candidateHeightDp())) {
-            params.height = dp(candidateHeightDp());
-            header.setLayoutParams(params);
-        }
+        applyCandidateHeaderSizing();
     }
 
     private void addRow(String[] keys, boolean upper) {
@@ -2500,7 +2277,7 @@ public final class KeyboardView extends LinearLayout {
 
     private void applyCandidateHeaderSizing() {
         int candidateHeight = candidateHeightDp();
-        ViewGroup.LayoutParams candidateParams = candidateBar.getLayoutParams();
+        FrameLayout.LayoutParams candidateParams = (FrameLayout.LayoutParams) candidateBar.getLayoutParams();
         if (candidateParams != null && candidateParams.height != dp(candidateHeight)) {
             candidateParams.height = dp(candidateHeight);
             candidateBar.setLayoutParams(candidateParams);
@@ -2511,9 +2288,16 @@ public final class KeyboardView extends LinearLayout {
             toolbarRow.setLayoutParams(toolbarParams);
         }
         ViewGroup.LayoutParams headerParams = header.getLayoutParams();
-        if (headerParams != null && headerParams.height != dp(candidateHeight + PATH_HEIGHT_DP)) {
-            headerParams.height = dp(candidateHeight + PATH_HEIGHT_DP);
+        if (headerParams != null && headerParams.height != dp(candidateHeight)) {
+            headerParams.height = dp(candidateHeight);
             header.setLayoutParams(headerParams);
+        }
+        if (expandedHeaderTitle != null) {
+            FrameLayout.LayoutParams titleParams = (FrameLayout.LayoutParams) expandedHeaderTitle.getLayoutParams();
+            if (titleParams.height != dp(candidateHeight)) {
+                titleParams.height = dp(candidateHeight);
+                expandedHeaderTitle.setLayoutParams(titleParams);
+            }
         }
     }
 

@@ -148,7 +148,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private volatile List<PinyinDictionary.Entry> candidateResults = java.util.Collections.emptyList();
     private Mode candidateDisplayMode;
     private String candidateDisplayInput = "";
-    private final ByteBudgetCache<List<PinyinDictionary.Entry>> candidateCache = new ByteBudgetCache<>(4 * 1024 * 1024, 512, ByteBudgetCache::entries);
+    private static final class CandidateFrame {
+        final String input;
+        final boolean doubleInput;
+        final List<PinyinDictionary.Entry> entries;
+        CandidateFrame(String input, boolean doubleInput, List<PinyinDictionary.Entry> entries) {
+            this.input = input; this.doubleInput = doubleInput; this.entries = entries;
+        }
+    }
+    private final ByteBudgetCache<CandidateFrame> candidateCache = new ByteBudgetCache<>(4 * 1024 * 1024, 512,
+            frame -> 48 + frame.input.length() * 2 + ByteBudgetCache.entries(frame.entries), 0);
     private boolean refreshScheduled;
     private final Runnable renderRefreshRunnable = this::renderRefreshNow;
     private final OrderedKeyInput keyInputOrder = new OrderedKeyInput();
@@ -342,6 +351,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onCreate() {
         super.onCreate();
+        ByteBudgetCache.configure(this);
         keyInputOrder.setOnIdle(() -> { if (keyboardView != null) keyboardView.onKeyInputIdle(); });
         settingsPreferences = getSharedPreferences("settings", MODE_PRIVATE);
         settingsPreferences.registerOnSharedPreferenceChangeListener(settingsListener);
@@ -397,8 +407,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     @Override public void onTrimMemory(int level) {
         super.onTrimMemory(level);
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            candidateCache.clear();
-            if (dictionary != null) dictionary.trimQueryCaches();
+            ByteBudgetCache.trimMemory(level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
+                    || level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
             if (keyboardView != null) keyboardView.trimArtwork();
             if (clipboardHistory != null) clipboardHistory.releaseMemory();
         }
@@ -1425,7 +1435,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             return candidateResults;
         }
 
-        List<PinyinDictionary.Entry> cached = candidateCache.get(key);
+        CandidateFrame cachedFrame = candidateCache.get(key);
+        List<PinyinDictionary.Entry> cached = cachedFrame == null ? null : cachedFrame.entries;
         if (cached != null) {
             cancelCandidateWork();
             candidateResults = cached;
@@ -1457,7 +1468,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 CandidateQueryCoordinator.Ticket ticket = candidateQueries.next();
                 long requestedAt = measuredCandidateAt;
                 candidateQueries.submit(ticket, () -> {
-                    QueryWork.begin(ticket.cancellation);
+                    QueryWork.begin(ticket.cancellation, ticket.stages);
                     try {
                         List<PinyinDictionary.Entry> common = dictionary.suggestBootstrap(
                                 rawInput, queryMode == Mode.NINE);
@@ -1500,7 +1511,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             android.os.CancellationSignal cancellation = ticket.cancellation;
             long requestedAt = measuredCandidateAt;
             candidateQueries.submit(ticket, () -> {
-                QueryWork.begin(cancellation);
+                QueryWork.begin(cancellation, ticket.stages);
                 try {
                 QueryWork.firstScreen(true);
                 QueryWork.check();
@@ -1524,9 +1535,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 }
                 QueryWork.check();
                 candidateQueries.submitSupplement(ticket, () -> {
-                QueryWork.begin(cancellation);
+                QueryWork.begin(cancellation, ticket.stages);
                 try {
-                QueryWork.firstScreen(creatingWord && !expanded);
+                QueryWork.firstScreen(creatingWord && !expanded, false);
                 dictionary.reloadManagedWords();
                 QueryWork.check();
                 long started = ImePerformanceMonitor.start();
@@ -1586,7 +1597,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (!complete && key.equals(candidateCompleteKey)) return;
             candidateResults = entries; candidateResultKey = candidateSelectableKey = key;
             candidateDisplayMode = queryMode; candidateDisplayInput = raw;
-            if (complete) { candidateCompleteKey = key; candidatePendingKey = ""; candidateCache.put(key, entries); }
+            if (complete) { candidateCompleteKey = key; candidatePendingKey = ""; candidateCache.put(key, new CandidateFrame(raw, isShuangpin(), entries)); }
             refresh();
             ImePerformanceMonitor.stage(this, complete ? "candidate_ready" : "first_selectable", requestedAt, entries.size(), queryMode == Mode.NINE);
             if (key.equals(deferredCommitKey)) {
@@ -2433,8 +2444,12 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 && (wordCreation.active || !ordinaryWordAssembly.parts.isEmpty());
     }
     String wordCreationStatus() {
-        return wordCreation.active ? wordCreation.label(composing.toString())
-                : composing.length() == 0 ? lastCustomWordNotice : "";
+        // Ordinary typing must never insert a save/undo row into the keyboard.
+        return wordCreation.active ? wordCreation.label(composing.toString()) : "";
+    }
+
+    boolean hasWordSaveActions() {
+        return canSaveExplicitWord() && (ordinaryWordOffer != null || lastCustomWordChange != null);
     }
 
     private void trackOrdinaryWordSelection(PinyinDictionary.Entry selected, int consumed) {
@@ -2454,14 +2469,57 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
     }
 
+    private static final class PendingLearning {
+        final PinyinDictionary.Selection selection;
+        final long epoch, storeRevision;
+        PendingLearning(PinyinDictionary.Selection selection, long epoch, long storeRevision) {
+            this.selection = selection; this.epoch = epoch; this.storeRevision = storeRevision;
+        }
+    }
+    private final java.util.ArrayDeque<PendingLearning> pendingLearning = new java.util.ArrayDeque<>();
+    private boolean learningDrainScheduled;
+
     private void queueWordLearning(String code, String word, String usage, int tier) {
-        PinyinDictionary target = dictionary;
-        long epoch = userDataEpoch;
-        CustomWordStore.IO.execute(() -> {
-            if (destroyed || epoch != userDataEpoch || getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false)) return;
-            target.reloadManagedWords(); target.learnSelection(code, word, usage, null, tier);
-            mainHandler.post(() -> { if (!destroyed) { invalidateCandidates(); refresh(); } });
-        });
+        synchronized (pendingLearning) {
+            pendingLearning.addLast(new PendingLearning(new PinyinDictionary.Selection(code, word, usage, null, tier),
+                    userDataEpoch, settingsPreferences.getLong("user_words_revision", 0)));
+            if (learningDrainScheduled) return;
+            learningDrainScheduled = true;
+        }
+        CustomWordStore.IO.execute(this::drainWordLearning);
+    }
+
+    private void drainWordLearning() {
+        try {
+            long epoch = userDataEpoch;
+            long storeRevision = settingsPreferences.getLong("user_words_revision", 0);
+            List<PinyinDictionary.Selection> batch = new ArrayList<>();
+            synchronized (pendingLearning) {
+                // Bound one turn so explicit word edits can use the same ordered IO lane.
+                for (int i = 0; i < 32 && !pendingLearning.isEmpty(); i++) {
+                    PendingLearning pending = pendingLearning.removeFirst();
+                    if (pending.epoch == epoch && pending.storeRevision == storeRevision) batch.add(pending.selection);
+                }
+            }
+            if (destroyed || epoch != userDataEpoch || batch.isEmpty()
+                    || settingsPreferences.getBoolean("privacy_mode", false)) return;
+            LearningChange change = dictionary.learnSelections(batch, storeRevision);
+            mainHandler.post(() -> {
+                if (destroyed || epoch != userDataEpoch) return;
+                candidateCache.removeIf((key, frame) -> frame.doubleInput || change.affects(frame.input, frame.entries));
+                if (isShuangpin() || wordCreation.active || change.affects(composing.toString(), candidateResults)) {
+                    // Keep the last frame painted; only affected queries lose selectability.
+                    cancelCandidateWork();
+                    candidatePendingKey = candidateCompleteKey = candidateSelectableKey = candidateResultKey = "";
+                    refresh();
+                }
+            });
+        } finally {
+            synchronized (pendingLearning) {
+                learningDrainScheduled = !pendingLearning.isEmpty();
+                if (learningDrainScheduled) CustomWordStore.IO.execute(this::drainWordLearning);
+            }
+        }
     }
 
     private boolean handleWordCreationKey(String key) {

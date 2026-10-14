@@ -21,7 +21,7 @@ final class SentenceComposer {
             for (List<State> beam : value.beams) for (State state : beam)
                 bytes += 96 + (state.text.length() + state.reading.length()) * 2 + state.words.size() * 48;
             return bytes;
-        });
+        }, 0);
         void clear() { recent.clear(); }
     }
     private static final class Decoded {
@@ -44,6 +44,7 @@ final class SentenceComposer {
         long stageStarted = ImePerformanceMonitor.start();
         try {
         if (tokens.isEmpty() || tokens.size() > 32) return java.util.Collections.emptyList();
+        long cacheRevision = decoder == null ? 0 : decoder.recent.revision();
         List<List<State>> beams = new ArrayList<>();
         for (int i = 0; i <= tokens.size(); i++) beams.add(new ArrayList<>());
         beams.get(0).add(new State("", 0, ""));
@@ -83,7 +84,7 @@ final class SentenceComposer {
             beams.set(end, target);
         }
         QueryWork.check();
-        if (decoder != null) decoder.recent.put(cacheKey, new Decoded(tokens, beams));
+        if (decoder != null) decoder.recent.putIfUnchanged(cacheKey, new Decoded(tokens, beams), cacheRevision);
         List<PinyinDictionary.Entry> out = new ArrayList<>();
         for (State state : beams.get(tokens.size())) {
             if (out.size() >= 8) break;

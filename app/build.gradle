@@ -16,8 +16,8 @@ android {
         applicationId "com.example.offlineime"
         minSdk 26
         targetSdk 35
-        versionCode 21
-        versionName "0.5.1"
+        versionCode 23
+        versionName "0.5.3"
         testInstrumentationRunner "com.example.offlineime.FrontendStabilityInstrumentation"
         ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }
         externalNativeBuild {
