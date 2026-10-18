@@ -1,12 +1,12 @@
 {
   "character_count": 8105,
-  "reading_count": 10908,
+  "reading_count": 10909,
   "pinyin_crate_version": "0.10.0",
   "pinyin_data_version": "0.13.0",
   "sources": [
     {
       "path": "desktop/lexicon/zh/single_char_common_8105.txt",
-      "sha256": "cce1cae8c76803afa785b6e2075279b68508c40e498977d7ae50167755069863"
+      "sha256": "8bb1c6593fa462418d7dbcef1ebd27338420d9dbb9f9f182ec4a09ae60bc5f8f"
     },
     {
       "path": "pinyin-0.10.0/pinyin-data/pinyin.txt",
@@ -14,17 +14,12 @@
     },
     {
       "path": "desktop/data_sources/kaixin/pronunciation_aliases.tsv",
-      "sha256": "0f02157dab25eeca3552e0963d8203d1fee584e5bfd6e20d88f610c2462a49fd"
+      "sha256": "c8eddab0e56f4b730f8651f7fe51453c1cd3ecdf56045429fbb3fe19c0d50e06"
     },
     {
       "path": "desktop/data_sources/kaixin/pronunciation_exclusions.tsv",
       "sha256": "e10c95ce4999b9e3d252e91f4c8c28b9ca512f88632f61b08b30e33be3de1a0f"
     }
   ],
-  "output": "zh/single_char_readings.txt",
-  "added_character_count": 2584,
-  "added_readings": 5106,
-  "previous_database_readings": 192528,
-  "merged_database_readings": 197634,
-  "total_lexicon_readings": 217630
+  "output": "data_sources/desktop_single_char_readings.txt"
 }

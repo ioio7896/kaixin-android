@@ -128,6 +128,29 @@ final class CandidateRanker {
         return rankTop(source, preferSingleCharacter, limit, "");
     }
 
+    /** Preserve small exact and common-short pools before later personal/context ranking. */
+    static List<PinyinDictionary.Entry> rankForRecall(
+            Iterable<PinyinDictionary.Entry> source, boolean preferSingleCharacter,
+            int limit, String input) {
+        List<PinyinDictionary.Entry> ranked = rankTop(source, preferSingleCharacter, limit, input);
+        java.util.HashSet<String> included = new java.util.HashSet<>();
+        for (PinyinDictionary.Entry entry : ranked) included.add(entry.word);
+        ArrayList<PinyinDictionary.Entry> exact = new ArrayList<>();
+        ArrayList<PinyinDictionary.Entry> commonShort = new ArrayList<>();
+        for (PinyinDictionary.Entry entry : source) {
+            QueryWork.check();
+            if (entry == null || entry.word == null || included.contains(entry.word)) continue;
+            if (entry.rankingTier < 35 && entry.matchTier == PinyinDictionary.TIER_EXACT_FULL)
+                exact.add(entry);
+            if (entry.rankingTier < 35 && isFrequentShortWord(entry)) commonShort.add(entry);
+        }
+        for (PinyinDictionary.Entry entry : rankTop(exact, preferSingleCharacter, 4, input))
+            if (included.add(entry.word)) ranked.add(entry);
+        for (PinyinDictionary.Entry entry : rankTop(commonShort, preferSingleCharacter, 4, input))
+            if (included.add(entry.word)) ranked.add(entry);
+        return ranked;
+    }
+
     static boolean isThreeLetterInput(String input) {
         if (input == null || input.length() != 3) return false;
         for (int i = 0; i < 3; i++)

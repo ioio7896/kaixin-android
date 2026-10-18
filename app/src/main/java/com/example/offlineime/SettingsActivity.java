@@ -1,6 +1,7 @@
 package com.example.offlineime;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -20,6 +21,8 @@ import android.widget.EditText;
 import android.widget.Toast;
 import android.widget.SeekBar;
 import android.widget.ImageView;
+import android.view.inputmethod.InputMethodInfo;
+import android.view.inputmethod.InputMethodManager;
 import android.content.res.ColorStateList;
 import android.app.AlertDialog;
 import java.util.HashMap;
@@ -43,11 +46,16 @@ public final class SettingsActivity extends Activity {
     private int mainScrollY;
     private TextView skinChoice;
     private KeyboardSkinPreview skinPreview;
+    private View homeSetupCard;
+    private TextView homeSetupTitle, homeSetupDescription, homeSetupAction;
+    private TextView setupStatus, setupStatusDescription, enableStepNumber, enableStepState;
+    private TextView pickerStepNumber, pickerStepState, enableSetupAction, pickerSetupAction;
     private final Map<View, Runnable> paletteBindings = new HashMap<>();
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener appearanceListener = (prefs, key) -> {
         if (key == null || "theme".equals(key)) {
             palette = UiTokens.palette(this);
             for (Runnable binding : paletteBindings.values()) binding.run();
+            refreshInputMethodSetup();
         }
         if (key == null || "theme".equals(key) || "dark".equals(key)
                 || "high_contrast".equals(key) || "appearance_mode".equals(key) || key.startsWith("candidate_") || key.startsWith("key_")) refreshSkinPreview();
@@ -74,6 +82,7 @@ public final class SettingsActivity extends Activity {
         TextView subtitle = text("每一次输入，都合你的习惯", 13, palette.textSecondary);
         subtitle.setPadding(dp(2), 0, 0, dp(20));
         content.addView(subtitle, new LinearLayout.LayoutParams(-1, -2));
+        addHomeSetupCard(content);
         LinearLayout inputGroup = addSettingsGroup(content);
         addCategoryRow(inputGroup, "外观反馈", "皮肤、声音与键盘尺寸", true, false);
         addCategoryRow(inputGroup, "输入体验", "拼音、纠错与候选词", false, false);
@@ -95,30 +104,9 @@ public final class SettingsActivity extends Activity {
         content.addView(footer, new LinearLayout.LayoutParams(-1, -2));
 
         addSection(content, "启用输入法");
-        Button enable = new Button(this);
-        enable.setText("在系统设置中启用输入法");
-        enable.setTextColor(Color.WHITE);
-        enable.setTextSize(15);
-        enable.setAllCaps(false);
-        enable.setBackground(pressableRoundRect(palette.accent, darken(palette.accent), 18));
-        LinearLayout.LayoutParams enableParams = new LinearLayout.LayoutParams(-1, dp(56));
-        enableParams.topMargin = dp(12);
-        enable.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)));
-        content.addView(enable, enableParams);
-
-        TextView howTo = text("启用后调用方法", 16, palette.textPrimary);
-        howTo.setPadding(dp(4), dp(14), 0, dp(4));
-        content.addView(howTo, new LinearLayout.LayoutParams(-1, dp(38)));
-        TextView steps = text("1. 在系统列表打开“开心离线输入法”\n2. 在任意输入框点击键盘图标或长按空格\n3. 选择“开心离线输入法”即可调用", 14, palette.textSecondary);
-        steps.setPadding(dp(4), 0, 0, dp(8));
-        content.addView(steps, new LinearLayout.LayoutParams(-1, -2));
-        Button picker = new Button(this);
-        picker.setText("立即选择默认输入法"); picker.setAllCaps(false); picker.setTextSize(15);
-        picker.setOnClickListener(v -> {
-            android.view.inputmethod.InputMethodManager imm = (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
-            if (imm != null) imm.showInputMethodPicker();
-        });
-        content.addView(picker, new LinearLayout.LayoutParams(-1, dp(48)));
+        LinearLayout setupDetails = createSetupDetails();
+        setupDetails.setTag("setting-subsection");
+        content.addView(setupDetails, new LinearLayout.LayoutParams(-1, -2));
 
         addSection(content, "外观反馈");
         addSkinControls(content);
@@ -151,18 +139,11 @@ public final class SettingsActivity extends Activity {
         addSwitch(content, "显示操作提示", "gesture_hints", true);
         addChoice(content, "26键拼音方案", "pinyin_scheme", new String[]{"全拼 / 简拼", "小鹤双拼"},
                 new String[]{"full", "xiaohe"}, "full");
-        addSubheading(content, "拼音与纠错");
+        addSubheading(content, "拼音输入");
         addSwitch(content, "全拼输入", "full_pinyin", true); addSwitch(content, "简拼输入", "short_pinyin", true);
         addSwitch(content, "全拼简拼混合输入", "mixed_pinyin", true);
         addSwitch(content, "双字母声母简拼（zh/ch/sh）", "double_initials", true);
-        addSwitch(content, "拼写纠错（一次误触、漏字、多字或错序）", "spelling_correction", true);
-        addSwitch(content, "26键触点辅助纠错（仅本次输入，不保存坐标）", "touch_correction", true);
-        addSubheading(content, "模糊音");
-        addSwitch(content, "启用模糊音", "fuzzy_pinyin", false);
-        for (String[] pair : new String[][]{{"zh", "z"}, {"ch", "c"}, {"sh", "s"}, {"n", "l"}, {"h", "f"}, {"an", "ang"}, {"en", "eng"}, {"in", "ing"}, {"ian", "iang"}})
-            addSwitch(content, "模糊音 " + pair[0] + " / " + pair[1], "fuzzy_" + pair[0] + "_" + pair[1], false);
         addSubheading(content, "联想与候选");
-        addSwitch(content, "整句输入（最多 32 音节）", "sentence_prediction", true);
         addSwitch(content, "下一词联想", "next_word_prediction", true);
         addChoice(content, "手写停笔等待", "handwriting_delay", new String[]{"快速 250ms", "标准 400ms", "从容 650ms", "慢速 900ms"}, new String[]{"250", "400", "650", "900"}, "400");
         addSwitch(content, "默认使用连续多字手写", "handwriting_continuous", false);
@@ -300,6 +281,205 @@ public final class SettingsActivity extends Activity {
         flattenButtonShadows(root);
         setContentView(root);
         root.requestApplyInsets();
+        refreshInputMethodSetup();
+    }
+
+    private void addHomeSetupCard(LinearLayout parent) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(18), dp(18), dp(18));
+        homeSetupCard = card;
+        TextView eyebrow = text("开始使用", 12, palette.accent);
+        eyebrow.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        card.addView(eyebrow);
+        homeSetupTitle = text("启用开心输入法", 20, palette.textPrimary);
+        homeSetupTitle.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(-1, -2);
+        titleParams.topMargin = dp(8);
+        card.addView(homeSetupTitle, titleParams);
+        homeSetupDescription = text("完成系统设置后即可开始使用", 13, palette.textSecondary);
+        LinearLayout.LayoutParams descriptionParams = new LinearLayout.LayoutParams(-1, -2);
+        descriptionParams.topMargin = dp(5);
+        card.addView(homeSetupDescription, descriptionParams);
+        homeSetupAction = text("去设置  ›", 15, Color.WHITE);
+        homeSetupAction.setGravity(Gravity.CENTER);
+        homeSetupAction.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        homeSetupAction.setOnClickListener(v -> openSection("启用输入法", ""));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dp(48));
+        actionParams.topMargin = dp(16);
+        card.addView(homeSetupAction, actionParams);
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+        cardParams.bottomMargin = dp(16);
+        parent.addView(card, cardParams);
+        bindPalette(card, () -> {
+            GradientDrawable background = roundRect(palette.accentSoft, 20);
+            background.setStroke(dp(1), palette.accent);
+            card.setBackground(background);
+            eyebrow.setTextColor(palette.accent);
+            homeSetupTitle.setTextColor(palette.textPrimary);
+            homeSetupDescription.setTextColor(palette.textSecondary);
+            homeSetupAction.setBackground(pressableRoundRect(palette.accent, darken(palette.accent), 12));
+        });
+    }
+
+    private LinearLayout createSetupDetails() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+
+        LinearLayout hero = new LinearLayout(this);
+        hero.setOrientation(LinearLayout.VERTICAL);
+        hero.setPadding(dp(18), dp(20), dp(18), dp(20));
+        TextView eyebrow = text("两步完成设置", 12, palette.accent);
+        eyebrow.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        hero.addView(eyebrow);
+        setupStatus = text("检查输入法状态", 21, palette.textPrimary);
+        setupStatus.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        LinearLayout.LayoutParams statusParams = new LinearLayout.LayoutParams(-1, -2);
+        statusParams.topMargin = dp(8);
+        hero.addView(setupStatus, statusParams);
+        setupStatusDescription = text("按顺序完成下面两步，即可开始打字。", 14, palette.textSecondary);
+        setupStatusDescription.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams statusDescriptionParams = new LinearLayout.LayoutParams(-1, -2);
+        statusDescriptionParams.topMargin = dp(6);
+        hero.addView(setupStatusDescription, statusDescriptionParams);
+        page.addView(hero, new LinearLayout.LayoutParams(-1, -2));
+        bindPalette(hero, () -> {
+            hero.setBackground(roundRect(palette.accentSoft, 18));
+            eyebrow.setTextColor(palette.accent);
+            setupStatus.setTextColor(palette.textPrimary);
+            setupStatusDescription.setTextColor(palette.textSecondary);
+        });
+
+        addSetupStep(page, true, "在系统中启用", "打开系统输入法列表，开启「开心离线输入法」。", v ->
+                startActivity(new Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)));
+        addSetupStep(page, false, "设为当前输入法", "从系统输入法选择器中选择「开心离线输入法」。", v -> {
+            InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (manager != null) manager.showInputMethodPicker();
+        });
+
+        TextView tip = text("完成后返回此页，状态会自动更新。以后也可以在输入框的键盘切换按钮中更换输入法。",
+                13, palette.textSecondary);
+        tip.setLineSpacing(dp(3), 1f);
+        tip.setPadding(dp(4), dp(16), dp(4), 0);
+        page.addView(tip, new LinearLayout.LayoutParams(-1, -2));
+        bindPalette(tip, () -> tip.setTextColor(palette.textSecondary));
+        return page;
+    }
+
+    private void addSetupStep(LinearLayout page, boolean first, String title, String description,
+                              View.OnClickListener listener) {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(16), dp(17), dp(16), dp(16));
+        LinearLayout heading = new LinearLayout(this);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView number = text(first ? "1" : "2", 15, palette.accent);
+        number.setGravity(Gravity.CENTER);
+        number.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        heading.addView(number, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        TextView label = text(title, 17, palette.textPrimary);
+        label.setTypeface(android.graphics.Typeface.create("sans-serif-medium", 0));
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1);
+        labelParams.leftMargin = dp(10);
+        heading.addView(label, labelParams);
+        TextView state = text("待完成", 12, palette.textSecondary);
+        heading.addView(state);
+        card.addView(heading);
+        TextView detail = text(description, 14, palette.textSecondary);
+        detail.setLineSpacing(dp(3), 1f);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+        detailParams.topMargin = dp(10);
+        card.addView(detail, detailParams);
+        TextView action = text(first ? "打开系统设置  ›" : "选择输入法  ›", 15, Color.WHITE);
+        action.setGravity(Gravity.CENTER);
+        action.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        action.setOnClickListener(listener);
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, dp(48));
+        actionParams.topMargin = dp(16);
+        card.addView(action, actionParams);
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+        cardParams.topMargin = dp(12);
+        page.addView(card, cardParams);
+        bindPalette(card, () -> {
+            card.setBackground(roundRect(palette.surface, 18));
+            label.setTextColor(palette.textPrimary);
+            detail.setTextColor(palette.textSecondary);
+        });
+        if (first) {
+            enableStepNumber = number;
+            enableStepState = state;
+            enableSetupAction = action;
+        } else {
+            pickerStepNumber = number;
+            pickerStepState = state;
+            pickerSetupAction = action;
+        }
+    }
+
+    private int inputMethodSetupState() {
+        InputMethodManager manager = (InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+        if (manager == null) return 0;
+        boolean enabled = false;
+        for (InputMethodInfo info : manager.getEnabledInputMethodList()) {
+            if (getPackageName().equals(info.getPackageName())
+                    && OfflineImeService.class.getName().equals(info.getServiceName())) {
+                enabled = true;
+                break;
+            }
+        }
+        if (!enabled) return 0;
+        String selectedId = Settings.Secure.getString(getContentResolver(),
+                Settings.Secure.DEFAULT_INPUT_METHOD);
+        ComponentName selected = selectedId == null ? null : ComponentName.unflattenFromString(selectedId);
+        return selected != null && getPackageName().equals(selected.getPackageName())
+                && OfflineImeService.class.getName().equals(selected.getClassName()) ? 2 : 1;
+    }
+
+    private void refreshInputMethodSetup() {
+        if (homeSetupCard == null || setupStatus == null) return;
+        int state = inputMethodSetupState();
+        homeSetupCard.setVisibility(state == 2 ? View.GONE : View.VISIBLE);
+        homeSetupTitle.setText(state == 0 ? "尚未启用输入法" : "还需选择默认输入法");
+        homeSetupDescription.setText(state == 0 ? "先在系统设置中启用，再选择为当前输入法。"
+                : "已完成启用，再进行最后一步即可开始打字。");
+        homeSetupAction.setText(state == 0 ? "去启用输入法  ›" : "去选择输入法  ›");
+        homeSetupCard.setContentDescription(homeSetupTitle.getText() + "，" + homeSetupDescription.getText()
+                + "，点击查看设置步骤");
+        setupStatus.setText(state == 0 ? "先启用输入法" : state == 1 ? "再选择输入法" : "已准备就绪");
+        setupStatusDescription.setText(state == 0 ? "在系统设置中开启后，返回完成第二步。"
+                : state == 1 ? "输入法已启用，选择它作为当前输入法。" : "开心离线输入法已经启用并选为当前输入法。");
+        enableStepNumber.setText(state > 0 ? "✓" : "1");
+        enableStepState.setText(state > 0 ? "已完成" : "待完成");
+        pickerStepNumber.setText(state == 2 ? "✓" : "2");
+        pickerStepState.setText(state == 2 ? "已完成" : state == 1 ? "进行中" : "待完成");
+        enableSetupAction.setText(state > 0 ? "查看系统设置  ›" : "打开系统设置  ›");
+        pickerSetupAction.setText(state == 2 ? "更换输入法  ›" : "选择输入法  ›");
+        styleSetupAction(enableSetupAction, state == 0, true);
+        styleSetupAction(pickerSetupAction, state == 1, state > 0);
+        enableStepNumber.setBackground(roundRect(palette.accentSoft, 10));
+        pickerStepNumber.setBackground(roundRect(state > 0 ? palette.accentSoft : palette.surfaceMuted, 10));
+        enableStepNumber.setTextColor(palette.accent);
+        pickerStepNumber.setTextColor(state > 0 ? palette.accent : palette.textSecondary);
+        enableStepState.setTextColor(state > 0 ? palette.accent : palette.textSecondary);
+        pickerStepState.setTextColor(state == 2 ? palette.accent : palette.textSecondary);
+    }
+
+    private void styleSetupAction(TextView action, boolean primary, boolean enabled) {
+        action.setEnabled(enabled);
+        action.setTextColor(primary ? Color.WHITE : enabled ? palette.accent : palette.textSecondary);
+        action.setBackground(pressableRoundRect(primary ? palette.accent : palette.accentSoft,
+                primary ? darken(palette.accent) : palette.surfaceMuted, 12));
+        action.setAlpha(enabled ? 1f : 0.65f);
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        refreshInputMethodSetup();
+    }
+
+    @Override public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) refreshInputMethodSetup();
     }
 
     private void addSkinControls(LinearLayout parent) {
@@ -405,7 +585,7 @@ public final class SettingsActivity extends Activity {
             final int preset = i;
             Button button = new Button(this); button.setText(names[i]);
             button.setOnClickListener(v -> {
-                preferences.edit().putInt("key_height", new int[]{250, 270, 340}[preset])
+                preferences.edit().putInt("key_height", new int[]{240, 250, 320}[preset])
                         .putInt("key_font", new int[]{18, 20, 24}[preset]).putInt("key_gap", 2).putInt("key_radius", 12)
                         .putString("candidate_font_size", new String[]{"15", "17", "21"}[preset])
                         .putString("candidate_bar_height", new String[]{"44", "48", "56"}[preset])
@@ -632,14 +812,16 @@ public final class SettingsActivity extends Activity {
         activeSectionPage.setOrientation(LinearLayout.VERTICAL);
         activeSectionPage.setPadding(dp(16), dp(12), dp(16), dp(28));
         activeSectionPage.setBackgroundColor(palette.background);
-        TextView pageSummary = text(summary, 13, palette.textSecondary);
-        pageSummary.setPadding(dp(4), 0, dp(4), dp(16));
-        activeSectionPage.addView(pageSummary, new LinearLayout.LayoutParams(-1, -2));
+        if (!"启用输入法".equals(category)) {
+            TextView pageSummary = text(summary, 13, palette.textSecondary);
+            pageSummary.setPadding(dp(4), 0, dp(4), dp(16));
+            activeSectionPage.addView(pageSummary, new LinearLayout.LayoutParams(-1, -2));
+        }
         LinearLayout sectionCard = null;
         boolean previousRow = false;
         for (View child : activeSectionChildren) {
             detailsContent.removeView(child);
-            styleSecondaryControl(child);
+            if (!"启用输入法".equals(category)) styleSecondaryControl(child);
             if ("setting-subsection".equals(child.getTag())) {
                 activeSectionPage.addView(child);
                 sectionCard = null;
@@ -770,11 +952,11 @@ public final class SettingsActivity extends Activity {
                 + "英文词频词库基于 wordfreq 3.1.1（Apache License 2.0），由项目筛选并加入少量常用技术词。\n\n"
                 + "Apache 许可摘要\n" + readBundledText("en/LICENSE.wordfreq.md")
                 + "\n\n来源说明\n" + readBundledText("en/README.md")
-                + "\n\n" + readBundledText("desktop-import-notice.md")
-                + "\n\n" + readBundledText("category-expansion-notice.md")
+                + "\n\n" + readBundledText("windows-category-import-notice.md")
+                + "\n\n" + readBundledText("lexicon-corrections/NOTICE.md")
                 + "\n\n分类词库语料许可\n" + readBundledText("category-LICENSE.jieba.md")
                 + "\n\n拼音生成许可\n" + readBundledText("category-LICENSE.pypinyin.md")
-                + "\n\n单字读音数据许可\n" + readBundledText("zh/LICENSE.pinyin-data.md")
+                + "\n\n单字读音数据许可\n" + readBundledText("lexicon-notices/LICENSE.pinyin-data.md")
                 + "\n中文词库各数据源的再分发条件须以对应来源和许可为准。公开发布前请核实全部词库的授权，并随应用提供适用的完整许可文本。"
                 + "\n\nEmoji 面板样式\n" + readBundledText("emoji_styles/NOTICE.txt")
                 + "\nTwemoji 图形许可\n" + readBundledText("emoji_styles/licenses/twemoji.txt")

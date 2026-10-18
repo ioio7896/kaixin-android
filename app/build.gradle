@@ -51,7 +51,7 @@ android {
 
     sourceSets {
         main {
-            // 使用本目录已有的、带来源说明的离线词库；不会访问网络。
+            // 本目录的 lexicon 是桌面项目词库的完整镜像；离线随 APK 打包。
             assets.srcDirs += ["../lexicon"]
         }
     }
@@ -97,6 +97,8 @@ dependencies {
 def generatedLexiconDb = rootProject.layout.buildDirectory.file("lexicon-source/pinyin.db").get()
 tasks.register("buildLexiconDatabase", Exec) {
     inputs.files(fileTree("../lexicon") { include "**/*.txt" })
+    inputs.files(fileTree("src/main/assets/lexicon-corrections") { include "**/*.txt"; include "**/*.tsv" })
+    inputs.file("../data_sources/desktop_single_char_readings.txt")
     inputs.file("../tools/build_lexicon_db.py")
     inputs.file("src/main/java/com/example/offlineime/PinyinDictionary.java")
     outputs.file(generatedLexiconDb)

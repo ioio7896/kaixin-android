@@ -6,6 +6,7 @@ import sys
 
 root = Path(__file__).resolve().parents[1]
 lexicon = root / "lexicon"
+corrections = root / "app/src/main/assets/lexicon-corrections"
 # The loader is the single source of truth for bundled upgrade metadata.
 dictionary_source = root / "app/src/main/java/com/example/offlineime/PinyinDictionary.java"
 version_match = re.search(r"LEXICON_VERSION\s*=\s*(\d+)", dictionary_source.read_text(encoding="utf-8"))
@@ -21,7 +22,35 @@ def t9(code: str) -> str:
     table = str.maketrans("abcdefghijklmnopqrstuvwxyz", "22233344455566677778889999")
     return code.translate(table)
 
-def rows(path: Path):
+score_caps = {}
+prefix_caps = {}
+source_scales = {}
+word_caps = {}
+excluded = set()
+with (corrections / "rules.tsv").open(encoding="utf-8") as rules:
+    for line in rules:
+        if not line.strip() or line.startswith("#"):
+            continue
+        columns = line.rstrip("\n").split("\t")
+        action = columns[0]
+        if action == "cap" and len(columns) == 3:
+            score_caps[columns[1]] = int(columns[2])
+        elif action == "cap-prefix" and len(columns) == 3:
+            prefix_caps[columns[1]] = int(columns[2])
+        elif action == "scale-prefix" and len(columns) == 3:
+            percent = int(columns[2])
+            if not 1 <= percent <= 100:
+                raise ValueError(f"Invalid source scale: {line!r}")
+            source_scales[columns[1]] = percent
+        elif action == "cap-word" and len(columns) == 4:
+            word_caps[(columns[1], columns[2])] = int(columns[3])
+        elif action == "exclude" and len(columns) == 3:
+            excluded.add((columns[1], columns[2]))
+        else:
+            raise ValueError(f"Invalid lexicon correction: {line!r}")
+
+
+def rows(path: Path, source_name: str = ""):
     with path.open(encoding="utf-8") as source:
         for line in source:
             if not line or line.startswith("#"):
@@ -30,16 +59,30 @@ def rows(path: Path):
             if len(columns) < 2:
                 continue
             word, raw = columns[0].strip(), columns[1].strip().lower()
+            if (source_name, word) in excluded:
+                continue
             raw = raw.replace("ü", "v").replace("u:", "v")
             code = raw.replace(" ", "").replace("'", "").strip()
             if not word or not code:
                 continue
             try:
                 # Hot overlays keep heat separate from the base frequency in column four.
-                score_column = 3 if path.name.startswith("life_short_hot_") else 2
+                score_column = 3 if path.name.startswith("life_short_hot_") and len(columns) > 3 else 2
                 score = int(columns[score_column].strip()) if len(columns) > score_column else 1
             except ValueError:
                 score = 1
+            scale = 100
+            matching_scales = (prefix for prefix in source_scales if source_name.startswith(prefix))
+            longest = max(matching_scales, key=len, default=None)
+            if longest is not None:
+                scale = source_scales[longest]
+            score = max(1, (score * scale + 50) // 100)
+            cap = score_caps.get(source_name, score)
+            for prefix, limit in prefix_caps.items():
+                if source_name.startswith(prefix):
+                    cap = min(cap, limit)
+            cap = min(cap, word_caps.get((source_name, word), cap))
+            score = min(score, cap)
             yield word, raw, code, score
 
 db = sqlite3.connect(output)
@@ -55,7 +98,6 @@ CREATE TABLE word_transitions(previous TEXT NOT NULL, next TEXT NOT NULL, weight
 """)
 insert = ("INSERT INTO words(code,word,score,kind,t9) VALUES(?,?,?,?,?) "
           "ON CONFLICT(code,word,kind) DO UPDATE SET score=MAX(words.score,excluded.score)")
-pronunciations = {}
 count = 0
 
 
@@ -71,10 +113,13 @@ pronunciation_insert = ("INSERT INTO pronunciations(code,syllables,initials,word
 chinese = list((lexicon / "core").glob("*.txt"))
 chinese += [p for p in (lexicon / "zh").glob("*.txt") if p.name != "single_char_common_8105.txt"]
 chinese += list((lexicon / "zh-ext").glob("*.txt"))
-for path in chinese:
+chinese_sources = [(path, path.relative_to(lexicon).as_posix()) for path in chinese]
+chinese_sources += [(corrections / name, "lexicon-corrections/" + name)
+                    for name in ("idioms.txt", "organizations.txt")]
+for path, source_name in chinese_sources:
     batch = []
     phrase_batch = []
-    for word, raw, code, score in rows(path):
+    for word, raw, code, score in rows(path, source_name):
         batch.append((code, word, score, 0, t9(code)))
         syllables = [s for s in re.split(r"[\s']+", raw) if s]
         initials = "".join(s[0] for s in syllables)
@@ -85,9 +130,6 @@ for path in chinese:
             for mixed in mixed_codes(syllables):
                 if mixed != code and mixed != initials:
                     batch.append((mixed, word, score, 3, t9(mixed)))
-        if len(word) == len(syllables):
-            for char, syllable in zip(word, syllables):
-                pronunciations.setdefault(char, set()).add(re.sub("[^a-z]", "", syllable))
         count += 1
     db.executemany(insert, batch)
     db.executemany(pronunciation_insert, phrase_batch)
@@ -95,23 +137,29 @@ for path in chinese:
 for path in (lexicon / "en").glob("*.txt"):
     db.executemany(insert, ((code, word, score, 2, "") for word, raw, code, score in rows(path)))
 
-single = lexicon / "zh/single_char_common_8105.txt"
-with single.open(encoding="utf-8") as source:
-    batch = []
+single_scores = {}
+with (lexicon / "zh/single_char_common_8105.txt").open(encoding="utf-8") as source:
     for line in source:
-        if not line or line.startswith("#"):
-            continue
-        columns = line.rstrip("\n").split("\t")
-        if len(columns) < 2:
-            continue
-        try:
-            score = int(columns[1])
-        except ValueError:
-            continue
-        for code in pronunciations.get(columns[0].strip(), ()):
-            batch.append((code, columns[0].strip(), score, 0, t9(code)))
-    db.executemany(insert, batch)
-    db.executemany(pronunciation_insert, ((code, code, code[0], word, score) for code,word,score,kind,digits in batch))
+        if line.strip() and not line.startswith("#"):
+            word, score = line.rstrip("\n").split("\t")
+            single_scores[word] = int(score)
+
+# This reading index was generated from the desktop project's pinned pinyin
+# data and pronunciation overrides. Frequencies always come from the mirrored
+# desktop lexicon above, so the index cannot introduce another word corpus.
+single_readings = root / "data_sources/desktop_single_char_readings.txt"
+batch = []
+covered = set()
+for word, reading, _, _ in rows(single_readings):
+    if word not in single_scores:
+        raise ValueError(f"reading index contains a character absent from desktop lexicon: {word}")
+    covered.add(word)
+    batch.append((reading, word, single_scores[word], 0, t9(reading)))
+if covered != single_scores.keys():
+    raise ValueError(f"desktop single-character readings missing {len(single_scores.keys() - covered)} characters")
+db.executemany(insert, batch)
+db.executemany(pronunciation_insert, ((code, code, code[0], word, score)
+                                      for code, word, score, kind, digits in batch))
 
 db.executescript("""
 CREATE INDEX idx_words_kind_code_score ON words(kind,code,score DESC);

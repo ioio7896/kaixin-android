@@ -1,635 +1,600 @@
-# 开心输入法：本地生活场景简拼热度覆盖（独立编写）
-# 格式：词语<TAB>实际读音<TAB>简拼加分<TAB>基础词频
-# 加分分为常用3000、次常用1200、场景600；仅完整简拼/混拼使用，热度不进入基础数据库。
-# 基础词频取已有离线词库同词同读音最高值；新增固定搭配使用6000基础分。
-# 桌面热词来源：zh/life_short_hot_2char.txt；领域热度仅转换为简拼/混拼加分。
-# 开心输入法：生活场景二字高频精选（600 条）
+# 开心输入法：生活场景二字高频精选（597 条）
 # 人工精选行保留原权重，其余按完整词库频率补齐；由 scripts/build_short_hot_lexicons.py 生成。
 # 格式：词语<TAB>全拼<TAB>领域热度
-可以	ke yi	3000	9898
-在吗	zai ma	3000	6000
-外卖	wai mai	3000	4990
-好的	hao de	3000	9300
-快递	kuai di	3000	5785
-收到	shou dao	3000	7577
-社保	she bao	3000	5133
-谢谢	xie xie	3000	8667
-一下	yi xia	1200	8656
-一个	yi ge	1200	10000
-一些	yi xie	1200	9267
-一切	yi qie	1200	8819
-一定	yi ding	1200	9165
-一样	yi yang	1200	9247
-一次	yi ci	1200	8819
-一点	yi dian	1200	8758
-一直	yi zhi	1200	9023
-一种	yi zhong	1200	8961
-一般	yi ban	1200	8778
-一起	yi qi	1200	9063
-上传	shang chuan	1200	7068
-上海	shang hai	1200	8798
-上班	shang ban	1200	6925
-下班	xia ban	1200	5988
-下载	xia zai	1200	9450
-下雨	xia yu	1200	5907
-不会	bu hui	1200	9430
-不同	bu tong	1200	9165
-不断	bu duan	1200	8656
-不是	bu shi	1200	9756
-不有	bu you	1200	8717
-不用	bu yong	1200	7862
-不能	bu neng	1200	9552
-不行	bu xing	1200	7373
-不要	bu yao	1200	9145
-不过	bu guo	1200	9185
-专业	zhuan ye	1200	8636
-世界	shi jie	1200	9572
-东西	dong xi	1200	9002
-两个	liang ge	1200	8982
-个人	ge ren	1200	8798
-中国	zhong guo	1200	9959
-中心	zhong xin	1200	9043
-中是	zhong shi	1200	8819
-中有	zhong you	1200	8595
-为了	wei le	1200	9328
-主要	zhu yao	1200	9389
-举行	ju xing	1200	8615
-之前	zhi qian	1200	8636
-之后	zhi hou	1200	9002
-之间	zhi jian	1200	8697
-买菜	mai cai	1200	3687
-了解	liao jie	1200	9280
-事件	shi jian	1200	8737
-事情	shi qing	1200	8697
-产品	chan pin	1200	8860
-人们	ren men	1200	9043
-人口	ren kou	1200	8819
-人员	ren yuan	1200	8697
-人有	ren you	1200	8697
-人民	ren min	1200	9409
-什么	shen me	1200	9878
-今天	jin tian	1200	9043
-他们	ta men	1200	9939
-代表	dai biao	1200	9043
-以及	yi ji	1200	9430
-以后	yi hou	1200	8656
-任何	ren he	1200	9084
-任务	ren wu	1200	8636
-企业	qi ye	1200	9247
-会议	hui yi	1200	8860
-传统	chuan tong	1200	8595
-但是	dan shi	1200	9450
-作业	zuo ye	1200	7047
-作为	zuo wei	1200	9185
-你们	ni men	1200	9348
-使用	shi yong	1200	9491
-保护	bao hu	1200	8758
-信息	xin xi	1200	8697
-全国	quan guo	1200	9267
-全球	quan qiu	1200	8595
-公司	gong si	1200	9654
-关于	guan yu	1200	8961
-关系	guan xi	1200	9124
-其中	qi zhong	1200	9247
-其他	qi ta	1200	9409
-其实	qi shi	1200	8595
-内容	nei rong	1200	9002
-再见	zai jian	1200	6640
-决定	jue ding	1200	9267
-准备	zhun bei	1200	8717
-出来	chu lai	1200	9104
-出现	chu xian	1200	9267
-出门	chu men	1200	6681
-删除	shan chu	1200	6884
-加油	jia you	1200	7027
-加班	jia ban	1200	5438
-包括	bao kuo	1200	9287
-北京	bei jing	1200	9247
-医保	yi bao	1200	5113
-单位	dan wei	1200	9370
-历史	li shi	1200	9450
-原因	yuan yin	1200	8636
-参与	can yu	1200	8636
-参加	can jia	1200	9460
-发展	fa zhan	1200	9674
-发现	fa xian	1200	9287
-发生	fa sheng	1200	9409
-只是	zhi shi	1200	9124
-只有	zhi you	1200	9084
-可能	ke neng	1200	9633
-台湾	tai wan	1200	8900
-吃饭	chi fan	1200	7149
-合作	he zuo	1200	8656
-同学	tong xue	1200	7556
-同时	tong shi	1200	9328
-哪里	na li	1200	8697
-啤酒	pi jiu	1200	6192
-喜欢	xi huan	1200	9206
-回头	hui tou	1200	6558
-回家	hui jia	1200	7841
-因为	yin wei	1200	9776
-因此	yin ci	1200	9063
-国内	guo nei	1200	8839
-国家	guo jia	1200	9857
-国际	guo ji	1200	9511
-地区	di qu	1200	9511
-地址	di zhi	1200	7312
-地方	di fang	1200	9389
-城市	cheng shi	1200	9023
-处理	chu li	1200	9280
-多少	duo shao	1200	8615
-大学	da xue	1200	8982
-大家	da jia	1200	8941
-天气	tian qi	1200	7332
-女人	nv ren	1200	8636
-如何	ru he	1200	9267
-如果	ru guo	1200	9593
-存在	cun zai	1200	8697
-学习	xue xi	1200	8697
-学校	xue xiao	1200	8982
-学生	xue sheng	1200	9185
-孩子	hai zi	1200	8961
-安全	an quan	1200	8961
-完全	wan quan	1200	8860
-完成	wan cheng	1200	8778
-宝宝	bao bao	1200	6884
-密码	mi ma	1200	7006
-对于	dui yu	1200	9002
-小时	xiao shi	1200	8636
-就是	jiu shi	1200	9715
-工作	gong zuo	1200	9613
-工资	gong zi	1200	7312
-已经	yi jing	1200	9715
-市场	shi chang	1200	9023
-希望	xi wang	1200	9185
-应该	ying gai	1200	9910
-建立	jian li	1200	8860
-建设	jian she	1200	8900
-开会	kai hui	1200	6457
-开始	kai shi	1200	9674
-开心	kai xin	1200	8667
-当时	dang shi	1200	8880
-当然	dang ran	1200	8737
-影响	ying xiang	1200	9226
-很多	hen duo	1200	8921
-得到	de dao	1200	8860
-微信	wei xin	1200	8800
-必须	bi xu	1200	9328
-怎么	zen me	1200	9735
-总统	zong tong	1200	8697
-情况	qing kuang	1200	9430
-感觉	gan jue	1200	8615
-成为	cheng wei	1200	9532
-成功	cheng gong	1200	8697
-成立	cheng li	1200	8636
-我人	wo ren	1200	8798
-我们	wo men	1200	9980
-或者	huo zhe	1200	8697
-战争	zhan zheng	1200	8697
-房子	fang zi	1200	7353
-所以	suo yi	1200	9308
-所有	suo you	1200	9308
-手机	shou ji	1200	8574
-打车	da che	1200	4644
-技术	ji shu	1200	9185
-报告	bao gao	1200	8697
-拥有	yong you	1200	8615
-挂号	gua hao	1200	4257
-接受	jie shou	1200	8676
-提供	ti gong	1200	9185
-提出	ti chu	1200	8758
-支付	zhi fu	1200	7577
-支持	zhi chi	1200	9043
-收藏	shou cang	1200	6518
-改变	gai bian	1200	8676
-放心	fang xin	1200	6823
-政府	zheng fu	1200	9654
-政治	zheng zhi	1200	9450
-政策	zheng ce	1200	8676
-故事	gu shi	1200	8656
-教育	jiao yu	1200	9002
-文件	wen jian	1200	7882
-文化	wen hua	1200	9206
-新闻	xin wen	1200	8900
-方便	fang bian	1200	7353
-方式	fang shi	1200	8982
-方法	fang fa	1200	8676
-方面	fang mian	1200	8656
-无法	wu fa	1200	8819
-日本	ri ben	1200	9572
-早安	zao an	1200	6049
-早餐	zao can	1200	6090
-时代	shi dai	1200	8615
-时候	shi hou	1200	9511
-时期	shi qi	1200	8676
-时间	shi jian	1200	9532
-明天	ming tian	1200	7882
-明白	ming bai	1200	8208
-是否	shi fou	1200	8636
-晚安	wan an	1200	6619
-晚餐	wan can	1200	5886
-更新	geng xin	1200	7821
-最后	zui hou	1200	9023
-最大	zui da	1200	8697
-有些	you xie	1200	8656
-有人	you ren	1200	8900
-有关	you guan	1200	8860
-朋友	peng you	1200	8982
-服务	fu wu	1200	9084
-机会	ji hui	1200	8595
-机构	ji gou	1200	8737
-根据	gen ju	1200	9104
-正在	zheng zai	1200	8676
-比较	bi jiao	1200	8697
-民主	min zhu	1200	8758
-水果	shui guo	1200	6619
-没事	mei shi	1200	6742
-没有	mei you	1200	9919
-没空	mei kong	1200	4440
-没问题	mei wen ti	1200	9001
-法律	fa lv	1200	8737
-注意	zhu yi	1200	8432
-活动	huo dong	1200	9471
-消息	xiao xi	1200	8228
-游戏	you xi	1200	9063
-然后	ran hou	1200	8839
-照片	zhao pian	1200	8697
-爱你	ai ni	1200	7312
-特别	te bie	1200	9002
-独立	du li	1200	8595
-环境	huan jing	1200	8778
-现在	xian zai	1200	9756
-甚至	shen zhi	1200	8758
-生产	sheng chan	1200	8860
-生日	sheng ri	1200	7027
-生活	sheng huo	1200	9369
-由于	you yu	1200	9002
-申请	shen qing	1200	7923
-电影	dian ying	1200	9165
-电脑	dian nao	1200	7984
-电话	dian hua	1200	8615
-登录	deng lu	1200	6070
-目前	mu qian	1200	8982
-直接	zhi jie	1200	8717
-相关	xiang guan	1200	8860
-看到	kan dao	1200	9063
-真的	zhen de	1200	9430
-睡觉	shui jiao	1200	9450
-知道	zhi dao	1200	9593
-研究	yan jiu	1200	9124
-社会	she hui	1200	9613
-科学	ke xue	1200	8636
-科技	ke ji	1200	8676
-等下	deng xia	1200	6000
-管理	guan li	1200	8819
-系统	xi tong	1200	9104
-红包	hong bao	1200	5805
-组织	zu zhi	1200	9430
-经济	jing ji	1200	9491
-结束	jie shu	1200	8513
-结果	jie guo	1200	9550
-继续	ji xu	1200	9023
-网站	wang zhan	1200	9389
-网络	wang luo	1200	8778
-美国	mei guo	1200	9796
-老师	lao shi	1200	8310
-考试	kao shi	1200	7536
-而且	er qie	1200	9043
-能力	neng li	1200	8615
-能够	neng gou	1200	8819
-自己	zi ji	1200	9837
-自由	zi you	1200	8900
-艺术	yi shu	1200	8615
-英国	ying guo	1200	8697
-获得	huo de	1200	9002
-蔬菜	shu cai	1200	6497
-虽然	sui ran	1200	9063
-行为	xing wei	1200	9190
-表示	biao shi	1200	8982
-要求	yao qiu	1200	9185
-规定	gui ding	1200	8636
-视频	shi pin	1200	8737
-觉得	jue de	1200	9640
-解决	jie jue	1200	8615
-计划	ji hua	1200	9552
-订单	ding dan	1200	5846
-认为	ren wei	1200	9532
-认识	ren shi	1200	8656
-记者	ji zhe	1200	8819
-许多	xu duo	1200	9002
-设计	she ji	1200	8717
-请假	qing jia	1200	4990
-购物	gou wu	1200	6782
-资料	zi liao	1200	8982
-资源	zi yuan	1200	8656
-起来	qi lai	1200	9206
-超市	chao shi	1200	6436
-超过	chao guo	1200	8595
-转账	zhuan zhang	1200	4970
-软件	ruan jian	1200	7882
-过去	guo qu	1200	8880
-过程	guo cheng	1200	8737
-运动	yun dong	1200	8941
-还是	hai shi	1200	9730
-还有	hai you	1200	9820
-这个	zhe ge	1200	9878
-这么	zhe me	1200	9124
-这些	zhe xie	1200	9695
-这和	zhe he	1200	8656
-这在	zhe zai	1200	8860
-这是	zhe shi	1200	8982
-这有	zhe you	1200	8636
-这样	zhe yang	1200	9674
-这的	zhe de	1200	9043
-这种	zhe zhong	1200	9369
-这里	zhe li	1200	9084
-进入	jin ru	1200	8819
-进行	jin xing	1200	9593
-退款	tui kuan	1200	4440
-选择	xuan ze	1200	8839
-通过	tong guo	1200	9348
-那个	na ge	1200	8839
-那么	na me	1200	9185
-那些	na xie	1200	8880
-部分	bu fen	1200	8941
-重要	zhong yao	1200	9640
-问题	wen ti	1200	9817
-集团	ji tuan	1200	8656
-需要	xu yao	1200	9532
-非常	fei chang	1200	8921
-音乐	yin yue	1200	8920
-项目	xiang mu	1200	8676
-领导	ling dao	1200	8819
-香港	xiang gang	1200	9389
-马上	ma shang	1200	7332
-验证码	yan zheng ma	1200	8163
-一位	yi wei	600	8289
-一天	yi tian	600	8228
-上人	shang ren	600	8391
-上年	shang nian	600	8310
-不上	bu shang	600	8412
-不为	bu wei	600	8574
-不仅	bu jin	600	8330
-不到	bu dao	600	8289
-不来	bu lai	600	8289
-不说	bu shuo	600	8412
-不还	bu hai	600	8188
-与会	yu hui	600	8228
-专家	zhuan jia	600	8371
-世纪	shi ji	600	8554
-严重	yan zhong	600	8554
-中中	zhong zhong	600	8432
-中为	zhong wei	600	8473
-中会	zhong hui	600	8249
-中到	zhong dao	600	8249
-中央	zhong yang	600	8310
-中年	zhong nian	600	8412
-中来	zhong lai	600	8208
-中要	zhong yao	600	8208
-中说	zhong shuo	600	8330
-主席	zhu xi	600	8452
-之一	zhi yi	600	8391
-产生	chan sheng	600	8574
-人上	ren shang	600	8391
-人中	ren zhong	600	8513
-人到	ren dao	600	8310
-人年	ren nian	600	8513
-人来	ren lai	600	8269
-人物	ren wu	600	8330
-人类	ren lei	600	8574
-人要	ren yao	600	8289
-今年	jin nian	600	8269
-介绍	jie shao	600	8269
-他来	ta lai	600	8228
-以上	yi shang	600	8452
-以下	yi xia	600	8473
-以为	yi wei	600	8269
-以前	yi qian	600	8310
-以来	yi lai	600	8452
-价值	jia zhi	600	8432
-价格	jia ge	600	8371
-会为	hui wei	600	8269
-位于	wei yu	600	8208
-余额	yu e	600	6171
-作品	zuo pin	600	8534
-例如	li ru	600	8249
-保证	bao zheng	600	8228
-健康	jian kang	600	8228
-儿子	er zi	600	8289
-充电	chong dian	600	5927
-先生	xian sheng	600	8310
-免费	mian fei	600	8208
-全部	quan bu	600	8289
-公开	gong kai	600	8289
-共同	gong tong	600	8249
-关注	guan zhu	600	8310
-具有	ju you	600	8513
-农业	nong ye	600	8249
-几个	ji ge	600	8452
-分别	fen bie	600	8310
-分析	fen xi	600	8574
-利用	li yong	600	8473
-别人	bie ren	600	8330
-制度	zhi du	600	8473
-力量	li liang	600	8249
-办法	ban fa	600	8452
-功能	gong neng	600	8269
-加入	jia ru	600	8412
-努力	nu li	600	8493
-区域	qu yu	600	8310
-医院	yi yuan	600	8371
-印度	yin du	600	8208
-反对	fan dui	600	8412
-发布	fa bu	600	8412
-发票	fa piao	600	5337
-发表	fa biao	600	8289
-取得	qu de	600	8249
-受到	shou dao	600	8534
-变化	bian hua	600	8391
-变成	bian cheng	600	8208
-另外	ling wai	600	8208
-只要	zhi yao	600	8493
-可是	ke shi	600	8350
-各种	ge zhong	600	8574
-同样	tong yang	600	8249
-后来	hou lai	600	8330
-告诉	gao su	600	8574
-商城	shang cheng	600	6500
-图片	tu pian	600	8452
-土地	tu di	600	8249
-地铁	di tie	600	7149
-坚持	jian chi	600	8269
-基本	ji ben	600	8432
-基础	ji chu	600	8534
-增加	zeng jia	600	8554
-增长	zeng zhang	600	8391
-声音	sheng yin	600	8208
-大量	da liang	600	8228
-女儿	nv er	600	8208
-女性	nv xing	600	8330
-如此	ru ci	600	8493
-妈妈	ma ma	600	8208
-媒体	mei ti	600	8493
-学院	xue yuan	600	8269
-它们	ta men	600	8574
-官方	guan fang	600	8391
-实施	shi shi	600	8249
-实现	shi xian	600	8513
-实际	shi ji	600	8228
-宣布	xuan bu	600	8289
-家庭	jia ting	600	8534
-容易	rong yi	600	8228
-对人	dui ren	600	8493
-对会	dui hui	600	8228
-对要	dui yao	600	8208
-导致	dao zhi	600	8432
-将在	jiang zai	600	8208
-将是	jiang shi	600	8208
-属于	shu yu	600	8412
-工业	gong ye	600	8534
-工程	gong cheng	600	8310
-帮助	bang zhu	600	8554
-年代	nian dai	600	8452
-年会	nian hui	600	8228
-并且	bing qie	600	8554
-并在	bing zai	600	8208
-应用	ying yong	600	8208
-建筑	jian zhu	600	8412
-建议	jian yi	600	8371
-开发	kai fa	600	8452
-开放	kai fang	600	8228
-当地	dang di	600	8289
-形成	xing cheng	600	8412
-德国	de guo	600	8391
-怎样	zen yang	600	8513
-想要	xiang yao	600	8208
-意思	yi si	600	8269
-意见	yi jian	600	8330
-成员	cheng yuan	600	8452
-我个	wo ge	600	8228
-我后	wo hou	600	8208
-我国	wo guo	600	8473
-我来	wo lai	600	8391
-我还	wo hai	600	8289
-才能	cai neng	600	8493
-执行	zhi xing	600	8330
-找到	zhao dao	600	8269
-投资	tou zi	600	8574
-持续	chi xu	600	8228
-指出	zhi chu	600	8371
-控制	kong zhi	600	8513
-提高	ti gao	600	8269
-改革	gai ge	600	8350
-数据	shu ju	600	8829
-整个	zheng ge	600	8493
-旅游	lv you	600	8249
-是将	shi jiang	600	8208
-显示	xian shi	600	8391
-最终	zui zhong	600	8208
-最近	zui jin	600	8289
-最高	zui gao	600	8330
-有会	you hui	600	8371
-有来	you lai	600	8330
-有要	you yao	600	8350
-期间	qi jian	600	8574
-未来	wei lai	600	8452
-机关	ji guan	600	8330
-权利	quan li	600	8371
-权力	quan li	600	8228
-条件	tiao jian	600	8371
-来自	lai zi	600	8493
-来说	lai shuo	600	8371
-标准	biao zhun	600	8371
-根本	gen ben	600	8513
-欧洲	ou zhou	600	8473
-正式	zheng shi	600	8249
-母亲	mu qin	600	8350
-每个	mei ge	600	8473
-比赛	bi sai	600	8473
-民族	min zu	600	8249
-永远	yong yuan	600	8228
-汽车	qi che	600	8208
-法国	fa guo	600	8574
-然而	ran er	600	8228
-父亲	fu qin	600	8310
-理论	li lun	600	8310
-用户	yong hu	600	8330
-电视	dian shi	600	8228
-男人	nan ren	600	8513
-的将	de jiang	600	8289
-的并	de bing	600	8289
-的话	de hua	600	8432
-的还	de hai	600	8452
-目标	mu biao	600	8574
-相信	xiang xin	600	8534
-相当	xiang dang	600	8208
-看看	kan kan	600	8228
-真正	zhen zheng	600	8574
-确定	que ding	600	8330
-社区	she qu	600	8289
-离开	li kai	600	8432
-空间	kong jian	600	8208
-第一	di yi	600	8534
-简单	jian dan	600	8310
-精神	jing shen	600	8228
-系列	xi lie	600	8350
-组成	zu cheng	600	8249
-终于	zhong yu	600	8208
-经过	jing guo	600	8493
-经验	jing yan	600	8391
-结构	jie gou	600	8310
-综合	zong he	600	8310
-美元	mei yuan	600	8208
-群众	qun zhong	600	8493
-考虑	kao lv	600	8228
-联系	lian xi	600	8350
-自然	zi ran	600	8289
-范围	fan wei	600	8269
-行动	xing dong	600	9010
-行政	xing zheng	600	8412
-表现	biao xian	600	8473
-解释	jie shi	600	8330
-警察	jing cha	600	8350
-讨论	tao lun	600	8310
-记录	ji lu	600	8350
-设备	she bei	600	8208
-证明	zheng ming	600	8310
-语言	yu yan	600	8391
-说明	shuo ming	600	8371
-调查	diao cha	600	9100
-负责	fu ze	600	8534
-足球	zu qiu	600	8208
-身边	shen bian	600	7638
-达到	da dao	600	8473
-还和	hai he	600	8249
-还在	hai zai	600	8350
-还我	hai wo	600	8289
-这上	zhe shang	600	8350
-这不	zhe bu	600	8574
-这与	zhe yu	600	8452
-这中	zhe zhong	600	8452
-这为	zhe wei	600	8493
-这也	zhe ye	600	8513
-这人	zhe ren	600	8554
-这会	zhe hui	600	8269
-这到	zhe dao	600	8269
-这对	zhe dui	600	8432
-这就	zhe jiu	600	8412
-这年	zhe nian	600	8452
-这来	zhe lai	600	8228
-这次	zhe ci	600	8371
-这要	zhe yao	600	8249
-这说	zhe shuo	600	8350
-这都	zhe dou	600	8391
-选举	xuan ju	600	8493
-造成	zao cheng	600	8554
-那里	na li	600	8289
-部门	bu men	600	8371
-采用	cai yong	600	8310
-里面	li mian	600	8208
-重点	zhong dian	600	8228
-银行	yin hang	600	8829
-除了	chu le	600	8432
-革命	ge ming	600	8452
-韩国	han guo	600	8595
-领域	ling yu	600	8208
+好的	hao de	8500
+结束	jie shu	8500
+音乐	yin yue	8500
+房子	fang zi	8500
+生日	sheng ri	8500
+上班	shang ban	8500
+宝宝	bao bao	8500
+购物	gou wu	8500
+再见	zai jian	8500
+水果	shui guo	8500
+蔬菜	shu cai	8500
+超市	chao shi	8500
+啤酒	pi jiu	8500
+早餐	zao can	8500
+下班	xia ban	8500
+晚餐	wan can	8500
+快递	kuai di	8500
+外卖	wai mai	8500
+买菜	mai cai	8500
+收到	shou dao	9000
+没事	mei shi	9000
+谢谢	xie xie	9000
+马上	ma shang	9000
+已经	yi jing	9000
+正在	zheng zai	9000
+现在	xian zai	9000
+知道	zhi dao	9000
+明白	ming bai	9000
+放心	fang xin	9000
+注意	zhu yi	9000
+方便	fang bian	9000
+可以	ke yi	9000
+不行	bu xing	9000
+没空	mei kong	9000
+等下	deng xia	9000
+回头	hui tou	9000
+晚安	wan an	9000
+早安	zao an	9000
+加油	jia you	9000
+开心	kai xin	9000
+喜欢	xi huan	9000
+手机	shou ji	9000
+电脑	dian nao	9000
+微信	wei xin	9000
+网络	wang luo	9000
+软件	ruan jian	9000
+登录	deng lu	9000
+下载	xia zai	9000
+更新	geng xin	9000
+密码	mi ma	9000
+地址	di zhi	9000
+电话	dian hua	9000
+工作	gong zuo	9000
+会议	hui yi	9000
+项目	xiang mu	9000
+文件	wen jian	9000
+资料	zi liao	9000
+考试	kao shi	9000
+作业	zuo ye	9000
+老师	lao shi	9000
+同学	tong xue	9000
+天气	tian qi	9000
+下雨	xia yu	9000
+回家	hui jia	9000
+出门	chu men	9000
+吃饭	chi fan	9000
+睡觉	shui jiao	9000
+一个	yi ge	8800
+我们	wo men	8799
+中国	zhong guo	8798
+他们	ta men	8797
+没有	mei you	8795
+什么	shen me	8794
+这个	zhe ge	8793
+国家	guo jia	8792
+自己	zi ji	8791
+问题	wen ti	8790
+美国	mei guo	8789
+因为	yin wei	8788
+不是	bu shi	8786
+怎么	zen me	8785
+就是	jiu shi	8784
+这些	zhe xie	8783
+发展	fa zhan	8782
+开始	kai shi	8781
+这样	zhe yang	8780
+公司	gong si	8779
+政府	zheng fu	8777
+可能	ke neng	8776
+社会	she hui	8775
+如果	ru guo	8774
+进行	jin xing	8773
+世界	shi jie	8772
+日本	ri ben	8771
+不能	bu neng	8770
+计划	ji hua	8768
+成为	cheng wei	8767
+时间	shi jian	8766
+认为	ren wei	8765
+需要	xu yao	8764
+国际	guo ji	8763
+地区	di qu	8762
+时候	shi hou	8761
+使用	shi yong	8759
+经济	jing ji	8758
+活动	huo dong	8757
+但是	dan shi	8756
+历史	li shi	8755
+应该	ying gai	8754
+政治	zheng zhi	8753
+不会	bu hui	8752
+以及	yi ji	8750
+情况	qing kuang	8749
+真的	zhen de	8748
+组织	zu zhi	8747
+人民	ren min	8746
+其他	qi ta	8745
+发生	fa sheng	8744
+主要	zhu yao	8742
+地方	di fang	8741
+网站	wang zhan	8740
+香港	xiang gang	8739
+生活	sheng huo	8738
+这种	zhe zhong	8737
+你们	ni men	8736
+通过	tong guo	8735
+为了	wei le	8733
+同时	tong shi	8732
+必须	bi xu	8731
+所以	suo yi	8730
+所有	suo you	8729
+包括	bao kuo	8728
+发现	fa xian	8727
+还有	hai you	8726
+一些	yi xie	8724
+全国	quan guo	8723
+决定	jue ding	8722
+出现	chu xian	8721
+如何	ru he	8720
+还是	hai shi	8719
+一样	yi yang	8718
+企业	qi ye	8717
+其中	qi zhong	8715
+北京	bei jing	8714
+觉得	jue de	8713
+重要	zhong yao	8712
+影响	ying xiang	8711
+文化	wen hua	8710
+起来	qi lai	8709
+不过	bu guo	8708
+作为	zuo wei	8706
+学生	xue sheng	8705
+希望	xi wang	8704
+技术	ji shu	8703
+提供	ti gong	8702
+要求	yao qiu	8701
+那么	na me	8700
+一定	yi ding	8698
+不同	bu tong	8697
+电影	dian ying	8696
+不要	bu yao	8695
+关系	guan xi	8694
+只是	zhi shi	8693
+研究	yan jiu	8692
+这么	zhe me	8691
+出来	chu lai	8689
+根据	gen ju	8688
+系统	xi tong	8687
+任何	ren he	8686
+只有	zhi you	8685
+服务	fu wu	8684
+结果	jie guo	8683
+这里	zhe li	8682
+一起	yi qi	8680
+因此	yin ci	8679
+游戏	you xi	8678
+看到	kan dao	8677
+虽然	sui ran	8676
+中心	zhong xin	8675
+人们	ren men	8674
+今天	jin tian	8673
+代表	dai biao	8671
+支持	zhi chi	8670
+而且	er qie	8669
+这的	zhe de	8668
+一直	yi zhi	8667
+城市	cheng shi	8666
+市场	shi chang	8665
+最后	zui hou	8664
+继续	ji xu	8662
+东西	dong xi	8661
+之后	zhi hou	8660
+内容	nei rong	8659
+对于	dui yu	8658
+教育	jiao yu	8657
+特别	te bie	8656
+由于	you yu	8655
+获得	huo de	8653
+许多	xu duo	8652
+两个	liang ge	8651
+大学	da xue	8650
+学校	xue xiao	8649
+方式	fang shi	8648
+朋友	peng you	8647
+目前	mu qian	8645
+表示	biao shi	8644
+这是	zhe shi	8643
+一种	yi zhong	8642
+关于	guan yu	8641
+孩子	hai zi	8640
+安全	an quan	8639
+大家	da jia	8638
+运动	yun dong	8636
+部分	bu fen	8635
+很多	hen duo	8634
+非常	fei chang	8633
+台湾	tai wan	8632
+建设	jian she	8631
+新闻	xin wen	8630
+有人	you ren	8629
+自由	zi you	8627
+参加	can jia	8626
+当时	dang shi	8625
+过去	guo qu	8624
+那些	na xie	8623
+产品	chan pin	8622
+单位	dan wei	8621
+完全	wan quan	8620
+建立	jian li	8618
+得到	de dao	8617
+有关	you guan	8616
+生产	sheng chan	8615
+相关	xiang guan	8614
+这在	zhe zai	8613
+国内	guo nei	8612
+然后	ran hou	8611
+选择	xuan ze	8609
+那个	na ge	8608
+一切	yi qie	8607
+一次	yi ci	8606
+中是	zhong shi	8605
+人口	ren kou	8604
+无法	wu fa	8603
+管理	guan li	8602
+能够	neng gou	8600
+记者	ji zhe	8599
+进入	jin ru	8598
+领导	ling dao	8597
+上海	shang hai	8596
+个人	ge ren	8595
+我人	wo ren	8594
+一般	yi ban	8592
+完成	wan cheng	8591
+环境	huan jing	8590
+一点	yi dian	8589
+保护	bao hu	8588
+提出	ti chu	8587
+民主	min zhu	8586
+甚至	shen zhi	8585
+事件	shi jian	8583
+当然	dang ran	8582
+机构	ji gou	8581
+法律	fa lv	8580
+视频	shi pin	8579
+过程	guo cheng	8578
+不有	bu you	8577
+准备	zhun bei	8576
+直接	zhi jie	8574
+设计	she ji	8573
+之间	zhi jian	8572
+事情	shi qing	8571
+人员	ren yuan	8570
+人有	ren you	8569
+信息	xin xi	8568
+哪里	na li	8567
+存在	cun zai	8565
+学习	xue xi	8564
+总统	zong tong	8563
+成功	cheng gong	8562
+或者	huo zhe	8561
+战争	zhan zheng	8560
+报告	bao gao	8559
+最大	zui da	8558
+比较	bi jiao	8556
+照片	zhao pian	8555
+英国	ying guo	8554
+接受	jie shou	8553
+改变	gai bian	8552
+政策	zheng ce	8551
+方法	fang fa	8550
+时期	shi qi	8548
+科技	ke ji	8547
+一下	yi xia	8546
+不断	bu duan	8545
+以后	yi hou	8544
+合作	he zuo	8543
+故事	gu shi	8542
+方面	fang mian	8541
+有些	you xie	8539
+认识	ren shi	8538
+资源	zi yuan	8537
+这和	zhe he	8536
+集团	ji tuan	8535
+专业	zhuan ye	8534
+之前	zhi qian	8533
+任务	ren wu	8532
+原因	yuan yin	8530
+参与	can yu	8529
+女人	nv ren	8528
+小时	xiao shi	8527
+成立	cheng li	8526
+是否	shi fou	8525
+科学	ke xue	8524
+规定	gui ding	8523
+这有	zhe you	8521
+举行	ju xing	8520
+了解	liao jie	8519
+处理	chu li	8518
+多少	duo shao	8517
+感觉	gan jue	8516
+拥有	yong you	8515
+时代	shi dai	8514
+能力	neng li	8512
+艺术	yi shu	8511
+解决	jie jue	8510
+中有	zhong you	8509
+传统	chuan tong	8508
+全球	quan qiu	8507
+其实	qi shi	8506
+机会	ji hui	8505
+独立	du li	8503
+行为	xing wei	8502
+超过	chao guo	8501
+韩国	han guo	8500
+不为	bu wei	8499
+产生	chan sheng	8498
+人类	ren lei	8497
+分析	fen xi	8495
+各种	ge zhong	8494
+告诉	gao su	8493
+它们	ta men	8492
+投资	tou zi	8491
+期间	qi jian	8490
+法国	fa guo	8489
+目标	mu biao	8488
+真正	zhen zheng	8486
+调查	diao cha	8485
+这不	zhe bu	8484
+世纪	shi ji	8483
+严重	yan zhong	8482
+增加	zeng jia	8481
+帮助	bang zhu	8480
+并且	bing qie	8479
+行动	xing dong	8477
+这人	zhe ren	8476
+造成	zao cheng	8475
+作品	zuo pin	8474
+受到	shou dao	8473
+基础	ji chu	8472
+家庭	jia ting	8471
+工业	gong ye	8470
+相信	xiang xin	8468
+第一	di yi	8467
+负责	fu ze	8466
+人中	ren zhong	8465
+人年	ren nian	8464
+具有	ju you	8463
+实现	shi xian	8462
+怎样	zen yang	8461
+控制	kong zhi	8459
+根本	gen ben	8458
+男人	nan ren	8457
+这也	zhe ye	8456
+努力	nu li	8455
+只要	zhi yao	8454
+如此	ru ci	8453
+媒体	mei ti	8452
+对人	dui ren	8450
+才能	cai neng	8449
+整个	zheng ge	8448
+来自	lai zi	8447
+经过	jing guo	8446
+群众	qun zhong	8445
+这为	zhe wei	8444
+选举	xuan ju	8442
+中为	zhong wei	8441
+以下	yi xia	8440
+利用	li yong	8439
+制度	zhi du	8438
+我国	wo guo	8437
+欧洲	ou zhou	8436
+每个	mei ge	8435
+比赛	bi sai	8433
+表现	biao xian	8432
+达到	da dao	8431
+主席	zhu xi	8430
+以上	yi shang	8429
+以来	yi lai	8428
+几个	ji ge	8427
+办法	ban fa	8426
+图片	tu pian	8424
+年代	nian dai	8423
+开发	kai fa	8422
+成员	cheng yuan	8421
+未来	wei lai	8420
+的还	de hai	8419
+这与	zhe yu	8418
+这中	zhe zhong	8417
+这年	zhe nian	8415
+革命	ge ming	8414
+中中	zhong zhong	8413
+价值	jia zhi	8412
+基本	ji ben	8411
+导致	dao zhi	8410
+的话	de hua	8409
+离开	li kai	8408
+这对	zhe dui	8406
+除了	chu le	8405
+不上	bu shang	8404
+不说	bu shuo	8403
+中年	zhong nian	8402
+加入	jia ru	8401
+反对	fan dui	8400
+发布	fa bu	8398
+属于	shu yu	8397
+建筑	jian zhu	8396
+形成	xing cheng	8395
+数据	shu ju	8394
+行政	xing zheng	8393
+这就	zhe jiu	8392
+银行	yin hang	8391
+上人	shang ren	8389
+之一	zhi yi	8388
+人上	ren shang	8387
+变化	bian hua	8386
+增长	zeng zhang	8385
+官方	guan fang	8384
+德国	de guo	8383
+我来	wo lai	8382
+显示	xian shi	8380
+经验	jing yan	8379
+语言	yu yan	8378
+这都	zhe dou	8377
+专家	zhuan jia	8376
+价格	jia ge	8375
+医院	yi yuan	8374
+建议	jian yi	8373
+指出	zhi chu	8371
+有会	you hui	8370
+权利	quan li	8369
+条件	tiao jian	8368
+来说	lai shuo	8367
+标准	biao zhun	8366
+说明	shuo ming	8365
+这次	zhe ci	8364
+部门	bu men	8362
+可是	ke shi	8361
+改革	gai ge	8360
+有要	you yao	8359
+母亲	mu qin	8358
+系列	xi lie	8357
+联系	lian xi	8356
+警察	jing cha	8355
+记录	ji lu	8353
+还在	hai zai	8352
+这上	zhe shang	8351
+这说	zhe shuo	8350
+不仅	bu jin	8349
+中说	zhong shuo	8348
+人物	ren wu	8347
+别人	bie ren	8345
+后来	hou lai	8344
+女性	nv xing	8343
+意见	yi jian	8342
+执行	zhi xing	8341
+最高	zui gao	8340
+有来	you lai	8339
+机关	ji guan	8338
+用户	yong hu	8336
+确定	que ding	8335
+解释	jie shi	8334
+上年	shang nian	8333
+中央	zhong yang	8332
+人到	ren dao	8331
+以前	yi qian	8330
+先生	xian sheng	8329
+关注	guan zhu	8327
+分别	fen bie	8326
+区域	qu yu	8325
+工程	gong cheng	8324
+父亲	fu qin	8323
+理论	li lun	8322
+简单	jian dan	8321
+结构	jie gou	8320
+综合	zong he	8318
+讨论	tao lun	8317
+证明	zheng ming	8316
+采用	cai yong	8315
+一位	yi wei	8314
+不到	bu dao	8313
+不来	bu lai	8312
+人要	ren yao	8311
+儿子	er zi	8309
+全部	quan bu	8308
+公开	gong kai	8307
+发表	fa biao	8306
+宣布	xuan bu	8305
+当地	dang di	8304
+我还	wo hai	8303
+最近	zui jin	8302
+社区	she qu	8298
+自然	zi ran	8297
+还我	hai wo	8296
+那里	na li	8295
+人来	ren lai	8294
+今年	jin nian	8292
+介绍	jie shao	8291
+以为	yi wei	8290
+会为	hui wei	8289
+功能	gong neng	8288
+坚持	jian chi	8287
+学院	xue yuan	8286
+意思	yi si	8285
+找到	zhao dao	8283
+提高	ti gao	8282
+范围	fan wei	8281
+这会	zhe hui	8280
+这到	zhe dao	8279
+中会	zhong hui	8278
+中到	zhong dao	8277
+例如	li ru	8276
+共同	gong tong	8274
+农业	nong ye	8273
+力量	li liang	8272
+取得	qu de	8271
+同样	tong yang	8270
+土地	tu di	8269
+实施	shi shi	8268
+旅游	lv you	8267
+正式	zheng shi	8265
+民族	min zu	8264
+组成	zu cheng	8263
+还和	hai he	8262
+这要	zhe yao	8261
+一天	yi tian	8260
+与会	yu hui	8259
+他来	ta lai	8258
+保证	bao zheng	8256
+健康	jian kang	8255
+大量	da liang	8254
+实际	shi ji	8253
+容易	rong yi	8252
+对会	dui hui	8251
+年会	nian hui	8250
+开放	kai fang	8248
+我个	wo ge	8247
+持续	chi xu	8246
+权力	quan li	8245
+永远	yong yuan	8244
+消息	xiao xi	8243
+然而	ran er	8242
+电视	dian shi	8241
+看看	kan kan	8239
+精神	jing shen	8238
+考虑	kao lv	8237
+这来	zhe lai	8236
+重点	zhong dian	8235
+中来	zhong lai	8234
+中要	zhong yao	8233
+位于	wei yu	8232
+免费	mian fei	8230
+印度	yin du	8229
+变成	bian cheng	8228
+另外	ling wai	8227
+声音	sheng yin	8226
+女儿	nv er	8225
+妈妈	ma ma	8224
+对要	dui yao	8223
+将在	jiang zai	8221
+将是	jiang shi	8220
+并在	bing zai	8219
+应用	ying yong	8218
+想要	xiang yao	8217
+我后	wo hou	8216
+是将	shi jiang	8215
+最终	zui zhong	8214
+汽车	qi che	8212
+相当	xiang dang	8211
+空间	kong jian	8210
+终于	zhong yu	8209
+美元	mei yuan	8208
+设备	she bei	8207
+足球	zu qiu	8206
+里面	li mian	8205
+领域	ling yu	8203
+不还	bu hai	8202
+产业	chan ye	8200
