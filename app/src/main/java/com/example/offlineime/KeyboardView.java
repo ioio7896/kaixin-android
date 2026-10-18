@@ -126,6 +126,7 @@ public final class KeyboardView extends LinearLayout {
         final TextView view;
         PinyinDictionary.Entry entry, pressedEntry;
         int candidateIndex = -1;
+        boolean selectable;
         String word = "";
         String description = "";
         String styledWord = "";
@@ -316,7 +317,15 @@ public final class KeyboardView extends LinearLayout {
         android.content.SharedPreferences settings = renderSettings;
         boolean candidateInputChanged = !input.equals(renderedCandidateInput);
         boolean candidateSurfaceReady = ((OfflineImeService) getContext()).candidateSurfaceReady();
-        boolean candidateSurfaceChanged = words != renderedCandidateWords
+        // A new query starts with no results. Keep the last strip in place until
+        // its first frame arrives, but do not allow the stale words to be chosen.
+        List<PinyinDictionary.Entry> displayWords = !candidateSurfaceReady && words.isEmpty()
+                && candidateInputChanged && !input.isEmpty()
+                && renderedCandidateInput != null && !renderedCandidateInput.isEmpty()
+                && mode == renderedCandidateMode && renderedCandidateWords != null
+                && !renderedCandidateWords.isEmpty()
+                ? renderedCandidateWords : words;
+        boolean candidateSurfaceChanged = displayWords != renderedCandidateWords
                 || mode != renderedCandidateMode
                 || candidateInputChanged
                 || candidateSurfaceReady != renderedCandidateReady
@@ -333,15 +342,16 @@ public final class KeyboardView extends LinearLayout {
         int previousCount = visibleCandidateIndexes.size();
         visibleCandidateIndexes.clear();
         int pageSize = CandidateRanker.pageSize(getIntPreference(settings, "candidate_count", 6));
-        int page = Math.min(candidatePage, CandidateRanker.pageCount(words.size(), pageSize) - 1);
+        int page = Math.min(candidatePage, CandidateRanker.pageCount(displayWords.size(), pageSize) - 1);
         nextCandidateStripIndex = page * pageSize;
         int initialCount = candidateInputChanged || candidatePage != renderedCandidatePage
                 ? 15 : Math.max(15, previousCount);
-        appendCandidateStripBatch(words, mode, candidateSurfaceReady, initialCount);
+        appendCandidateStripBatch(displayWords, mode, candidateSurfaceReady, initialCount);
         for (int i = visibleCandidateIndexes.size(); i < candidatePool.size(); i++) {
             CandidateSlot slot = candidatePool.get(i);
             slot.entry = slot.pressedEntry = null;
             slot.candidateIndex = -1;
+            slot.selectable = false;
             if (slot.view.getVisibility() != GONE) slot.view.setVisibility(GONE);
         }
         if (expandCandidates.getCurrentTextColor() != fg) expandCandidates.setTextColor(fg);
@@ -354,7 +364,7 @@ public final class KeyboardView extends LinearLayout {
         if ((candidateInputChanged || candidatePage != renderedCandidatePage) && candidateScroll.getScrollX() != 0)
             candidateScroll.scrollTo(0, 0);
         candidateScroll.setVisibility(visibleCandidateIndexes.isEmpty() ? INVISIBLE : VISIBLE);
-        renderedCandidateWords = words;
+        renderedCandidateWords = displayWords;
         renderedCandidateMode = mode;
         renderedCandidateReady = candidateSurfaceReady;
         renderedCandidateStyleRevision = styleRevision;
@@ -401,7 +411,8 @@ public final class KeyboardView extends LinearLayout {
         TextView item = new TextView(getContext());
         CandidateSlot slot = new CandidateSlot(item);
         item.setOnClickListener(view -> {
-            if (slot.candidateIndex >= 0) callback.onCandidateEntry(slot.pressedEntry == null ? slot.entry : slot.pressedEntry);
+            if (slot.selectable && slot.candidateIndex >= 0)
+                callback.onCandidateEntry(slot.pressedEntry == null ? slot.entry : slot.pressedEntry);
             slot.pressedEntry = null;
         });
         item.setOnTouchListener((view, event) -> {
@@ -436,6 +447,7 @@ public final class KeyboardView extends LinearLayout {
             String candidateType = mode == OfflineImeService.Mode.ENGLISH ? "英文联想词 "
                     : nextWordPrediction ? "下一词建议 " : "候选词 ";
             slot.entry = entry;
+            slot.selectable = ready;
             bindCandidateSlot(slot, index, word,
                     (first ? "首选" : "") + candidateType + word, first, theme.text, gap);
             slot.view.setEnabled(ready);
@@ -1072,7 +1084,10 @@ public final class KeyboardView extends LinearLayout {
         LinearLayout body = new LinearLayout(getContext());
         body.setOrientation(HORIZONTAL);
         ninePathScroll = createNinePathPanel();
-        int pathWidth = Math.max(44, Math.min(56, KeyboardPlacement.width(getContext(), renderSettings) / 8));
+        // Keep the path strip narrow enough for the digit grid. Compact labels
+        // below leave room for five-letter readings without a leading marker.
+        int pathWidth = Math.max(72, Math.min(80,
+                KeyboardPlacement.width(getContext(), renderSettings) / 5));
         LayoutParams strip = new LayoutParams(dp(pathWidth), -1);
         // The sidebar uses the same outer gutters as the grid and bottom row.
         strip.setMargins(dp(nineKeyHorizontalGap()), 0, dp(nineKeyHorizontalGap()), 0);
@@ -1335,7 +1350,7 @@ public final class KeyboardView extends LinearLayout {
             for (java.util.Map.Entry<String, PinyinPathEditor.Segment> choice : choices.entrySet()) {
                 String reading = choice.getKey(); PinyinPathEditor.Segment option = choice.getValue();
                 boolean selected = service.pinyinReadingSelected(option, reading);
-                bindNinePathSlot(slotIndex++, (selected ? "✓ " : "") + reading,
+                bindNinePathSlot(slotIndex++, reading,
                         "选择音节:" + value + ":" + option.start + ":" + option.end + ":" + reading,
                         selected, "选择读音 " + reading + "，按长度和字母排序");
             }
@@ -1358,7 +1373,7 @@ public final class KeyboardView extends LinearLayout {
         slot.view.setEllipsize(android.text.TextUtils.TruncateAt.END);
         slot.view.setIncludeFontPadding(false);
         slot.view.setTextSize(14);
-        slot.view.setPadding(dp(4), dp(5), dp(4), dp(5));
+        slot.view.setPadding(dp(2), dp(5), dp(2), dp(5));
         slot.view.setText(label); slot.label = label.toString();
         slot.view.setTypeface(android.graphics.Typeface.DEFAULT,
                 selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
@@ -1485,7 +1500,7 @@ public final class KeyboardView extends LinearLayout {
 
     private void setNinePathSlotSize(NinePathSlot slot, int height, int verticalMargin, float weight) {
         LayoutParams params = (LayoutParams) slot.view.getLayoutParams();
-        int horizontalMargin = slot.quickSymbol ? 0 : dp(3);
+        int horizontalMargin = slot.quickSymbol ? 0 : dp(2);
         if (params.height != height || params.leftMargin != horizontalMargin
                 || params.topMargin != verticalMargin || params.rightMargin != horizontalMargin
                 || params.bottomMargin != verticalMargin || params.weight != weight) {

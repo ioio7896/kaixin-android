@@ -25,7 +25,7 @@ import java.util.Arrays;
 /** 纯本地词库。词库文件来自本工程 lexicon 目录，加载和查询均不联网。 */
 public final class PinyinDictionary {
     private static final String TAG = "OfflineImeLexicon";
-    private static final int LEXICON_VERSION = 2026101101;
+    private static final int LEXICON_VERSION = 2026101801;
     private final ThreadLocal<Boolean> shuangpinLookup = new ThreadLocal<>();
     List<Entry> suggestShuangpin(String expanded) {
         shuangpinLookup.set(true);
@@ -194,16 +194,11 @@ public final class PinyinDictionary {
         return settingsSignature() + ':' + managedRevision + ':' + (model == null ? 0 : model.scoringRevision());
     }
     private final Map<String, List<Entry>> englishIndex = new ConcurrentHashMap<>();
-    private volatile Map<String, List<MixedTerm>> mixedTermPrefixes = Collections.emptyMap();
-    private volatile Map<String, List<MixedTerm>> mixedTermT9Prefixes = Collections.emptyMap();
-    private volatile Set<String> mixedTermWords = Collections.emptySet();
-    private static final class MixedTerm {
-        final String word, code;
-        final int score;
-        MixedTerm(String word, String code, int score) {
-            this.word = word; this.code = code; this.score = score;
-        }
-    }
+    private final Map<String, Integer> lexiconScoreCaps = new HashMap<>();
+    private final Map<String, Integer> lexiconPrefixCaps = new HashMap<>();
+    private final Map<String, Integer> lexiconSourceScales = new HashMap<>();
+    private final Map<String, Map<String, Integer>> lexiconWordCaps = new HashMap<>();
+    private final Map<String, Set<String>> excludedLexiconWords = new HashMap<>();
     private final List<HotPhrase> hotPhraseBuffer = new ArrayList<>();
     private volatile List<HotPhrase> hotPhrases = Collections.emptyList();
     // Independent buckets retain hot candidates even when general memory indices are trimmed.
@@ -304,6 +299,8 @@ public final class PinyinDictionary {
         loadedEntryCount = 0;
         loadErrorCount = 0;
         try {
+            try { loadLexiconCorrectionRules(); }
+            catch (IOException error) { throw new IllegalStateException("missing lexicon corrections", error); }
             if (database != null) {
                 database.prepareBundledDatabase(LEXICON_VERSION);
                 importRequired = !database.isLexiconCurrent(LEXICON_VERSION);
@@ -314,18 +311,14 @@ public final class PinyinDictionary {
             loadFileSafely("core/kaixin_explicit.txt", true, importing, 0, true);
             loadFileSafely("core/kaixin_polyphone.txt", true, importing, 0, true);
             loadFileSafely("core/kaixin_pronunciation_aliases.txt", true, importing, 0, true);
-            try { loadMixedTerms(); }
-            catch (IOException error) { Log.e(TAG, "failed to load mixed/common_terms.txt", error); }
-            loadHotFileSafely("zh/life_common_3char_20000.txt", 1200);
-            // Desktop coverage gets its own bounded cache; existing Android hot words remain.
+            loadFileSafely("lexicon-corrections/idioms.txt", true, importing, 0, true);
+            // The bundled corpus mirrors the desktop project's lexicon directory.
             loadHotFileSafely("zh/life_common_3char.txt", 1200);
             loadHotFileSafely("zh/life_common_4char.txt", 1600);
-            loadHotFileSafely("zh/life_common_phrases_5to8.txt", 400);
             loadHotFileSafely("zh/life_common_phrases.txt", 400);
-            loadShortHotOverlay("zh/life_short_hot_2char.txt");
-            loadShortHotOverlay("zh/life_short_hot_3to4char.txt");
-            // Only a bounded selection stays in memory; all categories live in SQLite.
-            loadHotFileSafely("zh/life_category_hot.txt", 1200);
+            loadHotFileSafely("zh/life_short_hot_2char.txt", 600);
+            loadHotFileSafely("zh/life_hot_3char_curated.txt", 400);
+            loadHotFileSafely("zh/life_hot_4char_curated.txt", 400);
             publishHotPhrases();
 
             if (importRequired) {
@@ -338,6 +331,8 @@ public final class PinyinDictionary {
                 for (String name : safeList("zh-ext")) {
                     loadFileSafely("zh-ext/" + name, database == null, importing, 0, true);
                 }
+                loadFileSafely("lexicon-corrections/organizations.txt",
+                        database == null, importing, 0, true);
                 // This source stores character + score; pronunciation is resolved
                 // from every other bundled Chinese lexicon and Android ICU, never
                 // treated as a pinyin code or silently truncated.
@@ -513,19 +508,7 @@ public final class PinyinDictionary {
             else if (fullEnabled() && segmented.equals(record.code))
                 merge(result, new Entry(record.word, 0, TIER_USER, record.pinned).withInput(segmented.length(), reading));
         }
-        int exactCount = primaryCandidateCount(result.values());
-        if (!QueryWork.firstScreen() && exactCount < FIRST_SCREEN_TARGET && (fuzzyEnabled()
-                || segmented.length() <= 24 && preference("spelling_correction", true))) {
-            for (String variant : fuzzyVariants(segmented)) {
-                for (Entry entry : queryInputWords(variant, false)) {
-                    if (entry.matchTier == TIER_PREFIX) continue;
-                    merge(result, new Entry(entry.word, entry.score - 800, TIER_FUZZY, false, entry.corpusScore, 28)
-                            .withInput(segmented.length(), entry.pronunciation));
-                }
-            }
-        }
         mergeCustomWords(result, segmented, false, null);
-        composeInput(result, segmented, false);
         // Offer complete leading words with their exact consumed span, leaving the suffix intact.
         if (!QueryWork.firstScreen() && result.size() < FIRST_SCREEN_TARGET) {
             java.util.TreeSet<Integer> boundaries = new java.util.TreeSet<>(Collections.reverseOrder());
@@ -597,7 +580,7 @@ public final class PinyinDictionary {
      * final personal/context ranking, even when their base frequency is low. */
     private List<Entry> rankForRecall(Map<String, Entry> values, String input, boolean numeric,
                                       boolean preferSingleCharacter, int limit) {
-        List<Entry> ranked = CandidateRanker.rankTop(values.values(), preferSingleCharacter, limit, input);
+        List<Entry> ranked = CandidateRanker.rankForRecall(values.values(), preferSingleCharacter, limit, input);
         Set<String> included = new java.util.HashSet<>();
         for (Entry entry : ranked) included.add(entry.word);
         List<UserWordRecord> learned = new ArrayList<>(matchingUserRecords(input, numeric));
@@ -613,6 +596,13 @@ public final class PinyinDictionary {
             if (++retained >= 32) break;
         }
         return ranked;
+    }
+
+    List<Entry> contextMatches(String input, List<String> words) {
+        if (database == null || !databaseReady || words == null || words.isEmpty())
+            return Collections.emptyList();
+        return database.queryContextWords(input, words, fullEnabled(), shortEnabled(),
+                preference("mixed_pinyin", true), preference("double_initials", true));
     }
 
     /** Cached corpus edges only; context and personal scores are applied during
@@ -864,23 +854,6 @@ public final class PinyinDictionary {
                     .withInput(query.raw.length(), reading));
         }
         mergeCustomWords(result, query.raw, query.numeric, query);
-        if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET && sentenceEnabled()) {
-            Map<String, List<Entry>> words = new HashMap<>();
-            Map<String, Integer> transitions = new HashMap<>();
-            for (List<String> tokens : query.tokenPaths(full, shortInput, doubles)) {
-                if (tokens.size() < 2) continue;
-                List<Entry> composed = SentenceComposer.composeWords(tokens,
-                        code -> words.computeIfAbsent(code,
-                                key -> compositionWords(key, query.numeric, false, true)), query.raw.length(),
-                        (previous, next) -> transitions.computeIfAbsent(previous + ':' + next,
-                                key -> database.transitionBonus(previous, next)
-                                        + (sentenceContext == null ? 0 : sentenceContext.transitionBonus(previous, next))),
-                        sentenceDecoder, decoderKey("locked", query.numeric));
-                for (Entry entry : composed)
-                    if (query.match(entry.pronunciation, full, shortInput, mixed, doubles, false) != null)
-                        merge(result, rankComposed(entry, query.raw));
-            }
-        }
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
             mergeCreationPrefixes(result, query.raw, query.numeric, query);
         List<Entry> ranked = rankForRecall(result, query.raw, query.numeric, false,
@@ -1081,7 +1054,6 @@ public final class PinyinDictionary {
             for (Entry entry : QueryWork.firstScreen() && primaryCandidateCount(characters) >= 15
                     ? Collections.<Entry>emptyList() : corpusCandidates(query, true, null, true))
                 merge(result, withShortHotBoost(entry));
-            composeInput(result, query, true);
         }
         mergeShortHotMatches(result, query, true, null);
         mergeCustomWords(result, query, true, null);
@@ -1116,62 +1088,6 @@ public final class PinyinDictionary {
         List<Entry> ranked = rankResults(result);
         cacheRecall("e:" + query, query, ranked, recallRevision);
         return ranked;
-    }
-
-    /** Curated literal English and Chinese-English words for Chinese layouts. */
-    List<Entry> suggestMixedTerms(String raw, boolean numeric) {
-        String query = raw == null ? "" : raw.toLowerCase(Locale.ROOT);
-        if (!query.matches(numeric ? "[2-9]+" : "[a-z]+")) return Collections.emptyList();
-        List<MixedTerm> matches = (numeric ? mixedTermT9Prefixes : mixedTermPrefixes).get(query);
-        if (matches == null) return Collections.emptyList();
-        ArrayList<Entry> result = new ArrayList<>(Math.min(matches.size(), 16));
-        for (MixedTerm term : matches) {
-            String code = numeric ? toT9(term.code) : term.code;
-            boolean exact = code.equals(query);
-            if (numeric && !exact) continue; // T9 prefixes are too ambiguous.
-            int tier = exact ? TIER_MIXED : TIER_PREFIX;
-            result.add(new Entry(term.word, exact ? term.score : term.score / 4, tier)
-                    .withInput(raw.length(), ""));
-            if (result.size() >= 16) break;
-        }
-        return result;
-    }
-
-    boolean isMixedTerm(String word) { return mixedTermWords.contains(word); }
-
-    private void loadMixedTerms() throws IOException {
-        Map<String, List<MixedTerm>> letterPrefixes = new HashMap<>();
-        Map<String, List<MixedTerm>> digitPrefixes = new HashMap<>();
-        Set<String> words = new LinkedHashSet<>();
-        try (InputStream input = assets.open("mixed/common_terms.txt");
-             BufferedReader reader = new BufferedReader(
-                     new InputStreamReader(input, StandardCharsets.UTF_8))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                if (line.isEmpty() || line.charAt(0) == '#') continue;
-                String[] columns = line.split("\\t");
-                if (columns.length != 3) continue;
-                String word = columns[0].trim();
-                String code = columns[1].trim().toLowerCase(Locale.ROOT);
-                if (word.isEmpty() || !code.matches("[a-z]+")) continue;
-                int score;
-                try { score = Integer.parseInt(columns[2].trim()); }
-                catch (NumberFormatException ignored) { continue; }
-                MixedTerm term = new MixedTerm(word, code, Math.max(1, score));
-                words.add(word);
-                String digits = toT9(code);
-                for (int length = 1; length <= code.length(); length++)
-                    letterPrefixes.computeIfAbsent(code.substring(0, length), key -> new ArrayList<>()).add(term);
-                for (int length = 1; length <= digits.length(); length++)
-                    digitPrefixes.computeIfAbsent(digits.substring(0, length), key -> new ArrayList<>()).add(term);
-            }
-        }
-        Comparator<MixedTerm> byScore = Comparator.comparingInt((MixedTerm term) -> term.score).reversed();
-        for (List<MixedTerm> values : letterPrefixes.values()) values.sort(byScore);
-        for (List<MixedTerm> values : digitPrefixes.values()) values.sort(byScore);
-        mixedTermPrefixes = letterPrefixes;
-        mixedTermT9Prefixes = digitPrefixes;
-        mixedTermWords = words;
     }
 
     /** Populate a small hot set only after the keyboard has been idle. */
@@ -1738,7 +1654,8 @@ public final class PinyinDictionary {
     }
 
     private void addUser(UserWordRecord record) {
-        if (customWords.containsKey(record.word)) return;
+        if (customWords.containsKey(record.word) || record.preferredTier == TIER_FUZZY
+                || record.preferredTier == TIER_COMPOSED) return;
         int tier = record.pinned ? TIER_USER : normalizeUserTier(record.preferredTier);
         if ("en".equals(record.usageKey)) {
             upsert(englishUserIndex, record.code, record.word, 0, tier, record.pinned);
@@ -1767,7 +1684,8 @@ public final class PinyinDictionary {
 
     private void indexSearchRecord(Map<String, LinkedHashMap<String, UserWordRecord>> staged, UserWordRecord record) {
         if (record.code.startsWith("@") || "en".equals(record.usageKey)
-                || record.preferredTier == TIER_FUZZY || customWords.containsKey(record.word)) return;
+                || record.preferredTier == TIER_FUZZY || record.preferredTier == TIER_COMPOSED
+                || customWords.containsKey(record.word)) return;
         String reading = recordReading(record).toLowerCase(Locale.ROOT);
         String full = reading.replaceAll("[^a-z]", "");
         if (full.isEmpty()) full = normalizeStoredCode(record.code).replace("'", "");
@@ -1969,6 +1887,56 @@ public final class PinyinDictionary {
         }
         return new ArrayList<>(out);
     }
+    private void loadLexiconCorrectionRules() throws IOException {
+        lexiconScoreCaps.clear();
+        lexiconPrefixCaps.clear();
+        lexiconWordCaps.clear();
+        lexiconSourceScales.clear();
+        excludedLexiconWords.clear();
+        try (BufferedReader reader = new BufferedReader(new InputStreamReader(
+                assets.open("lexicon-corrections/rules.tsv"), StandardCharsets.UTF_8))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty() || line.charAt(0) == '#') continue;
+                String[] columns = line.split("\\t");
+                if (columns.length == 3 && "cap".equals(columns[0])) {
+                    lexiconScoreCaps.put(columns[1], Integer.parseInt(columns[2]));
+                } else if (columns.length == 3 && "cap-prefix".equals(columns[0])) {
+                    lexiconPrefixCaps.put(columns[1], Integer.parseInt(columns[2]));
+                } else if (columns.length == 3 && "scale-prefix".equals(columns[0])) {
+                    int percent = Integer.parseInt(columns[2]);
+                    if (percent < 1 || percent > 100) throw new IOException("invalid source scale: " + line);
+                    lexiconSourceScales.put(columns[1], percent);
+                } else if (columns.length == 4 && "cap-word".equals(columns[0])) {
+                    lexiconWordCaps.computeIfAbsent(columns[1], ignored -> new HashMap<>())
+                            .put(columns[2], Integer.parseInt(columns[3]));
+                } else if (columns.length == 3 && "exclude".equals(columns[0])) {
+                    excludedLexiconWords.computeIfAbsent(columns[1], ignored -> new LinkedHashSet<>())
+                            .add(columns[2]);
+                } else {
+                    throw new IOException("invalid lexicon correction rule: " + line);
+                }
+            }
+        }
+    }
+
+    private int correctedLexiconScore(String path, String word, int score) {
+        int scale = 100, longest = -1;
+        for (Map.Entry<String, Integer> source : lexiconSourceScales.entrySet()) {
+            if (path.startsWith(source.getKey()) && source.getKey().length() > longest) {
+                longest = source.getKey().length(); scale = source.getValue();
+            }
+        }
+        int corrected = Math.max(1, (int) (((long) score * scale + 50) / 100));
+        corrected = Math.min(corrected, lexiconScoreCaps.getOrDefault(path, corrected));
+        for (Map.Entry<String, Integer> prefix : lexiconPrefixCaps.entrySet()) {
+            if (path.startsWith(prefix.getKey())) corrected = Math.min(corrected, prefix.getValue());
+        }
+        Map<String, Integer> words = lexiconWordCaps.get(path);
+        if (words != null) corrected = Math.min(corrected, words.getOrDefault(word, corrected));
+        return corrected;
+    }
+
     private void loadFileSafely(String path, boolean keepInMemory,
                                 boolean importToDatabase, int kind,
                                 boolean collectPronunciations) {
@@ -1992,13 +1960,12 @@ public final class PinyinDictionary {
                 String[] columns = line.split("\\t");
                 if (columns.length < 2) continue;
                 String word = columns[0].trim();
+                Set<String> excluded = excludedLexiconWords.get(path);
+                if (excluded != null && excluded.contains(word)) continue;
                 String rawCode = columns[1].trim().toLowerCase(Locale.ROOT);
                 String code = normalize(rawCode);
                 if (word.isEmpty() || code.isEmpty()) continue;
-                // Overlay heat is query-specific; only its fourth-column base frequency is imported.
-                boolean shortOverlay = path.startsWith("zh/life_short_hot_");
-                if (shortOverlay && columns.length < 4) continue;
-                int score = parseScore(shortOverlay ? new String[]{word, rawCode, columns[3]} : columns, 1);
+                int score = correctedLexiconScore(path, word, parseScore(columns, 1));
                 if (kind == 2) {
                     if (keepInMemory) addEnglish(code, word, score);
                     if (importToDatabase) database.put(code, word, score, 2, "");

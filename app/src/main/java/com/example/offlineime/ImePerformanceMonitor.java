@@ -16,6 +16,8 @@ final class ImePerformanceMonitor {
     private static volatile int phase;
     private static boolean shown;
     private static long inputStarted;
+    private static final int[] candidateFrameCounts = new int[2];
+    private static final int[] candidateTopChanges = new int[2];
     private ImePerformanceMonitor() { }
     static long start() { return SystemClock.elapsedRealtimeNanos(); }
     static synchronized void inputStarted() {
@@ -29,6 +31,17 @@ final class ImePerformanceMonitor {
     static void query(Context context, long started, int count, boolean t9) { stage(context, "full_query", started, count, t9); }
     static void fastCandidates(Context context, long started, int count, boolean t9) { stage(context, "fast_candidates", started, count, t9); }
     static void candidateReady(Context context, long started, int count, boolean t9) { stage(context, "candidate_ready", started, count, t9); }
+    static synchronized void candidateTopChange(Context context, boolean changed, boolean t9) {
+        if (context == null || !context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                .getBoolean("performance_logging", false)) return;
+        int mode = t9 ? 1 : 0;
+        candidateFrameCounts[mode]++;
+        if (changed) candidateTopChanges[mode]++;
+        if (candidateFrameCounts[mode] % WINDOW_SIZE == 0) {
+            Log.d(TAG, "candidate_top_changes mode=" + (t9 ? "t9" : "alpha")
+                    + " changed=" + candidateTopChanges[mode] + " total=" + candidateFrameCounts[mode]);
+        }
+    }
     static void stage(Context context, String metric, long started, int count, boolean t9) {
         duration(context, metric, Math.max(0L, start() - started), count, t9);
     }

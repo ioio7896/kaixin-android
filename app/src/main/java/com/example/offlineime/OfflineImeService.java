@@ -141,6 +141,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private volatile String candidateResultKey = "";
     private volatile String candidatePendingKey = "";
     private volatile String candidateCompleteKey = "";
+    private String candidateFirstFrameKey = "";
+    private long candidateFirstFrameAt;
     private volatile String candidateSelectableKey = "";
     private String measuredCandidateKey = "";
     private long measuredCandidateAt;
@@ -1287,7 +1289,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (mode == Mode.NINE && lastEditorSelectionStart >= 0) { lastEditorSelectionStart -= selected.word.length(); lastEditorSelectionEnd = lastEditorSelectionStart; }
             return;
         }
-        if (mode != Mode.STROKE && canLearn() && !code.isEmpty()) queueWordLearning(
+        if (mode != Mode.STROKE && canLearn() && !code.isEmpty()
+                && selected.matchTier != PinyinDictionary.TIER_COMPOSED
+                && selected.matchTier != PinyinDictionary.TIER_FUZZY) queueWordLearning(
                 selected.pronunciation.isEmpty() ? code.substring(0, Math.min(code.length(), consumed)) : selected.pronunciation,
                 selected.word, personalUsageKey(mode), selected.matchTier);
         if (selected.wordSegments.isEmpty()) rememberWord(selected.word);
@@ -1387,10 +1391,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         final boolean useNames = nameMode;
         final List<ShuangpinInput.Path> doublePaths = isShuangpin()
                 ? shuangpin.paths(rawInput) : null;
-        final List<TouchCorrectionModel.Variant> touchVariants = queryMode == Mode.PINYIN && !useNames && doublePaths == null
-                && settingsPreferences.getBoolean("touch_correction", true)
-                && settingsPreferences.getBoolean("spelling_correction", true)
-                ? touchCorrection.variants(rawInput) : java.util.Collections.emptyList();
         final PinyinPathEditor.Query constraint = pathQuery();
         final boolean locked = (queryMode == Mode.PINYIN || queryMode == Mode.NINE)
                 && (constraint != null || !lockedPinyinPath.isEmpty());
@@ -1447,17 +1447,12 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             return cached;
         }
 
-        // Keep one complete previous frame while the newest query is pending.
-        // Its entries keep the old input version, so they cannot be selected.
-        // This removes the empty frame that caused the candidate bar to flash.
-        boolean keepPreviousFrame = candidateDisplayMode == queryMode
-                && !candidateDisplayInput.isEmpty() && !candidateResults.isEmpty();
-        if (!keepPreviousFrame) {
-            candidateResults = java.util.Collections.emptyList();
-            candidateResultKey = "";
-            candidateDisplayMode = queryMode;
-            candidateDisplayInput = rawInput;
-        }
+        // The reading path already follows the new input. Never display words
+        // from the previous query beside it while this query is still pending.
+        candidateResults = java.util.Collections.emptyList();
+        candidateResultKey = "";
+        candidateDisplayMode = queryMode;
+        candidateDisplayInput = rawInput;
         candidateCompleteKey = candidateSelectableKey = "";
         if (!dictionary.isLoaded()) {
             if (candidateQueries != null && !creatingWord && doublePaths == null
@@ -1545,7 +1540,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 full = creatingWord ? dictionary.creationCandidates(rawInput, queryMode == Mode.NINE, constraint, doublePaths)
                         : doublePaths == null ? lookupCandidates(queryMode, constraint, locked, query, false)
                         : lookupShuangpin(doublePaths, rawInput, useNames);
-                if (!creatingWord && !locked && !touchVariants.isEmpty()) full = addTouchCandidates(full, touchVariants, rawInput);
+                if (!creatingWord && !secureEditor && !locked && doublePaths == null
+                        && (queryMode == Mode.PINYIN || queryMode == Mode.NINE))
+                    full = addContextRecall(full, rawInput, previousPrevious, previous);
                 if (!creatingWord && useNames && doublePaths == null && (queryMode == Mode.PINYIN || queryMode == Mode.NINE))
                     full = NameCandidateEngine.suggest(full, constraint, rawInput, settingsPreferences);
                 if (creatingWord) full = filterCreationStrokes(full, creationStrokePrefix);
@@ -1595,8 +1592,24 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (destroyed || ticket.cancellation.isCanceled() || !candidateQueries.isCurrent(ticket)
                     || !key.equals(currentCandidateKey())) return;
             if (!complete && key.equals(candidateCompleteKey)) return;
+            if (complete && key.equals(candidateFirstFrameKey) && !candidateResults.isEmpty()
+                    && !entries.isEmpty()) {
+                boolean changed = !candidateResults.get(0).word.equals(entries.get(0).word);
+                long age = android.os.SystemClock.uptimeMillis() - candidateFirstFrameAt;
+                if (changed && age < 120) {
+                    mainHandler.postDelayed(() -> publishCandidateFrame(ticket, key, raw,
+                            queryMode, entries, true, requestedAt), 120 - Math.max(0, age));
+                    return;
+                }
+                ImePerformanceMonitor.candidateTopChange(this, changed, queryMode == Mode.NINE);
+                candidateFirstFrameKey = "";
+            }
             candidateResults = entries; candidateResultKey = candidateSelectableKey = key;
             candidateDisplayMode = queryMode; candidateDisplayInput = raw;
+            if (!complete && !entries.isEmpty()) {
+                candidateFirstFrameKey = key;
+                candidateFirstFrameAt = android.os.SystemClock.uptimeMillis();
+            }
             if (complete) { candidateCompleteKey = key; candidatePendingKey = ""; candidateCache.put(key, new CandidateFrame(raw, isShuangpin(), entries)); }
             refresh();
             ImePerformanceMonitor.stage(this, complete ? "candidate_ready" : "first_selectable", requestedAt, entries.size(), queryMode == Mode.NINE);
@@ -1648,21 +1661,20 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             List<PinyinDictionary.Entry> source, Mode queryMode, String rawInput,
             PinyinPathEditor.Query constraint, boolean shuangpinInput) {
         ArrayList<PinyinDictionary.Entry> eligible = new ArrayList<>();
-        if (source != null) for (PinyinDictionary.Entry entry : source)
+        if (source != null) for (PinyinDictionary.Entry entry : source) {
+            if ((queryMode == Mode.PINYIN || queryMode == Mode.NINE)
+                    && (entry.matchTier == PinyinDictionary.TIER_COMPOSED
+                    || entry.matchTier == PinyinDictionary.TIER_FUZZY)) continue;
             if (queryMode != Mode.PINYIN && queryMode != Mode.NINE
                     || entry.codePointLength < 5 || entry.codePointLength > 8
                     || !containsHan(entry.word)
                     || matchesCompleteLongWord(entry, queryMode, rawInput, constraint, shuangpinInput))
                 eligible.add(entry);
+        }
         if (queryMode == Mode.STROKE)
             return filterChinesePredictions(eligible);
         if (queryMode == Mode.NINE) {
-            boolean mixed = getSharedPreferences("settings", MODE_PRIVATE)
-                    .getBoolean("mixed_english", true);
-            ArrayList<PinyinDictionary.Entry> filtered = new ArrayList<>();
-            for (PinyinDictionary.Entry entry : eligible)
-                if (containsHan(entry.word) || mixed && dictionary.isMixedTerm(entry.word)) filtered.add(entry);
-            return filtered;
+            return filterChinesePredictions(eligible);
         }
         if (queryMode == Mode.PINYIN && !getSharedPreferences("settings", MODE_PRIVATE)
                 .getBoolean("mixed_english", true)) return filterChinesePredictions(eligible);
@@ -1702,15 +1714,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         else if (queryMode == Mode.NINE && !locked) values = dictionary.suggestT9(query);
         else if (queryMode == Mode.ENGLISH) values = dictionary.suggestEnglish(query);
         else values = forCommit ? dictionary.suggestForCommit(query, false) : dictionary.suggest(query);
-        if (queryMode != Mode.PINYIN && queryMode != Mode.NINE
+        if (queryMode != Mode.PINYIN
                 || !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("mixed_english", true)
                 || constraint != null || locked) return values;
         ArrayList<PinyinDictionary.Entry> combined = new ArrayList<>(values);
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         for (PinyinDictionary.Entry entry : values) seen.add(entry.word.toLowerCase(Locale.ROOT));
-        for (PinyinDictionary.Entry term : dictionary.suggestMixedTerms(query, queryMode == Mode.NINE))
-            if (seen.add(term.word.toLowerCase(Locale.ROOT))) combined.add(term);
-        if (queryMode != Mode.PINYIN || !query.matches("[A-Za-z][A-Za-z'.-]*")) return combined;
+        if (!query.matches("[A-Za-z][A-Za-z'.-]*")) return combined;
         int added = 0;
         for (PinyinDictionary.Entry english : dictionary.suggestEnglish(query)) {
             if (seen.add(english.word.toLowerCase(Locale.ROOT))) {
@@ -1740,25 +1750,19 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         return new ArrayList<>(best.values());
     }
 
-    private List<PinyinDictionary.Entry> addTouchCandidates(List<PinyinDictionary.Entry> source,
-            List<TouchCorrectionModel.Variant> variants, String raw) {
+    private List<PinyinDictionary.Entry> addContextRecall(List<PinyinDictionary.Entry> source,
+            String input, String previousPrevious, String previous) {
+        if (contextModel == null || previous.isEmpty()) return source;
+        List<PinyinDictionary.Entry> predicted = contextModel.predict(previousPrevious, previous, 8);
+        if (predicted.isEmpty()) return source;
+        ArrayList<String> words = new ArrayList<>(predicted.size());
+        for (PinyinDictionary.Entry entry : predicted) words.add(entry.word);
+        List<PinyinDictionary.Entry> matched = dictionary.contextMatches(input, words);
+        if (matched.isEmpty()) return source;
         ArrayList<PinyinDictionary.Entry> combined = new ArrayList<>(source);
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         for (PinyinDictionary.Entry entry : source) seen.add(entry.word);
-        for (TouchCorrectionModel.Variant variant : variants) {
-            QueryWork.check();
-            int count = 0;
-            for (PinyinDictionary.Entry entry : dictionary.suggest(variant.input)) {
-                if (entry.matchTier > PinyinDictionary.TIER_MIXED || entry.consumedLength != raw.length()
-                        || !containsHan(entry.word) || !seen.add(entry.word)) continue;
-                PinyinDictionary.Entry corrected = new PinyinDictionary.Entry(entry.word,
-                        entry.score - variant.penalty, PinyinDictionary.TIER_FUZZY, false, entry.corpusScore, 28)
-                        .withInput(raw.length(), entry.pronunciation);
-                corrected.queryText = raw; corrected.wordSegments = entry.wordSegments;
-                combined.add(corrected);
-                if (++count >= 8) break;
-            }
-        }
+        for (PinyinDictionary.Entry entry : matched) if (seen.add(entry.word)) combined.add(entry);
         return combined;
     }
 

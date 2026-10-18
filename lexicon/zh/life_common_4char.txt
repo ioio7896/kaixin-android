@@ -1,33 +1,66 @@
 # 开心输入法原生词库：5000 条通用四字短语
 # Source: wordfreq 中文频率排序 + 高频现代固定搭配
 # 格式：词语<TAB>全拼<TAB>权重；拼音不标声调。；第三列统一为 1-10000 万分制排序分数。
-与此同时	yu ci tong shi	10000
-总的来说	zong de lai shuo	10000
-换句话说	huan ju hua shuo	10000
+与此同时	yu ci tong shi	7500
+总的来说	zong de lai shuo	7500
+换句话说	huan ju hua shuo	7500
+一点一点	yi dian yi dian	8220
+工作人员	gong zuo ren yuan	9985
+一段时间	yi duan shi jian	9966
+解决问题	jie jue wen ti	9866
+发现自己	fa xian zi ji	9808
+目前为止	mu qian wei zhi	9715
+浪费时间	lang fei shi jian	9700
+可不可以	ke bu ke yi	9599
+在此之前	zai ci zhi qian	9474
+一般来说	yi ban lai shuo	9461
+真不知道	zhen bu zhi dao	9396
+并不知道	bing bu zhi dao	9299
+息息相关	xi xi xiang guan	9274
+团结起来	tuan jie qi lai	9058
+多长时间	duo zhang shi jian	8916
+不太可能	bu tai ke neng	8825
+一般而言	yi ban er yan	8784
+继续下去	ji xu xia qu	8715
+工作岗位	gong zuo gang wei	8670
+知不知道	zhi bu zhi dao	8541
+解释一下	jie shi yi xia	8459
+早些时候	zao xie shi hou	8383
+同一时间	tong yi shi jian	8319
+并不需要	bing bu xu yao	8250
+迫切需要	po qie xu yao	8105
+刚刚开始	gang gang kai shi	8075
+真实情况	zhen shi qing kuang	8032
+从今以后	cong jin yi hou	7948
 有限公司	you xian gong si	9998
 社会主义	she hui zhu yi	9996
 马来西亚	ma lai xi ya	9994
 澳大利亚	ao da li ya	9991
+从此以后	cong ci yi hou	7521
 巴基斯坦	ba ji si tan	9989
 另一方面	ling yi fang mian	9987
-工作人员	gong zuo ren yuan	9985
 资本主义	zi ben zhu yi	9983
 行政区划	xing zheng qu hua	9981
 高速公路	gao su gong lu	9978
 中国政府	zhong guo zheng fu	9976
 人民政府	ren min zheng fu	9974
+密切相关	mi qie xiang guan	7248
 伊斯兰教	yi si lan jiao	9972
 官方网站	guan fang wang zhan	9970
 无论如何	wu lun ru he	9968
-一段时间	yi duan shi jian	9966
 人大代表	ren da dai biao	9963
+管理工作	guan li gong zuo	7138
 平方千米	ping fang qian mi	9961
 也就是说	ye jiu shi shuo	9959
 美国政府	mei guo zheng fu	9957
+一点一滴	yi dian yi di	7030
 共产主义	gong chan zhu yi	9955
 平方公里	ping fang gong li	9953
 中共中央	zhong gong zhong yang	9950
+故事情节	gu shi qing jie	6993
 中华民国	zhong hua min guo	9948
+没有勇气	mei you yong qi	6987
+紧急情况	jin ji qing kuang	6978
 绝大多数	jue da duo shu	9946
 世界各地	shi jie ge di	9944
 中华民族	zhong hua min zu	9942
@@ -43,16 +76,24 @@
 意识形态	yi shi xing tai	9920
 除此之外	chu ci zhi wai	9918
 全国政协	quan guo zheng xie	9916
+工作效率	gong zuo xiao lv	6758
 西班牙语	xi ban ya yu	9914
+请等一下	qing deng yi xia	712
 高等教育	gao deng jiao yu	9912
+无所不能	wu suo bu neng	6732
+比较简单	bi jiao jian dan	6724
 纽约时报	niu yue shi bao	9909
 无产阶级	wu chan jie ji	9907
+不能不要	bu neng bu yao	678
 不可思议	bu ke si yi	9905
 罗马尼亚	luo ma ni ya	9903
 航空公司	hang kong gong si	9901
+具体情况	ju ti qing kuang	6681
 言论自由	yan lun zi you	9899
 人民日报	ren min ri bao	9897
 北京大学	bei jing da xue	9894
+最后通牒	zui hou tong die	6644
+本职工作	ben zhi gong zuo	6642
 恐怖主义	kong bu zhu yi	9892
 最新消息	zui xin xiao xi	9890
 白俄罗斯	bai e luo si	9888
@@ -65,7 +106,6 @@
 资产阶级	zi chan jie ji	9873
 抗日战争	kang ri zhan zheng	9871
 民族主义	min zu zhu yi	9869
-解决问题	jie jue wen ti	9866
 中央政府	zhong yang zheng fu	9864
 知识产权	zhi shi chan quan	9862
 穆罕默德	mu han mo de	9860
@@ -87,12 +127,13 @@
 维多利亚	wei duo li ya	9825
 中产阶级	zhong chan jie ji	9823
 保加利亚	bao jia li ya	9821
+一般见识	yi ban jian shi	6323
 无能为力	wu neng wei li	9819
 最高法院	zui gao fa yuan	9817
 恐怖分子	kong bu fen zi	9815
+好的开始	hao de kai shi	6280
 胡说八道	hu shuo ba dao	9812
 一模一样	yi mu yi yang	9810
-发现自己	fa xian zi ji	9808
 外交部长	wai jiao bu zhang	9806
 生日快乐	sheng ri kuai le	9804
 耶路撒冷	ye lu sa leng	9802
@@ -100,12 +141,17 @@
 尼日利亚	ni ri li ya	9797
 帝国主义	di guo zhu yi	9795
 成千上万	cheng qian shang wan	9793
+休息时间	xiu xi shi jian	6226
 亚美尼亚	ya mei ni ya	9791
 有史以来	you shi yi lai	9789
+晚些时候	wan xie shi hou	6185
 上市公司	shang shi gong si	9787
 中央军委	zhong yang jun wei	9784
 众所周知	zhong suo zhou zhi	9782
 共产党员	gong chan dang yuan	9780
+继续前进	ji xu qian jin	6159
+考虑一下	kao lv yi xia	6157
+营业时间	ying ye shi jian	6150
 日本政府	ri ben zheng fu	9778
 有期徒刑	you qi tu xing	9776
 种族歧视	zhong zu qi shi	9774
@@ -135,16 +181,15 @@
 克罗地亚	ke luo di ya	9722
 文化遗产	wen hua yi chan	9720
 电视节目	dian shi jie mu	9718
-目前为止	mu qian wei zhi	9715
 自然资源	zi ran zi yuan	9713
 通货膨胀	tong huo peng zhang	9711
 万平方米	wan ping fang mi	9709
 不管怎样	bu guan zen yang	9707
 独一无二	du yi wu er	9705
 难以置信	nan yi zhi xin	9703
-浪费时间	lang fei shi jian	9700
 诺贝尔奖	nuo bei er jiang	9698
 高新技术	gao xin ji shu	9696
+不能容忍	bu neng rong ren	5931
 对外开放	dui wai kai fang	9694
 罗马帝国	luo ma di guo	9692
 西伯利亚	xi bo li ya	9690
@@ -176,7 +221,9 @@
 国会议员	guo hui yi yuan	9634
 市场经济	shi chang jing ji	9631
 法兰克福	fa lan ke fu	9629
+持续时间	chi xu shi jian	5648
 葡萄牙语	pu tao ya yu	9627
+案发现场	an fa xian chang	5637
 这样一来	zhe yang yi lai	9625
 阿拉伯人	a la bo ren	9623
 黑龙江省	hei long jiang sheng	9621
@@ -189,11 +236,12 @@
 野生动物	ye sheng dong wu	9606
 与众不同	yu zhong bu tong	9603
 人工智能	ren gong zhi neng	9601
-可不可以	ke bu ke yi	9599
 各种各样	ge zhong ge yang	9597
+从头开始	cong tou kai shi	5590
 格鲁吉亚	ge lu ji ya	9595
 谢谢你们	xie xie ni men	9593
 圣彼得堡	sheng bi de bao	9590
+想不起来	xiang bu qi lai	5543
 奥林匹克	ao lin pi ke	9588
 广播电台	guang bo dian tai	9586
 改革开放	gai ge kai fang	9584
@@ -201,6 +249,7 @@
 爱因斯坦	ai yin si tan	9580
 竞争对手	jing zheng dui shou	9578
 莎士比亚	sha shi bi ya	9575
+筹备工作	chou bei gong zuo	5508
 乱七八糟	luan qi ba zao	9573
 全心全意	quan xin quan yi	9571
 四分之一	si fen zhi yi	9569
@@ -222,6 +271,7 @@
 一无所知	yi wu suo zhi	9534
 不仅如此	bu jin ru ci	9532
 中山大学	zhong shan da xue	9530
+社会工作	she hui gong zuo	5398
 在我看来	zai wo kan lai	9528
 巴塞罗那	ba sai luo na	9526
 引人注目	yin ren zhu mu	9524
@@ -229,6 +279,7 @@
 搜索引擎	sou suo yin qing	9519
 有色金属	you se jin shu	9517
 自然而然	zi ran er ran	9515
+不成问题	bu cheng wen ti	5368
 为所欲为	wei suo yu wei	9513
 信息技术	xin xi ji shu	9511
 值得注意	zhi de zhu yi	9509
@@ -247,13 +298,11 @@
 世界银行	shi jie yin hang	9481
 别无选择	bie wu xuan ze	9478
 千方百计	qian fang bai ji	9476
-在此之前	zai ci zhi qian	9474
 工人阶级	gong ren jie ji	9472
 弹道导弹	dan dao dao dan	9470
 短篇小说	duan pian xiao shuo	9468
 轨道交通	gui dao jiao tong	9465
 一国两制	yi guo liang zhi	9463
-一般来说	yi ban lai shuo	9461
 天文学家	tian wen xue jia	9459
 未成年人	wei cheng nian ren	9457
 波多黎各	bo duo li ge	9455
@@ -267,6 +316,7 @@
 师范学院	shi fan xue yuan	9437
 新闻自由	xin wen zi you	9435
 朝鲜半岛	chao xian ban dao	9433
+再也不能	zai ye bu neng	5109
 相互作用	xiang hu zuo yong	9431
 个人资料	ge ren zi liao	9429
 意想不到	yi xiang bu dao	9427
@@ -283,13 +333,14 @@
 株式会社	zhu shi hui she	9403
 此时此刻	ci shi ci ke	9401
 毫无意义	hao wu yi yi	9399
-真不知道	zhen bu zhi dao	9396
 自以为是	zi yi wei shi	9394
 西班牙人	xi ban ya ren	9392
 购物中心	gou wu zhong xin	9390
 迫不及待	po bu ji dai	9388
 音乐学院	yin yue xue yuan	9386
+前段时间	qian duan shi jian	4984
 中文字幕	zhong wen zi mu	9384
+回想起来	hui xiang qi lai	4974
 各式各样	ge shi ge yang	9381
 媒体报道	mei ti bao dao	9379
 布鲁塞尔	bu lu sai er	9377
@@ -328,10 +379,10 @@
 佛罗里达	fu luo li da	9306
 公安机关	gong an ji guan	9304
 太平天国	tai ping tian guo	9302
-并不知道	bing bu zhi dao	9299
 手无寸铁	shou wu cun tie	9297
 控制系统	kong zhi xi tong	9295
 文艺复兴	wen yi fu xing	9293
+问题所在	wen ti suo zai	4760
 第三世界	di san shi jie	9291
 自古以来	zi gu yi lai	9289
 迄今为止	qi jin wei zhi	9287
@@ -340,7 +391,6 @@
 世界大战	shi jie da zhan	9280
 卡斯特罗	ka si te luo	9278
 实实在在	shi shi zai zai	9276
-息息相关	xi xi xiang guan	9274
 愈演愈烈	yu yan yu lie	9271
 政治委员	zheng zhi wei yuan	9269
 英国伦敦	ying guo lun dun	9267
@@ -361,6 +411,7 @@
 三分之二	san fen zhi er	9235
 不可或缺	bu ke huo que	9233
 交响乐团	jiao xiang yue tuan	9231
+亲眼看到	qin yan kan dao	4590
 从业人员	cong ye ren yuan	9228
 公共场所	gong gong chang suo	9226
 在世界上	zai shi jie shang	9224
@@ -372,10 +423,12 @@
 有线电视	you xian dian shi	9211
 百科全书	bai ke quan shu	9209
 职业生涯	zhi ye sheng ya	9207
+拖延时间	tuo yan shi jian	4532
 萨尔瓦多	sa er wa duo	9205
 一举一动	yi ju yi dong	9202
 东北地区	dong bei di qu	9200
 共产党人	gong chan dang ren	9198
+种族问题	zhong zu wen ti	4512
 十字路口	shi zi lu kou	9196
 单机游戏	dan ji you xi	9194
 取而代之	qu er dai zhi	9192
@@ -386,6 +439,7 @@
 蒙特利尔	meng te li er	9181
 行政部门	xing zheng bu men	9179
 辩护律师	bian hu lv shi	9177
+上班时间	shang ban shi jian	4473
 长篇小说	chang pian xiao shuo	9174
 业内人士	ye nei ren shi	9172
 个人信息	ge ren xin xi	9170
@@ -402,6 +456,7 @@
 不感兴趣	bu gan xing qu	9146
 专业人士	zhuan ye ren shi	9144
 候补委员	hou bu wei yuan	9142
+申请加入	shen qing jia ru	4366
 加拿大人	jia na da ren	9140
 化学武器	hua xue wu qi	9138
 厄瓜多尔	e gua duo er	9136
@@ -411,7 +466,9 @@
 财政部长	cai zheng bu zhang	9127
 邮政编码	you zheng bian ma	9125
 金融服务	jin rong fu wu	9123
+不能自己	bu neng zi ji	4320
 下落不明	xia luo bu ming	9121
+从零开始	cong ling kai shi	4310
 周年纪念	zhou nian ji nian	9118
 大马士革	da ma shi ge	9116
 某种程度	mou zhong cheng du	9114
@@ -436,11 +493,11 @@
 网络游戏	wang luo you xi	9073
 航空母舰	hang kong mu jian	9071
 谢天谢地	xie tian xie di	9069
+一般说来	yi ban shuo lai	4215
 高等法院	gao deng fa yuan	9067
 人力资源	ren li zi yuan	9065
 南京大学	nan jing da xue	9062
 博士学位	bo shi xue wei	9060
-团结起来	tuan jie qi lai	9058
 有所作为	you suo zuo wei	9056
 服务中心	fu wu zhong xin	9054
 没完没了	mei wan mei liao	9052
@@ -463,6 +520,7 @@
 苹果公司	ping guo gong si	9015
 逍遥法外	xiao yao fa wai	9013
 香港政府	xiang gang zheng fu	9011
+专利申请	zhuan li shen qing	4062
 世界末日	shi jie mo ri	9009
 世界遗产	shi jie yi chan	9006
 五四运动	wu si yun dong	9004
@@ -485,6 +543,7 @@
 不切实际	bu qie shi ji	8968
 军事基地	jun shi ji di	8965
 宗教自由	zong jiao zi you	8963
+觉得很有	jue de hen you	3954
 必不可少	bi bu ke shao	8961
 恢复正常	hui fu zheng chang	8959
 或多或少	huo duo huo shao	8957
@@ -506,11 +565,11 @@
 再生能源	zai sheng neng yuan	8922
 各行各业	ge hang ge ye	8920
 国家机关	guo jia ji guan	8918
-多长时间	duo zhang shi jian	8916
 总统大选	zong tong da xuan	8914
 政治权利	zheng zhi quan li	8912
 文化交流	wen hua jiao liu	8909
 无处不在	wu chu bu zai	8907
+抓紧时间	zhua jin shi jian	3844
 气候变化	qi hou bian hua	8905
 统计数据	tong ji shu ju	8903
 综艺节目	zong yi jie mu	8901
@@ -521,6 +580,7 @@
 中国银行	zhong guo yin hang	8890
 供不应求	gong bu ying qiu	8888
 可口可乐	ke kou ke le	8886
+见识一下	jian shi yi xia	3788
 大吃一惊	da chi yi jing	8883
 实际行动	shi ji xing dong	8881
 很久以前	hen jiu yi qian	8879
@@ -533,6 +593,7 @@
 考古学家	kao gu xue jia	8864
 联席会议	lian xi hui yi	8862
 自我介绍	zi wo jie shao	8860
+不能自拔	bu neng zi ba	3767
 退伍军人	tui wu jun ren	8858
 阶级斗争	jie ji dou zheng	8855
 高速铁路	gao su tie lu	8853
@@ -542,18 +603,20 @@
 从头到尾	cong tou dao wei	8845
 化学反应	hua xue fan ying	8843
 在历史上	zai li shi shang	8840
+性工作者	xing gong zuo zhe	3719
 异议人士	yi yi ren shi	8838
 恐怖袭击	kong bu xi ji	8836
 无动于衷	wu dong yu zhong	8834
+欲罢不能	yu ba bu neng	3693
 突如其来	tu ru qi lai	8832
 耶稣基督	ye su ji du	8830
 香格里拉	xiang ge li la	8827
-不太可能	bu tai ke neng	8825
 不遗余力	bu yi yu li	8823
 中央委员	zhong yang wei yuan	8821
 主任委员	zhu ren wei yuan	8819
 全部都是	quan bu dou shi	8817
 关键时刻	guan jian shi ke	8815
+连接起来	lian jie qi lai	3648
 呼和浩特	hu he hao te	8812
 唯物主义	wei wu zhu yi	8810
 国家元首	guo jia yuan shou	8808
@@ -567,12 +630,12 @@
 莫桑比克	mo sang bi ke	8791
 轰轰烈烈	hong hong lie lie	8789
 错综复杂	cuo zong fu za	8786
-一般而言	yi ban er yan	8784
 仅此而已	jin ci er yi	8782
 利比里亚	li bi li ya	8780
 医护人员	yi hu ren yuan	8778
 团结一致	tuan jie yi zhi	8776
 国有企业	guo you qi ye	8774
+感受一下	gan shou yi xia	3542
 富兰克林	fu lan ke lin	8771
 弗吉尼亚	fu ji ni ya	8769
 总工程师	zong gong cheng shi	8767
@@ -599,7 +662,6 @@
 手机号码	shou ji hao ma	8722
 看不出来	kan bu chu lai	8720
 精神病院	jing shen bing yuan	8718
-继续下去	ji xu xia qu	8715
 自由贸易	zi you mao yi	8713
 至高无上	zhi gao wu shang	8711
 话说回来	hua shuo hui lai	8709
@@ -620,7 +682,6 @@
 坚定不移	jian ding bu yi	8677
 基础教育	ji chu jiao yu	8674
 塞内加尔	sai nei jia er	8672
-工作岗位	gong zuo gang wei	8670
 归根结底	gui gen jie di	8668
 当之无愧	dang zhi wu kui	8666
 意大利语	yi da li yu	8664
@@ -680,7 +741,6 @@
 无所事事	wu suo shi shi	8547
 日本首相	ri ben shou xiang	8545
 生态环境	sheng tai huan jing	8543
-知不知道	zhi bu zhi dao	8541
 科罗拉多	ke luo la duo	8539
 纪念活动	ji nian huo dong	8536
 纳米比亚	na mi bi ya	8534
@@ -705,6 +765,7 @@
 胡思乱想	hu si luan xiang	8493
 自始至终	zi shi zhi zhong	8491
 自给自足	zi ji zi zu	8489
+提出申请	ti chu shen qing	3103
 首都机场	shou du ji chang	8487
 一成不变	yi cheng bu bian	8485
 中央集权	zhong yang ji quan	8483
@@ -718,10 +779,11 @@
 波斯尼亚	bo si ni ya	8465
 美国空军	mei guo kong jun	8463
 行政长官	xing zheng zhang guan	8461
-解释一下	jie shi yi xia	8459
 赫鲁晓夫	he lu xiao fu	8457
 集成电路	ji cheng dian lu	8455
+业余时间	ye yu shi jian	3025
 一帆风顺	yi fan feng shun	8452
+关键问题	guan jian wen ti	3001
 亲眼目睹	qin yan mu du	8450
 从根本上	cong gen ben shang	8448
 公共服务	gong gong fu wu	8446
@@ -747,13 +809,13 @@
 与你同在	yu ni tong zai	8403
 世贸组织	shi mao zu zhi	8401
 健康状况	jian kang zhuang kuang	8399
+详细情况	xiang xi qing kuang	2907
 哈哈大笑	ha ha da xiao	8396
 地方法院	di fang fa yuan	8394
 天主教会	tian zhu jiao hui	8392
 安东尼奥	an dong ni ao	8390
 弗洛伊德	fu luo yi de	8388
 怎样才能	zen yang cai neng	8386
-早些时候	zao xie shi hou	8383
 梦寐以求	meng mei yi qiu	8381
 毋庸置疑	wu yong zhi yi	8379
 民主人士	min zhu ren shi	8377
@@ -762,6 +824,7 @@
 电子产品	dian zi chan pin	8371
 维吉尼亚	wei ji ni ya	8368
 股份公司	gu fen gong si	8366
+充满希望	chong man xi wang	2863
 一清二楚	yi qing er chu	8364
 两国关系	liang guo guan xi	8362
 乌兹别克	wu zi bie ke	8360
@@ -783,7 +846,6 @@
 一视同仁	yi shi tong ren	8325
 交易平台	jiao yi ping tai	8323
 党组书记	dang zu shu ji	8321
-同一时间	tong yi shi jian	8319
 商业模式	shang ye mo shi	8317
 四面八方	si mian ba fang	8314
 因地制宜	yin di zhi yi	8312
@@ -814,8 +876,8 @@
 君主立宪	jun zhu li xian	8258
 墨西哥人	mo xi ge ren	8256
 平民百姓	ping min bai xing	8254
+比较严重	bi jiao yan zhong	2639
 年轻一代	nian qing yi dai	8252
-并不需要	bing bu xu yao	8250
 应有尽有	ying you jin you	8248
 很多很多	hen duo hen duo	8245
 忍无可忍	ren wu ke ren	8243
@@ -829,7 +891,6 @@
 英国首相	ying guo shou xiang	8226
 轻描淡写	qing miao dan xie	8224
 这些年来	zhe xie nian lai	8222
-一点一点	yi dian yi dian	8220
 一目了然	yi mu liao ran	8217
 三民主义	san min zhu yi	8215
 不由自主	bu you zi zhu	8213
@@ -857,6 +918,7 @@
 货真价实	huo zhen jia shi	8166
 阿弥陀佛	e mi tuo fo	8164
 韩国政府	han guo zheng fu	8161
+敬请期待	jing qing qi dai	2491
 丰富多彩	feng fu duo cai	8159
 人民代表	ren min dai biao	8157
 亿万富翁	yi wan fu weng	8155
@@ -882,7 +944,6 @@
 许许多多	xu xu duo duo	8112
 货币政策	huo bi zheng ce	8110
 违规行为	wei gui xing wei	8108
-迫切需要	po qie xu yao	8105
 门户网站	men hu wang zhan	8103
 阿尔伯特	a er bo te	8101
 面对现实	mian dui xian shi	8099
@@ -896,7 +957,6 @@
 克什米尔	ke shi mi er	8082
 全体会议	quan ti hui yi	8080
 公共交通	gong gong jiao tong	8077
-刚刚开始	gang gang kai shi	8075
 加州大学	jia zhou da xue	8073
 去年同期	qu nian tong qi	8071
 可见一斑	ke jian yi ban	8069
@@ -916,11 +976,11 @@
 热带雨林	re dai yu lin	8039
 爆炸事件	bao zha shi jian	8036
 犹豫不决	you yu bu jue	8034
-真实情况	zhen shi qing kuang	8032
 神经系统	shen jing xi tong	8030
 管理中心	guan li zhong xin	8028
 经济体制	jing ji ti zhi	8026
 越来越少	yue lai yue shao	8023
+认识一下	ren shi yi xia	2307
 针锋相对	zhen feng xiang dui	8021
 黄金时代	huang jin shi dai	8019
 一见钟情	yi jian zhong qing	8017
@@ -944,6 +1004,7 @@
 海洋生物	hai yang sheng wu	7978
 深化改革	shen hua gai ge	7976
 犯罪分子	fan zui fen zi	7974
+寄希望于	ji xi wang yu	2228
 综合治理	zong he zhi li	7972
 自相矛盾	zi xiang mao dun	7970
 赫尔辛基	he er xin ji	7967
@@ -955,7 +1016,6 @@
 不得而知	bu de er zhi	7955
 不管怎么	bu guan zen me	7952
 主营业务	zhu ying ye wu	7950
-从今以后	cong jin yi hou	7948
 从小到大	cong xiao dao da	7946
 从未有过	cong wei you guo	7944
 南华早报	nan hua zao bao	7942
@@ -1100,6 +1160,7 @@
 广播节目	guang bo jie mu	7642
 感谢上帝	gan xie shang di	7640
 愿不愿意	yuan bu yuan yi	7638
+争取时间	zheng qu shi jian	1786
 文学作品	wen xue zuo pin	7636
 旗帜鲜明	qi zhi xian ming	7633
 注意事项	zhu yi shi xiang	7631
@@ -1153,7 +1214,6 @@
 上帝保佑	shang di bao you	7528
 不可分割	bu ke fen ge	7526
 与日俱增	yu ri ju zeng	7523
-从此以后	cong ci yi hou	7521
 以身作则	yi shen zuo ze	7519
 伊莉莎白	yi li sha bai	7517
 力所能及	li suo neng ji	7515
@@ -1183,6 +1243,7 @@
 违法犯罪	wei fa fan zui	7463
 风云人物	feng yun ren wu	7461
 黄埔军校	huang pu jun xiao	7459
+民生问题	min sheng wen ti	1568
 一厢情愿	yi xiang qing yuan	7457
 不堪一击	bu kan yi ji	7454
 不算什么	bu suan shen me	7452
@@ -1219,6 +1280,7 @@
 认真学习	ren zhen xue xi	7385
 辛辛苦苦	xin xin ku ku	7383
 适得其反	shi de qi fan	7381
+从那以后	cong na yi hou	1477
 顺其自然	shun qi zi ran	7379
 一切顺利	yi qie shun li	7377
 一本正经	yi ben zheng jing	7375
@@ -1274,6 +1336,7 @@
 双边关系	shuang bian guan xi	7269
 同性恋者	tong xing lian zhe	7267
 后顾之忧	hou gu zhi you	7265
+需不需要	xu bu xu yao	1352
 售后服务	shou hou fu wu	7263
 国家机密	guo jia ji mi	7260
 国家标准	guo jia biao zhun	7258
@@ -1281,7 +1344,6 @@
 官方语言	guan fang yu yan	7254
 实话实说	shi hua shi shuo	7252
 家庭教育	jia ting jiao yu	7250
-密切相关	mi qie xiang guan	7248
 引人入胜	yin ren ru sheng	7245
 当代艺术	dang dai yi shu	7243
 托尔斯泰	tuo er si tai	7241
@@ -1333,7 +1395,6 @@
 热烈欢迎	re lie huan ying	7144
 犯罪现场	fan zui xian chang	7142
 电动汽车	dian dong qi che	7140
-管理工作	guan li gong zuo	7138
 职业道德	zhi ye dao de	7135
 脊椎动物	ji zhui dong wu	7133
 训练有素	xun lian you su	7131
@@ -1383,7 +1444,6 @@
 鸡皮疙瘩	ji pi ge da	7036
 一千五百	yi qian wu bai	7034
 一夜之间	yi ye zhi jian	7032
-一点一滴	yi dian yi di	7030
 不屈不挠	bu qu bu nao	7028
 专家学者	zhuan jia xue zhe	7026
 个人利益	ge ren li yi	7023
@@ -1400,14 +1460,11 @@
 恐怖事件	kong bu shi jian	7000
 房地产业	fang di chan ye	6997
 提心吊胆	ti xin diao dan	6995
-故事情节	gu shi qing jie	6993
 数一数二	shu yi shu er	6991
 欧洲央行	ou zhou yang hang	6989
-没有勇气	mei you yong qi	6987
 特拉维夫	te la wei fu	6985
 电子设备	dian zi she bei	6982
 电视广告	dian shi guang gao	6980
-紧急情况	jin ji qing kuang	6978
 美国之音	mei guo zhi yin	6976
 说到做到	shuo dao zuo dao	6974
 贸易协定	mao yi xie ding	6972
@@ -1493,6 +1550,7 @@
 迎刃而解	ying ren er jie	6804
 进退两难	jin tui liang nan	6801
 铺天盖地	pu tian gai di	6799
+时候未到	shi hou wei dao	764
 项目管理	xiang mu guan li	6797
 高度评价	gao du ping jia	6795
 黑色幽默	hei se you mo	6793
@@ -1513,7 +1571,6 @@
 国家主权	guo jia zhu quan	6763
 国家教委	guo jia jiao wei	6763
 如出一辙	ru chu yi zhe	6760
-工作效率	gong zuo xiao lv	6758
 平方公尺	ping fang gong chi	6756
 建筑工程	jian zhu gong cheng	6754
 弄虚作假	nong xu zuo jia	6752
@@ -1526,11 +1583,9 @@
 斯图尔特	si tu er te	6737
 施加压力	shi jia ya li	6735
 旅游胜地	lv you sheng di	6735
-无所不能	wu suo bu neng	6732
 无神论者	wu shen lun zhe	6730
 明目张胆	ming mu zhang dan	6728
 核磁共振	he ci gong zhen	6726
-比较简单	bi jiao jian dan	6724
 水深火热	shui shen huo re	6722
 离家出走	li jia chu zou	6719
 科夫斯基	ke fu si ji	6719
@@ -1551,7 +1606,6 @@
 众说纷纭	zhong shuo fen yun	6687
 你死我活	ni si wo huo	6685
 光明正大	guang ming zheng da	6683
-具体情况	ju ti qing kuang	6681
 势在必行	shi zai bi xing	6678
 发表文章	fa biao wen zhang	6676
 取得胜利	qu de sheng li	6674
@@ -1565,11 +1619,10 @@
 惊心动魄	jing xin dong po	6657
 想尽办法	xiang jin ban fa	6655
 感到高兴	gan dao gao xing	6653
+思考问题	si kao wen ti	598
 改头换面	gai tou huan mian	6650
 放在心上	fang zai xin shang	6648
 数据中心	shu ju zhong xin	6646
-最后通牒	zui hou tong die	6644
-本职工作	ben zhi gong zuo	6642
 民国时期	min guo shi qi	6640
 注册商标	zhu ce shang biao	6638
 流行歌曲	liu xing ge qu	6635
@@ -1586,6 +1639,7 @@
 锦上添花	jin shang tian hua	6614
 霸权主义	ba quan zhu yi	6612
 驻华大使	zhu hua da shi	6610
+请多关照	qing duo guan zhao	542
 万亿美元	wan yi mei yuan	6607
 三峡大坝	san xia da ba	6605
 不是故意	bu shi gu yi	6603
@@ -1664,6 +1718,7 @@
 日日夜夜	ri ri ye ye	6452
 最低工资	zui di gong zi	6450
 有害物质	you hai wu zhi	6448
+辛勤工作	xin qin gong zuo	383
 法律制裁	fa lv zhi cai	6446
 玉女心经	yu nv xin jing	6444
 甲午战争	jia wu zhan zheng	6441
@@ -1722,9 +1777,9 @@
 道德规范	dao de gui fan	6334
 重中之重	zhong zhong zhi zhong	6331
 长途跋涉	chang tu ba she	6329
+腐败问题	fu bai wen ti	219
 非常容易	fei chang rong yi	6327
 高高兴兴	gao gao xing xing	6325
-一般见识	yi ban jian shi	6323
 不可开交	bu ke kai jiao	6321
 东南大学	dong nan da xue	6319
 个人隐私	ge ren yin si	6316
@@ -1746,7 +1801,6 @@
 大同小异	da tong xiao yi	6286
 大气污染	da qi wu ran	6284
 奴隶制度	nu li zhi du	6282
-好的开始	hao de kai shi	6280
 孙子兵法	sun zi bing fa	6278
 少之又少	shao zhi you shao	6275
 居高不下	ju gao bu xia	6273
@@ -1773,7 +1827,6 @@
 人类学家	ren lei xue jia	6230
 从那时起	cong na shi qi	6230
 任重道远	ren zhong dao yuan	6228
-休息时间	xiu xi shi jian	6226
 传奇人物	chuan qi ren wu	6224
 千万美元	qian wan mei yuan	6222
 卫生部门	wei sheng bu men	6219
@@ -1794,7 +1847,6 @@
 无所不在	wu suo bu zai	6189
 明文规定	ming wen gui ding	6187
 明末清初	ming mo qing chu	6187
-晚些时候	wan xie shi hou	6185
 暴力事件	bao li shi jian	6185
 梦想成真	meng xiang cheng zhen	6183
 武警部队	wu jing bu dui	6181
@@ -1809,11 +1861,8 @@
 瞬息万变	shun xi wan bian	6166
 空无一人	kong wu yi ren	6163
 绞尽脑汁	jiao jin nao zhi	6161
-继续前进	ji xu qian jin	6159
-考虑一下	kao lv yi xia	6157
 脱贫致富	tuo pin zhi fu	6155
 自上而下	zi shang er xia	6153
-营业时间	ying ye shi jian	6150
 虚张声势	xu zhang sheng shi	6148
 行政处罚	xing zheng chu fa	6146
 装机容量	zhuang ji rong liang	6144
@@ -1838,6 +1887,7 @@
 在所难免	zai suo nan mian	6105
 外籍人士	wai ji ren shi	6103
 多多少少	duo duo shao shao	6101
+常见问题	chang jian wen ti	122
 室内设计	shi nei she ji	6099
 小心谨慎	xiao xin jin shen	6097
 市场营销	shi chang ying xiao	6094
@@ -1920,7 +1970,6 @@
 一生一世	yi sheng yi shi	5937
 上海浦东	shang hai pu dong	5935
 不容忽视	bu rong hu shi	5933
-不能容忍	bu neng rong ren	5931
 乌尔都语	wu er dou yu	5928
 九三学社	jiu san xue she	5928
 亲密关系	qin mi guan xi	5926
@@ -1935,6 +1984,7 @@
 危言耸听	wei yan song ting	5909
 即时通讯	ji shi tong xun	5907
 因人而异	yin ren er yi	5905
+继续执行	ji xu zhi xing	120
 奴隶社会	nu li she hui	5903
 家破人亡	jia po ren wang	5900
 山东大学	shan dong da xue	5898
@@ -1964,6 +2014,8 @@
 美梦成真	mei meng cheng zhen	5849
 自我批评	zi wo pi ping	5847
 解决不了	jie jue bu liao	5844
+不大可能	bu da ke neng	117
+不请自来	bu qing zi lai	115
 防暴警察	fang bao jing cha	5842
 一大笔钱	yi da bi qian	5840
 不可抗力	bu ke kang li	5838
@@ -1984,6 +2036,7 @@
 半途而废	ban tu er fei	5808
 单枪匹马	dan qiang pi ma	5806
 发动战争	fa dong zhan zheng	5803
+好长时间	hao zhang shi jian	113
 发展趋势	fa zhan qu shi	5803
 变形金刚	bian xing jin gang	5801
 司法部门	si fa bu men	5799
@@ -2061,12 +2114,10 @@
 开门见山	kai men jian shan	5655
 恶性肿瘤	e xing zhong liu	5653
 抗震救灾	kang zhen jiu zai	5650
-持续时间	chi xu shi jian	5648
 数码相机	shu ma xiang ji	5646
 文化部长	wen hua bu zhang	5644
 新闻资讯	xin wen zi xun	5642
 春暖花开	chun nuan hua kai	5640
-案发现场	an fa xian chang	5637
 梅赛德斯	mei sai de si	5635
 欢欣鼓舞	huan xin gu wu	5633
 此起彼伏	ci qi bi fu	5631
@@ -2075,6 +2126,9 @@
 第十一条	di shi yi tiao	5624
 等离子体	deng li zi ti	5624
 简而言之	jian er yan zhi	5622
+就此结束	jiu ci jie shu	111
+希望工程	xi wang gong cheng	109
+应不应该	ying bu ying gai	107
 自然规律	zi ran gui lv	5620
 至今已有	zhi jin yi you	5618
 艺术创作	yi shu chuang zuo	5616
@@ -2089,7 +2143,6 @@
 二十八日	er shi ba ri	5596
 亲眼看见	qin yan kan jian	5594
 人身自由	ren shen zi you	5592
-从头开始	cong tou kai shi	5590
 体育老师	ti yu lao shi	5588
 使用暴力	shi yong bao li	5586
 党政机关	dang zheng ji guan	5584
@@ -2112,7 +2165,6 @@
 得不偿失	de bu chang shi	5549
 总参谋部	zong can mou bu	5547
 总政治部	zong zheng zhi bu	5545
-想不起来	xiang bu qi lai	5543
 感到遗憾	gan dao yi han	5543
 方兴未艾	fang xing wei ai	5540
 明明白白	ming ming bai bai	5538
@@ -2130,7 +2182,6 @@
 移动电话	yi dong dian hua	5515
 站不住脚	zhan bu zhu jiao	5512
 筋疲力尽	jin pi li jin	5510
-筹备工作	chou bei gong zuo	5508
 经常出现	jing chang chu xian	5506
 经济特区	jing ji te qu	5504
 美国使馆	mei guo shi guan	5502
@@ -2141,6 +2192,7 @@
 长生不老	chang sheng bu lao	5491
 陆陆续续	lu lu xu xu	5489
 随身携带	sui shen xie dai	5487
+及时发现	ji shi fa xian	104
 一声令下	yi sheng ling xia	5484
 一言为定	yi yan wei ding	5482
 不值一提	bu zhi yi ti	5480
@@ -2181,7 +2233,6 @@
 现身说法	xian shen shuo fa	5405
 百分之五	bai fen zhi wu	5402
 相依为命	xiang yi wei ming	5400
-社会工作	she hui gong zuo	5398
 种族隔离	zhong zu ge li	5396
 美国作家	mei guo zuo jia	5394
 自动步枪	zi dong bu qiang	5392
@@ -2196,7 +2247,6 @@
 一败涂地	yi bai tu di	5372
 上层建筑	shang ceng jian zhu	5370
 不以为意	bu yi wei yi	5368
-不成问题	bu cheng wen ti	5368
 东山再起	dong shan zai qi	5366
 中国时报	zhong guo shi bao	5364
 主权国家	zhu quan guo jia	5362
@@ -2254,6 +2304,7 @@
 行政公署	xing zheng gong shu	5258
 近在咫尺	jin zai zhi chi	5256
 进进出出	jin jin chu chu	5254
+热点问题	re dian wen ti	102
 麻木不仁	ma mu bu ren	5252
 一字一句	yi zi yi ju	5249
 不堪设想	bu kan she xiang	5247
@@ -2268,6 +2319,7 @@
 佛教协会	fo jiao xie hui	5230
 公共事务	gong gong shi wu	5228
 公安部门	gong an bu men	5226
+节省时间	jie sheng shi jian	100
 加德满都	jia de man dou	5224
 千篇一律	qian pian yi lv	5221
 取得联系	qu de lian xi	5219
@@ -2324,7 +2376,6 @@
 停不下来	ting bu xia lai	5114
 关键人物	guan jian ren wu	5112
 关键因素	guan jian yin su	5112
-再也不能	zai ye bu neng	5109
 出人头地	chu ren tou di	5107
 劳动模范	lao dong mo fan	5105
 十几分钟	shi ji fen zhong	5103
@@ -2355,6 +2406,7 @@
 民间团体	min jian tuan ti	5049
 永无止境	yong wu zhi jing	5047
 源远流长	yuan yuan liu chang	5045
+站不起来	zhan bu qi lai	98
 登峰造极	deng feng zao ji	5043
 相对而言	xiang dui er yan	5040
 耸人听闻	song ren ting wen	5038
@@ -2385,12 +2437,10 @@
 党的领导	dang de ling dao	4989
 内阁总理	nei ge zong li	4986
 到来之际	dao lai zhi ji	4984
-前段时间	qian duan shi jian	4984
 区委书记	qu wei shu ji	4982
 南太平洋	nan tai ping yang	4980
 各位朋友	ge wei peng you	4978
 善解人意	shan jie ren yi	4976
-回想起来	hui xiang qi lai	4974
 国事访问	guo shi fang wen	4971
 圣日耳曼	sheng ri er man	4969
 堂堂正正	tang tang zheng zheng	4967
@@ -2420,6 +2470,7 @@
 示威游行	shi wei you xing	4920
 社会变革	she hui bian ge	4918
 第十一届	di shi yi jie	4915
+工作部门	gong zuo bu men	96
 置身事外	zhi shen shi wai	4913
 考试成绩	kao shi cheng ji	4911
 股票市场	gu piao shi chang	4909
@@ -2460,6 +2511,7 @@
 公司总裁	gong si zong cai	4846
 军事学院	jun shi xue yuan	4844
 别具一格	bie ju yi ge	4842
+继续加强	ji xu jia qiang	94
 参考资料	can kao zi liao	4840
 发自内心	fa zi nei xin	4838
 哈尔科夫	ha er ke fu	4836
@@ -2473,6 +2525,7 @@
 安全监管	an quan jian guan	4823
 尽心尽力	jin xin jin li	4821
 平易近人	ping yi jin ren	4818
+辛苦工作	xin ku gong zuo	92
 异乎寻常	yi hu xun chang	4816
 异曲同工	yi qu tong gong	4816
 引以为傲	yin yi wei ao	4814
@@ -2494,6 +2547,7 @@
 牢狱之灾	lao yu zhi zai	4784
 玻利瓦尔	bo li wa er	4782
 综上所述	zong shang suo shu	4780
+下班时间	xia ban shi jian	89
 航空航天	hang kong hang tian	4777
 色情电影	se qing dian ying	4775
 著名作家	zhu ming zuo jia	4773
@@ -2504,7 +2558,6 @@
 西沙群岛	xi sha qun dao	4767
 读卖新闻	du mai xin wen	4764
 近几个月	jin ji ge yue	4762
-问题所在	wen ti suo zai	4760
 防不胜防	fang bu sheng fang	4758
 阿基米德	a ji mi de	4756
 顺利进行	shun li jin xing	4754
@@ -2591,7 +2644,6 @@
 举例来说	ju li lai shuo	4596
 乐于助人	le yu zhu ren	4594
 事半功倍	shi ban gong bei	4592
-亲眼看到	qin yan kan dao	4590
 人才培养	ren cai pei yang	4588
 令人羡慕	ling ren xian mu	4588
 似是而非	si shi er fei	4586
@@ -2620,7 +2672,6 @@
 心里有数	xin li you shu	4538
 户外活动	hu wai huo dong	4536
 所见所闻	suo jian suo wen	4534
-拖延时间	tuo yan shi jian	4532
 按劳分配	an lao fen pei	4530
 接踵而至	jie zhong er zhi	4527
 文章内容	wen zhang nei rong	4525
@@ -2629,13 +2680,14 @@
 易卜拉欣	yi bo la xin	4519
 水土保持	shui tu bao chi	4517
 消息来源	xiao xi lai yuan	4514
-种族问题	zhong zu wen ti	4512
 穿越时空	chuan yue shi kong	4510
 立法机关	li fa ji guan	4508
 第二季度	di er ji du	4508
 等等等等	deng deng deng deng	4506
 经济制裁	jing ji zhi cai	4504
 缺一不可	que yi bu ke	4502
+异常情况	yi chang qing kuang	87
+情况严重	qing kuang yan zhong	85
 讨人喜欢	tao ren xi huan	4499
 语言表达	yu yan biao da	4497
 说不清楚	shuo bu qing chu	4497
@@ -2650,7 +2702,6 @@
 一无所获	yi wu suo huo	4478
 一百一十	yi bai yi shi	4478
 一言难尽	yi yan nan jin	4476
-上班时间	shang ban shi jian	4473
 严格执行	yan ge zhi xing	4471
 个人观点	ge ren guan dian	4469
 中枢神经	zhong shu shen jing	4469
@@ -2695,6 +2746,7 @@
 学前教育	xue qian jiao yu	4396
 安全漏洞	an quan lou dong	4396
 尽善尽美	jin shan jin mei	4394
+遗留问题	yi liu wen ti	83
 征求意见	zheng qiu yi jian	4392
 待在家里	dai zai jia li	4389
 循环系统	xun huan xi tong	4389
@@ -2708,7 +2760,6 @@
 毁于一旦	hui yu yi dan	4372
 游刃有余	you ren you yu	4370
 爬行动物	pa xing dong wu	4368
-申请加入	shen qing jia ru	4366
 百事可乐	bai shi ke le	4364
 百分之十	bai fen zhi shi	4364
 私家侦探	si jia zhen tan	4361
@@ -2732,14 +2783,14 @@
 陷入僵局	xian ru jiang ju	4325
 集体经济	ji ti jing ji	4325
 风风雨雨	feng feng yu yu	4323
-不能自己	bu neng zi ji	4320
+圆满结束	yuan man jie shu	81
 世外桃源	shi wai tao yuan	4318
 世界之最	shi jie zhi zui	4318
 东张西望	dong zhang xi wang	4316
 于事无补	yu shi wu bu	4314
 交通管理	jiao tong guan li	4312
-从零开始	cong ling kai shi	4310
 伊拉克人	yi la ke ren	4308
+感觉得到	gan jue de dao	79
 军事冲突	jun shi chong tu	4305
 农业银行	nong ye yin hang	4303
 分崩离析	fen beng li xi	4301
@@ -2787,7 +2838,6 @@
 一年四季	yi nian si ji	4219
 一朝一夕	yi zhao yi xi	4219
 一百五十	yi bai wu shi	4217
-一般说来	yi ban shuo lai	4215
 严格控制	yan ge kong zhi	4213
 中超联赛	zhong chao lian sai	4211
 乐观主义	le guan zhu yi	4208
@@ -2863,7 +2913,6 @@
 一窍不通	yi qiao bu tong	4066
 不绝于耳	bu jue yu er	4064
 与我无关	yu wo wu guan	4064
-专利申请	zhuan li shen qing	4062
 严厉批评	yan li pi ping	4060
 事故现场	shi gu xian chang	4058
 五彩缤纷	wu cai bin fen	4055
@@ -2881,6 +2930,7 @@
 勤工俭学	qin gong jian xue	4032
 北京奥运	bei jing ao yun	4032
 千载难逢	qian zai nan feng	4029
+问个问题	wen ge wen ti	76
 叽叽喳喳	ji ji zha zha	4027
 吃苦耐劳	chi ku nai lao	4025
 天长地久	tian chang di jiu	4023
@@ -2920,7 +2970,6 @@
 花样滑冰	hua yang hua bing	3958
 落荒而逃	luo huang er tao	3956
 西西里岛	xi xi li dao	3954
-觉得很有	jue de hen you	3954
 语重心长	yu zhong xin chang	3952
 贝加尔湖	bei jia er hu	3950
 遣返回国	qian fan hui guo	3948
@@ -2948,6 +2997,7 @@
 充分体现	chong fen ti xian	3904
 入不敷出	ru bu fu chu	3902
 公司股票	gong si gu piao	3902
+时间推移	shi jian tui yi	74
 军事训练	jun shi xun lian	3900
 出版发行	chu ban fa xing	3898
 副委员长	fu wei yuan zhang	3896
@@ -2970,6 +3020,7 @@
 天天向上	tian tian xiang shang	3866
 好多好多	hao duo hao duo	3864
 威尼斯人	wei ni si ren	3861
+申请专利	shen qing zhuan li	72
 展望未来	zhan wang wei lai	3859
 工程建设	gong cheng jian she	3857
 广东省委	guang dong sheng wei	3855
@@ -2977,7 +3028,6 @@
 德国联邦	de guo lian bang	3851
 心血来潮	xin xue lai chao	3848
 总体而言	zong ti er yan	3846
-抓紧时间	zhua jin shi jian	3844
 攻击行为	gong ji xing wei	3842
 时有发生	shi you fa sheng	3840
 更有意义	geng you yi yi	3838
@@ -3004,7 +3054,6 @@
 若隐若现	ruo yin ruo xian	3795
 落井下石	luo jing xia shi	3792
 表示祝贺	biao shi zhu he	3790
-见识一下	jian shi yi xia	3788
 连云港市	lian yun gang shi	3786
 长途汽车	chang tu qi che	3784
 防御工事	fang yu gong shi	3782
@@ -3014,7 +3063,6 @@
 一百四十	yi bai si shi	3773
 不如说是	bu ru shuo shi	3771
 不正之风	bu zheng zhi feng	3769
-不能自拔	bu neng zi ba	3767
 不足为奇	bu zu wei qi	3764
 中文翻译	zhong wen fan yi	3762
 为人所知	wei ren suo zhi	3762
@@ -3035,11 +3083,11 @@
 多平方米	duo ping fang mi	3734
 夜以继日	ye yi ji ri	3732
 大学校园	da xue xiao yuan	3730
+就可以看	jiu ke yi kan	70
 奥斯维辛	ao si wei xin	3728
 宗派主义	zong pai zhu yi	3726
 年纪轻轻	nian ji qing qing	3723
 微软公司	wei ruan gong si	3721
-性工作者	xing gong zuo zhe	3719
 恼羞成怒	nao xiu cheng nu	3717
 情有可原	qing you ke yuan	3717
 技术学校	ji shu xue xiao	3715
@@ -3053,7 +3101,6 @@
 有话要说	you hua yao shuo	3698
 本来面目	ben lai mian mu	3695
 机会主义	ji hui zhu yi	3695
-欲罢不能	yu ba bu neng	3693
 深刻印象	shen ke yin xiang	3691
 深圳大学	shen zhen da xue	3691
 清晰可见	qing xi ke jian	3689
@@ -3076,7 +3123,6 @@
 警察局长	jing cha ju zhang	3652
 赤身裸体	chi shen luo ti	3650
 远远不够	yuan yuan bu gou	3648
-连接起来	lian jie qi lai	3648
 迷迷糊糊	mi mi hu hu	3646
 重大损失	zhong da sun shi	3644
 长命百岁	chang ming bai sui	3642
@@ -3120,6 +3166,7 @@
 埋头苦干	mai tou ku gan	3570
 培训基地	pei xun ji di	3568
 大呼小叫	da hu xiao jiao	3566
+不久以后	bu jiu yi hou	68
 天主教堂	tian zhu jiao tang	3564
 好久好久	hao jiu hao jiu	3562
 如鱼得水	ru yu de shui	3560
@@ -3131,11 +3178,11 @@
 年增长率	nian zeng zhang lv	3549
 广泛传播	guang fan chuan bo	3547
 悄无声息	qiao wu sheng xi	3545
-感受一下	gan shou yi xia	3542
 支气管炎	zhi qi guan yan	3540
 政治学家	zheng zhi xue jia	3538
 无理取闹	wu li qu nao	3536
 最低气温	zui di qi wen	3534
+午餐时间	wu can shi jian	66
 期待已久	qi dai yi jiu	3532
 欢声笑语	huan sheng xiao yu	3529
 欣喜若狂	xin xi ruo kuang	3527
@@ -3165,6 +3212,7 @@
 难以忘怀	nan yi wang huai	3480
 集思广益	ji si guang yi	3478
 高峰论坛	gao feng lun tan	3476
+朝核问题	chao he wen ti	64
 一万五千	yi wan wu qian	3473
 万众瞩目	wan zhong zhu mu	3471
 万分之一	wan fen zhi yi	3469
@@ -3218,6 +3266,7 @@
 美国华人	mei guo hua ren	3376
 美国白宫	mei guo bai gong	3374
 英文翻译	ying wen fan yi	3372
+一线希望	yi xian xi wang	61
 菲尼克斯	fei ni ke si	3370
 表演艺术	biao yan yi shu	3368
 跨国企业	kua guo qi ye	3366
@@ -3321,6 +3370,7 @@
 上流社会	shang liu she hui	3180
 上海市委	shang hai shi wei	3180
 个人主页	ge ren zhu ye	3178
+不能允许	bu neng yun xu	59
 五年计划	wu nian ji hua	3176
 交流中心	jiao liu zhong xin	3174
 人类史上	ren lei shi shang	3172
@@ -3355,7 +3405,6 @@
 手舞足蹈	shou wu zu dao	3109
 报仇雪恨	bao chou xue hen	3107
 振奋人心	zhen fen ren xin	3105
-提出申请	ti chu shen qing	3103
 数据结构	shu ju jie gou	3100
 整整齐齐	zheng zheng qi qi	3098
 斩钉截铁	zhan ding jie tie	3096
@@ -3394,7 +3443,6 @@
 不得人心	bu de ren xin	3032
 不明不白	bu ming bu bai	3029
 与其说是	yu qi shuo shi	3027
-业余时间	ye yu shi jian	3025
 严重后果	yan zhong hou guo	3025
 中华文明	zhong hua wen ming	3023
 中国女足	zhong guo nv zu	3023
@@ -3408,7 +3456,6 @@
 全面实施	quan mian shi shi	3008
 公共行政	gong gong xing zheng	3006
 关键技术	guan jian ji shu	3004
-关键问题	guan jian wen ti	3001
 冠冕堂皇	guan mian tang huang	2999
 切实可行	qie shi ke xing	2997
 前所未见	qian suo wei jian	2995
@@ -3422,6 +3469,7 @@
 如此而已	ru ci er yi	2980
 威风凛凛	wei feng lin lin	2980
 学术会议	xue shu hui yi	2978
+一般来讲	yi ban lai jiang	57
 寥寥无几	liao liao wu ji	2975
 工商银行	gong shang yin hang	2973
 平方英尺	ping fang ying chi	2971
@@ -3457,7 +3505,6 @@
 西里西亚	xi li xi ya	2911
 言传身教	yan chuan shen jiao	2909
 警务人员	jing wu ren yuan	2909
-详细情况	xiang xi qing kuang	2907
 豪华轿车	hao hua jiao che	2904
 赫赫有名	he he you ming	2902
 身先士卒	shen xian shi zu	2900
@@ -3468,6 +3515,7 @@
 霍普金斯	huo pu jin si	2889
 静脉曲张	jing mai qu zhang	2887
 黑暗时代	hei an shi dai	2885
+比较文学	bi jiao wen xue	55
 一举成名	yi ju cheng ming	2883
 一千八百	yi qian ba bai	2883
 三十分钟	san shi fen zhong	2881
@@ -3481,7 +3529,6 @@
 价格指数	jia ge zhi shu	2870
 你来我往	ni lai wo wang	2868
 信仰自由	xin yang zi you	2866
-充满希望	chong man xi wang	2863
 全身上下	quan shen shang xia	2861
 农村土地	nong cun tu di	2859
 出庭作证	chu ting zuo zheng	2857
@@ -3524,6 +3571,7 @@
 肃然起敬	su ran qi jing	2781
 自然遗产	zi ran yi chan	2779
 设身处地	she shen chu di	2777
+到此结束	dao ci jie shu	53
 财产损失	cai chan sun shi	2775
 财政预算	cai zheng yu suan	2775
 足不出户	zu bu chu hu	2773
@@ -3598,8 +3646,8 @@
 武器装备	wu qi zhuang bei	2644
 死气沉沉	si qi chen chen	2644
 殖民统治	zhi min tong zhi	2641
-比较严重	bi jiao yan zhong	2639
 沈阳军区	shen yang jun qu	2637
+需要的话	xu yao de hua	51
 牛鬼蛇神	niu gui she shen	2635
 理论体系	li lun ti xi	2633
 琳琅满目	lin lang man mu	2631
@@ -3618,6 +3666,7 @@
 阿尔萨斯	a er sa si	2607
 青年教师	qing nian jiao shi	2605
 高谈阔论	gao tan kuo lun	2603
+作息时间	zuo xi shi jian	48
 一步之遥	yi bu zhi yao	2600
 三星集团	san xing ji tuan	2598
 不知所云	bu zhi suo yun	2596
@@ -3660,6 +3709,7 @@
 布里斯班	bu li si ban	2521
 平方英里	ping fang ying li	2519
 幸免于难	xing mian yu nan	2516
+检查一下	jian cha yi xia	46
 开曼群岛	kai man qun dao	2514
 引起争议	yin qi zheng yi	2514
 强制措施	qiang zhi cuo shi	2512
@@ -3672,7 +3722,6 @@
 忠心耿耿	zhong xin geng geng	2497
 提起公诉	ti qi gong su	2495
 教育资源	jiao yu zi yuan	2493
-敬请期待	jing qing qi dai	2491
 数据传输	shu ju chuan shu	2488
 无法形容	wu fa xing rong	2486
 来来回回	lai lai hui hui	2484
@@ -3697,6 +3746,7 @@
 身经百战	shen jing bai zhan	2445
 运输工具	yun shu gong ju	2443
 防毒面具	fang du mian ju	2441
+黄金时间	huang jin shi jian	44
 预防措施	yu fang cuo shi	2439
 一筹莫展	yi chou mo zhan	2437
 不一会儿	bu yi hui er	2434
@@ -3767,7 +3817,6 @@
 致癌物质	zhi ai wu zhi	2312
 被迫辞职	bei po ci zhi	2309
 西撒哈拉	xi sa ha la	2309
-认识一下	ren shi yi xia	2307
 证据确凿	zheng ju que zao	2307
 说不出来	shuo bu chu lai	2305
 谈笑风生	tan xiao feng sheng	2303
@@ -3797,6 +3846,7 @@
 参考消息	can kao xiao xi	2256
 受宠若惊	shou chong ruo jing	2253
 古典主义	gu dian zhu yi	2251
+非同一般	fei tong yi ban	42
 含糊不清	han hu bu qing	2249
 和平谈判	he ping tan pan	2247
 品学兼优	pin xue jian you	2245
@@ -3807,7 +3857,6 @@
 基础理论	ji chu li lun	2234
 大千世界	da qian shi jie	2232
 天文数字	tian wen shu zi	2230
-寄希望于	ji xi wang yu	2228
 已成定局	yi cheng ding ju	2225
 康斯坦丁	kang si tan ding	2223
 扎扎实实	zha zha shi shi	2221
@@ -3856,6 +3905,8 @@
 马拉松赛	ma la song sai	2137
 马萨诸塞	ma sa zhu sai	2137
 黯然失色	an ran shi se	2135
+情况紧急	qing kuang jin ji	40
+情况通报	qing kuang tong bao	40
 一尘不染	yi chen bu ran	2133
 一百六十	yi bai liu shi	2133
 一鸣惊人	yi ming jing ren	2131
@@ -3870,6 +3921,7 @@
 中央苏区	zhong yang su qu	2115
 主要职责	zhu yao zhi ze	2113
 二十九年	er shi jiu nian	2111
+比较复杂	bi jiao fu za	38
 井井有条	jing jing you tiao	2109
 井然有序	jing ran you xu	2109
 人去楼空	ren qu lou kong	2107
@@ -3881,6 +3933,7 @@
 列宁主义	lie ning zhu yi	2096
 十恶不赦	shi e bu she	2094
 十有八九	shi you ba jiu	2092
+现实情况	xian shi qing kuang	35
 卡拉巴赫	ka la ba he	2090
 反反复复	fan fan fu fu	2087
 另行通知	ling xing tong zhi	2085
@@ -3891,6 +3944,7 @@
 四面楚歌	si mian chu ge	2077
 国企改革	guo qi gai ge	2075
 在短期内	zai duan qi nei	2072
+等待时间	deng dai shi jian	33
 大有人在	da you ren zai	2070
 大话西游	da hua xi you	2070
 天津大学	tian jin da xue	2068
@@ -3989,6 +4043,7 @@
 大放异彩	da fang yi cai	1891
 天花乱坠	tian hua luan zhui	1889
 孤身一人	gu shen yi ren	1887
+此项工作	ci xiang gong zuo	31
 山东鲁能	shan dong lu neng	1885
 平顶山市	ping ding shan shi	1883
 弗朗索瓦	fu lang suo wa	1881
@@ -4004,6 +4059,7 @@
 暂行办法	zan xing ban fa	1863
 最佳人选	zui jia ren xuan	1861
 机器翻译	ji qi fan yi	1859
+科研工作	ke yan gong zuo	29
 权宜之计	quan yi zhi ji	1857
 欧美国家	ou mei guo jia	1855
 氢氧化钠	qing yang hua na	1853
@@ -4040,7 +4096,6 @@
 中国海关	zhong guo hai guan	1790
 为数不少	wei shu bu shao	1788
 主办单位	zhu ban dan wei	1788
-争取时间	zheng qu shi jian	1786
 二分之一	er fen zhi yi	1784
 二战时期	er zhan shi qi	1784
 互相残杀	hu xiang can sha	1781
@@ -4157,9 +4212,9 @@
 有的放矢	you di fang shi	1574
 欢迎仪式	huan ying yi shi	1572
 死记硬背	si ji ying bei	1570
-民生问题	min sheng wen ti	1568
 水落石出	shui luo shi chu	1566
 沙文主义	sha wen zhu yi	1564
+四大家族	si da jia zu	27
 深表遗憾	shen biao yi han	1562
 特别强调	te bie qiang diao	1559
 现代科学	xian dai ke xue	1557
@@ -4187,6 +4242,7 @@
 蝴蝶效应	hu die xiao ying	1516
 行云流水	xing yun liu shui	1514
 被子植物	bei zi zhi wu	1512
+提前结束	ti qian jie shu	25
 说老实话	shuo lao shi hua	1510
 贫困家庭	pin kun jia ting	1508
 贸易逆差	mao yi ni cha	1508
@@ -4208,7 +4264,6 @@
 二十几年	er shi ji nian	1482
 五十年代	wu shi nian dai	1482
 人生目标	ren sheng mu biao	1480
-从那以后	cong na yi hou	1477
 伟大领袖	wei da ling xiu	1475
 传播学院	chuan bo xue yuan	1475
 体系结构	ti xi jie gou	1473
@@ -4271,7 +4326,6 @@
 通情达理	tong qing da li	1359
 遍布全国	bian bu quan guo	1357
 锲而不舍	qie er bu she	1355
-需不需要	xu bu xu yao	1352
 额尔古纳	e er gu na	1350
 鹤立鸡群	he li ji qun	1348
 齐聚一堂	qi ju yi tang	1346
@@ -4391,6 +4445,7 @@
 奥地利人	ao di li ren	1137
 妇女儿童	fu nv er tong	1135
 孟加拉虎	meng jia la hu	1133
+忘乎所以	wang hu suo yi	23
 家庭收入	jia ting shou ru	1130
 差强人意	cha qiang ren yi	1128
 开开心心	kai kai xin xin	1126
@@ -4449,6 +4504,7 @@
 阿德里安	a de li an	1029
 陈词滥调	chen ci lan diao	1027
 革命烈士	ge ming lie shi	1025
+通过观察	tong guo guan cha	20
 马马虎虎	ma ma hu hu	1023
 高校学生	gao xiao xue sheng	1021
 黑客攻击	hei ke gong ji	1018
@@ -4468,6 +4524,7 @@
 公私合营	gong si he ying	999
 其乐融融	qi le rong rong	997
 写实主义	xie shi zhu yi	995
+上述情况	shang shu qing kuang	18
 刑事诉讼	xing shi su song	992
 合法政府	he fa zheng fu	990
 国务部长	guo wu bu zhang	988
@@ -4479,6 +4536,7 @@
 宁为玉碎	ning wei yu sui	977
 完全一致	wan quan yi zhi	977
 宏都拉斯	hong dou la si	975
+十一点半	shi yi dian ban	16
 密尔沃基	mi er wo ji	973
 尽我所能	jin wo suo neng	971
 巴黎大学	ba li da xue	969
@@ -4512,6 +4570,7 @@
 焦虑不安	jiao lv bu an	921
 燃眉之急	ran mei zhi ji	921
 犯罪事实	fan zui shi shi	919
+文书工作	wen shu gong zuo	14
 生物医药	sheng wu yi yao	917
 痛哭流涕	tong ku liu ti	915
 盈利模式	ying li mo shi	913
@@ -4590,6 +4649,7 @@
 情有独钟	qing you du zhong	783
 拉米雷斯	la mi lei si	781
 拐弯抹角	guai wan mo jiao	781
+会计工作	kuai ji gong zuo	12
 拖拖拉拉	tuo tuo la la	779
 捉襟见肘	zhuo jin jian zhou	777
 提出批评	ti chu pi ping	775
@@ -4598,7 +4658,6 @@
 无法自拔	wu fa zi ba	768
 日本天皇	ri ben tian huang	766
 时事评论	shi shi ping lun	764
-时候未到	shi hou wei dao	764
 有惊无险	you jing wu xian	762
 机械故障	ji xie gu zhang	760
 村上春树	cun shang chun shu	758
@@ -4626,7 +4685,6 @@
 英雄本色	ying xiong ben se	719
 草菅人命	cao jian ren ming	717
 行业标准	hang ye biao zhun	714
-请等一下	qing deng yi xia	712
 费尔干纳	fei er gan na	710
 赞不绝口	zan bu jue kou	708
 赶尽杀绝	gan jin sha jue	708
@@ -4646,7 +4704,6 @@
 黄土高原	huang tu gao yuan	682
 一贫如洗	yi pin ru xi	680
 三权分立	san quan fen li	678
-不能不要	bu neng bu yao	678
 不良反应	bu liang fan ying	678
 不起作用	bu qi zuo yong	676
 举步维艰	ju bu wei jian	673
@@ -4677,6 +4734,7 @@
 外经贸部	wai jing mao bu	624
 大喊大叫	da han da jiao	622
 头晕目眩	tou yun mu xuan	620
+过段时间	guo duan shi jian	10
 孟什维克	meng shi wei ke	617
 完成使命	wan cheng shi ming	615
 定位系统	ding wei xi tong	615
@@ -4689,7 +4747,6 @@
 御史大夫	yu shi da fu	602
 心灰意冷	xin hui yi leng	600
 心照不宣	xin zhao bu xuan	600
-思考问题	si kao wen ti	598
 情绪低落	qing xu di luo	596
 扑朔迷离	pu shuo mi li	594
 打个比方	da ge bi fang	594
@@ -4719,7 +4776,6 @@
 舞蹈演员	wu dao yan yuan	548
 艺术设计	yi shu she ji	546
 英国公司	ying guo gong si	544
-请多关照	qing duo guan zhao	542
 贯彻落实	guan che luo shi	540
 趋之若鹜	qu zhi ruo wu	538
 转来转去	zhuan lai zhuan qu	536
@@ -4729,6 +4785,7 @@
 金碧辉煌	jin bi hui huang	529
 银行存款	yin hang cun kuan	527
 音乐作品	yin yue zuo pin	525
+善后工作	shan hou gong zuo	7
 颠倒黑白	dian dao hei bai	523
 马丁路德	ma ding lu de	520
 马提尼克	ma ti ni ke	520
@@ -4805,7 +4862,6 @@
 豪言壮语	hao yan zhuang yu	389
 费尔巴哈	fei er ba ha	387
 资源共享	zi yuan gong xiang	385
-辛勤工作	xin qin gong zuo	383
 过氧化氢	guo yang hua qing	380
 过氧化物	guo yang hua wu	380
 迎面而来	ying mian er lai	380
@@ -4891,9 +4947,9 @@
 耶夫斯基	ye fu si ji	225
 联合王国	lian he wang guo	223
 聚氯乙烯	ju lv yi xi	221
-腐败问题	fu bai wen ti	219
 自得其乐	zi de qi le	217
 自食其果	zi shi qi guo	217
+边界问题	bian jie wen ti	5
 表示同意	biao shi tong yi	214
 视觉艺术	shi jue yi shu	212
 证明文件	zheng ming wen jian	210
@@ -4927,6 +4983,7 @@
 优秀作品	you xiu zuo pin	158
 保温材料	bao wen cai liao	156
 保险业务	bao xian ye wu	156
+从这一点	cong zhe yi dian	3
 倾巢而出	qing chao er chu	154
 光明磊落	guang ming lei luo	152
 免费软件	mian fei ruan jian	150
@@ -4936,6 +4993,7 @@
 制作方法	zhi zuo fang fa	143
 动物学家	dong wu xue jia	141
 北伐战争	bei fa zhan zheng	139
+前期工作	qian qi gong zuo	1
 合二为一	he er wei yi	137
 后果自负	hou guo zi fu	135
 咎由自取	jiu you zi qu	132
@@ -4943,61 +5001,3 @@
 国产电影	guo chan dian ying	128
 处理程序	chu li cheng xu	126
 大海捞针	da hai lao zhen	124
-常见问题	chang jian wen ti	122
-继续执行	ji xu zhi xing	120
-不大可能	bu da ke neng	117
-不请自来	bu qing zi lai	115
-好长时间	hao zhang shi jian	113
-就此结束	jiu ci jie shu	111
-希望工程	xi wang gong cheng	109
-应不应该	ying bu ying gai	107
-及时发现	ji shi fa xian	104
-热点问题	re dian wen ti	102
-节省时间	jie sheng shi jian	100
-站不起来	zhan bu qi lai	98
-工作部门	gong zuo bu men	96
-继续加强	ji xu jia qiang	94
-辛苦工作	xin ku gong zuo	92
-下班时间	xia ban shi jian	89
-异常情况	yi chang qing kuang	87
-情况严重	qing kuang yan zhong	85
-遗留问题	yi liu wen ti	83
-圆满结束	yuan man jie shu	81
-感觉得到	gan jue de dao	79
-问个问题	wen ge wen ti	76
-时间推移	shi jian tui yi	74
-申请专利	shen qing zhuan li	72
-就可以看	jiu ke yi kan	70
-不久以后	bu jiu yi hou	68
-午餐时间	wu can shi jian	66
-朝核问题	chao he wen ti	64
-一线希望	yi xian xi wang	61
-不能允许	bu neng yun xu	59
-一般来讲	yi ban lai jiang	57
-比较文学	bi jiao wen xue	55
-到此结束	dao ci jie shu	53
-需要的话	xu yao de hua	51
-作息时间	zuo xi shi jian	48
-检查一下	jian cha yi xia	46
-黄金时间	huang jin shi jian	44
-非同一般	fei tong yi ban	42
-情况紧急	qing kuang jin ji	40
-情况通报	qing kuang tong bao	40
-比较复杂	bi jiao fu za	38
-现实情况	xian shi qing kuang	35
-等待时间	deng dai shi jian	33
-此项工作	ci xiang gong zuo	31
-科研工作	ke yan gong zuo	29
-四大家族	si da jia zu	27
-提前结束	ti qian jie shu	25
-忘乎所以	wang hu suo yi	23
-通过观察	tong guo guan cha	20
-上述情况	shang shu qing kuang	18
-十一点半	shi yi dian ban	16
-文书工作	wen shu gong zuo	14
-会计工作	kuai ji gong zuo	12
-过段时间	guo duan shi jian	10
-善后工作	shan hou gong zuo	7
-边界问题	bian jie wen ti	5
-从这一点	cong zhe yi dian	3
-前期工作	qian qi gong zuo	1

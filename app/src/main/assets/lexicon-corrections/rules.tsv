@@ -1,0 +1,30 @@
+# Android candidate corrections over the mirrored desktop lexicon.
+# cap<TAB>source path<TAB>maximum score
+# cap-prefix<TAB>source path prefix<TAB>maximum score
+# cap-word<TAB>source path<TAB>word<TAB>maximum score
+# scale-prefix<TAB>source path prefix<TAB>percentage (longest prefix wins)
+# exclude<TAB>source path<TAB>word (the replacement is in this directory)
+scale-prefix	zh-ext/	80
+scale-prefix	zh-ext/category_	65
+scale-prefix	zh-ext/category_common_	95
+scale-prefix	zh-ext/category_chat_	90
+scale-prefix	zh-ext/category_life_daily.txt	90
+scale-prefix	zh-ext/daily_communication.txt	90
+scale-prefix	zh-ext/category_proper_	65
+scale-prefix	zh-ext/professional_	60
+cap	zh-ext/animals.txt	3500
+cap	zh-ext/medicine.txt	3500
+cap-prefix	zh-ext/professional_	3500
+cap	zh-ext/category_proper_places.txt	3500
+cap	zh-ext/category_proper_organizations.txt	3500
+cap	zh-ext/category_proper_people.txt	2000
+cap-word	zh-ext/animals.txt	蚿	900
+cap-word	zh-ext/animals.txt	蛴螬	1200
+cap-word	zh-ext/animals.txt	莽牯朱蛤	1200
+cap-word	zh-ext/medicine.txt	克唑替尼	1500
+cap-word	zh-ext/category_idioms.txt	击壤鼓腹	1000
+cap-word	zh-ext/category_idioms.txt	忍辱念垢	1000
+cap-word	zh-ext/category_idioms.txt	龙骧虎步	1000
+exclude	zh-ext/category_proper_people.txt	大展宏图
+exclude	zh-ext/category_proper_people.txt	衣冠楚楚
+exclude	zh-ext/category_idioms.txt	上海联家超市有限公司

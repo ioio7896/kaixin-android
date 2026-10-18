@@ -65,24 +65,26 @@ def main():
         if not values:
             raise ValueError(f"Desktop character has no usable reading: U+{ord(char):04X}")
         rows.extend((char, reading, score) for reading in values)
-    output = root / "lexicon/zh/single_char_readings.txt"
+    output = root / "data_sources/desktop_single_char_readings.txt"
     comments = ["# 桌面 8105 单字词库的显式拼音读音；保留原始字频及多音读音。",
                 "# 字频来源：开心输入法/lexicon/zh/single_char_common_8105.txt",
                 "# 读音来源：桌面项目 pinyin crate 0.10.0 内含 pinyin-data 0.13.0。",
                 "# 应用桌面项目 pronunciation_aliases.tsv 和 pronunciation_exclusions.tsv；排除明确旧读。",
-                "# MIT 许可全文见 zh/LICENSE.pinyin-data.md；普通构建无需安装 Rust 或拼音库。",
+                "# MIT 许可全文见 app/src/main/assets/lexicon-notices/LICENSE.pinyin-data.md；普通构建无需安装 Rust 或拼音库。",
                 "# 格式：汉字<TAB>无声调拼音<TAB>字频"]
     output.write_text("\n".join(comments + [f"{c}\t{r}\t{s}" for c, r, s in rows]) + "\n", encoding="utf-8")
     license_text = (args.pinyin_crate / "LICENSE").read_text(encoding="utf-8")
-    (output.parent / "LICENSE.pinyin-data.md").write_text(license_text, encoding="utf-8")
+    license_path = root / "app/src/main/assets/lexicon-notices/LICENSE.pinyin-data.md"
+    license_path.parent.mkdir(parents=True, exist_ok=True)
+    license_path.write_text(license_text, encoding="utf-8")
     report = {"character_count": len(scores), "reading_count": len(rows),
               "pinyin_crate_version": "0.10.0", "pinyin_data_version": "0.13.0",
               "sources": [{"path": ("pinyin-0.10.0/" + p.relative_to(args.pinyin_crate).as_posix()
                                      if p == raw_path else "desktop/" + p.relative_to(args.desktop_root).as_posix()),
                            "sha256": hashlib.sha256(p.read_bytes()).hexdigest()}
                           for p in [source_path, raw_path, *override_paths]],
-              "output": "zh/single_char_readings.txt"}
-    (root / "lexicon/desktop-character-import.json").write_text(
+              "output": "data_sources/desktop_single_char_readings.txt"}
+    (root / "data_sources/desktop-single-char-readings.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"Imported {len(scores)} desktop characters with {len(rows)} readings")
 

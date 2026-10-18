@@ -20,7 +20,10 @@ assets. In particular:
   `app/src/main/assets/opencc/`.
 - English word-frequency data: Apache License 2.0, documented in
   `lexicon/en/LICENSE.wordfreq.md`.
-- Chinese pinyin data: MIT, documented in `lexicon/zh/LICENSE.pinyin-data.md`.
+- Chinese single-character reading data: MIT, documented in
+  `app/src/main/assets/lexicon-notices/LICENSE.pinyin-data.md`. The reading
+  index is derived from the desktop project's pinned pinyin data; the bundled
+  word corpus mirrors the desktop project's `lexicon/` directory.
 - Emoji artwork: Twemoji (CC BY 4.0), OpenMoji (CC BY-SA 4.0), Microsoft Fluent
   Emoji (MIT), and the Fluent Emoji subset from LobeHub (MIT). See
   `app/src/main/assets/emoji_styles/NOTICE.txt` and the license texts in its

@@ -1,10 +1,11 @@
-分类词库扩充
+Windows 分类词库扩充
 
-共 78 个分类，新增 38,489 条不同词语/读音。
-日常场景词与短语由项目整理（生成式 AI 辅助），请求短语只组合匹配的动词与对象。
-成语、三四字词和部分专名补充来自 jieba 0.42.1 本地词典，按词频和词性筛选。
-已有词条、多音读音和基础词频保留；低频语料采用较低基础分，不强行占据首选。
-所有内容随 APK 离线打包。分类明细及校验值见 category-expansion.json。
+同步安卓 78 个分类，收录 38,938 条不同词语/读音。
+相对 Windows 原词库新增 38,491 条读音记录、38,491 个词语。
+保留分类基础词频、实际读音与原词库；新增分类默认开启，可在词库设置中独立开关。
+项目词表与请求短语由项目整理（生成式 AI 辅助）；语料补充来自 jieba 0.42.1，拼音来自 pypinyin 0.55.0。
+完整 MIT 许可随包保存在 category-LICENSE.jieba.md 和 category-LICENSE.pypinyin.md。
+来源快照、数量及哈希见 windows-category-import.json；源片段保存在 data_sources/lexicon_fragments/zh-ext/category_*.txt。
 
 电商购物：68 条
 快递物流：337 条

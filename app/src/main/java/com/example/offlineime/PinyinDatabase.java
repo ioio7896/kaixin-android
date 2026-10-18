@@ -219,7 +219,12 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         values.put("code", syllables.replace(" ", "")); values.put("syllables", syllables);
         values.put("initials", initials.toString()); values.put("word", word); values.put("score", score);
         values.put("digits", PinyinDictionary.toT9(syllables.replace(" ", ""))); values.put("initial_digits", PinyinDictionary.toT9(initials.toString()));
-        importDatabase.insertWithOnConflict("pronunciations", null, values, SQLiteDatabase.CONFLICT_REPLACE);
+        if (importDatabase.insertWithOnConflict("pronunciations", null, values,
+                SQLiteDatabase.CONFLICT_IGNORE) < 0) {
+            importDatabase.update("pronunciations", values,
+                    "code=? AND syllables=? AND word=? AND score<?",
+                    new String[]{syllables.replace(" ", ""), syllables, word, Integer.toString(score)});
+        }
     }
 
     List<PinyinDictionary.Entry> queryFlexible(String input, int limit, boolean full,
@@ -426,7 +431,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                     || candidate.rankingTier == prior.rankingTier && candidate.score > prior.score)
                 unique.put(candidate.word, candidate);
         }
-        return CandidateRanker.rankTop(unique.values(), false, limit, input);
+        return CandidateRanker.rankForRecall(unique.values(), false, limit, input);
     }
 
     List<String> readings(String word) {
@@ -439,6 +444,36 @@ final class PinyinDatabase extends SQLiteOpenHelper {
             }
         }
         return result;
+    }
+
+    /** Give locally learned context words a path into the final ranking even when
+     * the corpus frequency scan has already reached its limit. */
+    List<PinyinDictionary.Entry> queryContextWords(String input, List<String> words,
+            boolean full, boolean shortInput, boolean mixed, boolean doubles) {
+        if (words == null || words.isEmpty()) return Collections.emptyList();
+        int count = Math.min(8, words.size());
+        StringBuilder where = new StringBuilder("word IN (");
+        String[] args = new String[count];
+        for (int i = 0; i < count; i++) {
+            if (i > 0) where.append(',');
+            where.append('?');
+            args[i] = words.get(i);
+        }
+        where.append(')');
+        ArrayList<PinyinDictionary.Entry> result = new ArrayList<>();
+        try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
+                where.toString(), args, null, null, "score DESC, word", "64")) {
+            while (cursor.moveToNext()) {
+                QueryWork.check();
+                String reading = cursor.getString(2);
+                PinyinInput.Match match = PinyinInput.match(input, reading,
+                        full, shortInput, mixed, doubles, false);
+                if (match != null) result.add(new PinyinDictionary.Entry(cursor.getString(0),
+                        cursor.getInt(1), match.tier).withInput(input.length(), reading));
+            }
+        }
+        return rankFlexible(result, !input.matches("[2-9']+")
+                && PinyinInput.isAbbreviationQuery(input, full), count, input);
     }
 
     List<PinyinDictionary.Entry> creationWords(String input, boolean numeric, PinyinPathEditor.Query constraint) {
