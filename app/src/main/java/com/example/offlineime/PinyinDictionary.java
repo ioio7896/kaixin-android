@@ -25,7 +25,7 @@ import java.util.Arrays;
 /** 纯本地词库。词库文件来自本工程 lexicon 目录，加载和查询均不联网。 */
 public final class PinyinDictionary {
     private static final String TAG = "OfflineImeLexicon";
-    private static final int LEXICON_VERSION = 2026101801;
+    private static final int LEXICON_VERSION = 2026102701;
     private final ThreadLocal<Boolean> shuangpinLookup = new ThreadLocal<>();
     List<Entry> suggestShuangpin(String expanded) {
         shuangpinLookup.set(true);
@@ -490,6 +490,9 @@ public final class PinyinDictionary {
         QueryWork.check();
         String segmented = normalizeForSegmentation(raw);
         if (segmented.isEmpty() || segmented.length() > 192 || (!fullEnabled() && !shortEnabled())) return Collections.emptyList();
+        if (segmented.indexOf('\'') >= 0
+                && segmented.split("'", -1).length > PinyinInput.MAX_SYLLABLES)
+            return Collections.emptyList();
         if (database == null || !loaded || !databaseReady) return suggestFast(segmented);
         String cacheKey = "p:" + combinedSignature() + ':' + QueryWork.firstScreen() + ':' + segmented;
         List<Entry> cached = recalled(cacheKey);
@@ -509,6 +512,7 @@ public final class PinyinDictionary {
                 merge(result, new Entry(record.word, 0, TIER_USER, record.pinned).withInput(segmented.length(), reading));
         }
         mergeCustomWords(result, segmented, false, null);
+        composeInput(result, segmented, false);
         // Offer complete leading words with their exact consumed span, leaving the suffix intact.
         if (!QueryWork.firstScreen() && result.size() < FIRST_SCREEN_TARGET) {
             java.util.TreeSet<Integer> boundaries = new java.util.TreeSet<>(Collections.reverseOrder());
@@ -551,8 +555,9 @@ public final class PinyinDictionary {
         List<Entry> characters = singleCharacters.lookup(input, input.matches("[2-9']+"), null, fullEnabled(), shortEnabled(),
                 preference("double_initials", true), prefix, QueryWork.firstScreen() ? 32 : 128);
         for (Entry entry : characters) merge(combined, entry);
-        List<Entry> found = QueryWork.firstScreen() && primaryCandidateCount(characters) >= 15
-                ? Collections.emptyList() : corpusCandidates(input, input.matches("[2-9']+"), null, prefix);
+        // A full strip of single characters is not a full set of word suggestions.
+        // Recall the corpus for both full spelling and initials on the first screen.
+        List<Entry> found = corpusCandidates(input, input.matches("[2-9']+"), null, prefix);
         for (Entry entry : found) merge(combined, withShortHotBoost(entry));
         mergeShortHotMatches(combined, input, input.matches("[2-9']+"), null);
         List<Entry> ranked = CandidateRanker.rankTop(combined.values(), false, 128, input);
@@ -669,11 +674,14 @@ public final class PinyinDictionary {
     /** Full spelling has its own fallback budget: unrelated abbreviations must
      * not suppress sentence decoding, and letter/digit length is not word length. */
     private void composeInput(Map<String, Entry> result, String input, boolean numeric) {
-        if (QueryWork.firstScreen() || !sentenceEnabled()) return;
+        if (QueryWork.firstScreen() || !sentenceEnabled() || input.replace("'", "").length() < 8) return;
+        for (Entry entry : result.values())
+            if (entry.matchTier == TIER_EXACT_FULL && entry.codePointLength > 1
+                    && entry.consumedLength == input.length()) return;
         boolean full = fullEnabled(), shortInput = shortEnabled();
         boolean doubles = preference("double_initials", true);
         List<PinyinInput.Path> selected = new ArrayList<>();
-        int limit = input.length() > 24 ? 2 : 6;
+        int limit = 6;
         if (full && fullCandidateCount(result.values()) < COMPOSITION_TARGET) {
             List<PinyinInput.Path> complete = new ArrayList<>();
             List<PinyinInput.Path> parsed = numeric ? PinyinInput.numericPaths(input, true, false, false)
@@ -842,8 +850,7 @@ public final class PinyinDictionary {
         boolean abbreviation = !query.numeric && isAbbreviationQuery(query.raw);
         List<Entry> characters = singleCharacters.lookup(query.raw, query.numeric, query, full, shortInput, doubles, true, QueryWork.firstScreen() ? 32 : 128);
         mergeAll(result, characters);
-        for (Entry entry : QueryWork.firstScreen() && primaryCandidateCount(characters) >= 15
-                ? Collections.<Entry>emptyList() : corpusCandidates(query.raw, query.numeric, query, true))
+        for (Entry entry : corpusCandidates(query.raw, query.numeric, query, true))
             merge(result, withShortHotBoost(entry));
         mergeShortHotMatches(result, query.databaseInput, query.numeric, query);
         for (UserWordRecord record : matchingUserRecords(query.raw, query.numeric)) {
@@ -1051,12 +1058,12 @@ public final class PinyinDictionary {
             List<Entry> characters = singleCharacters.lookup(query, true, null, full, shortPinyin,
                     preference("double_initials", true), true, QueryWork.firstScreen() ? 32 : 128);
             mergeAll(result, characters);
-            for (Entry entry : QueryWork.firstScreen() && primaryCandidateCount(characters) >= 15
-                    ? Collections.<Entry>emptyList() : corpusCandidates(query, true, null, true))
+            for (Entry entry : corpusCandidates(query, true, null, true))
                 merge(result, withShortHotBoost(entry));
         }
         mergeShortHotMatches(result, query, true, null);
         mergeCustomWords(result, query, true, null);
+        composeInput(result, query, true);
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
             mergeCreationPrefixes(result, query, true, null);
         List<Entry> ranked = rankForRecall(result, query, true, query.length() == 1,

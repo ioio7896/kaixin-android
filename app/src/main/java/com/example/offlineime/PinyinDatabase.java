@@ -299,6 +299,59 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 }
             }
         }
+        // A complete syllable can also be the beginning of a word ("ni" ->
+        // "nihao"). Fetch a small phrase-only prefix pool before the broad
+        // initials scan can exhaust the first-screen time budget.
+        boolean earlyFullPrefix = QueryWork.firstScreen() && prefix && full
+                && !numeric && !abbreviation && plain.length() >= 2;
+        if (earlyFullPrefix) {
+            List<String> prefixArgs = new ArrayList<>();
+            prefixArgs.add(plain); prefixArgs.add(prefixUpperBound(plain));
+            if (!leadingReading.isEmpty()) {
+                prefixArgs.add(leadingReading); prefixArgs.add(leadingPattern);
+            }
+            try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
+                    "length(word)>1 AND " + fullColumn + ">? AND " + fullColumn + "<?" + lockedFilter,
+                    prefixArgs.toArray(new String[0]), null, null,
+                    "score DESC, word", "24")) {
+                while (cursor.moveToNext()) {
+                    QueryWork.check();
+                    String reading = cursor.getString(2);
+                    PinyinInput.Match match = constraint == null
+                            ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, true)
+                            : constraint.match(reading, full, shortInput, mixed, doubles, true);
+                    if (match != null) out.add(new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
+                            .withInput(constraint == null ? input.length() : constraint.raw.length(), reading));
+                }
+            }
+        }
+        LinkedHashSet<String> primaryWords = new LinkedHashSet<>();
+        for (PinyinDictionary.Entry entry : out)
+            if (entry.matchTier <= PinyinDictionary.TIER_MIXED && entry.codePointLength > 1)
+                primaryWords.add(entry.word);
+        // Recall the literal initials independently. Other parsed keys can be
+        // much broader and must not consume its score-ordered SQL limit.
+        if (shortInput && !numeric && plain.length() >= 2 && keys.contains(plain)) {
+            List<String> literalArgs = new ArrayList<>(); literalArgs.add(plain);
+            if (!leadingReading.isEmpty()) {
+                literalArgs.add(leadingReading); literalArgs.add(leadingPattern);
+            }
+            try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
+                    "initials=? AND length(word)>1" + lockedFilter,
+                    literalArgs.toArray(new String[0]), null, null, "score DESC, word", "32")) {
+                while (cursor.moveToNext()) {
+                    QueryWork.check();
+                    String reading = cursor.getString(2);
+                    PinyinInput.Match match = constraint == null
+                            ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, false)
+                            : constraint.match(reading, full, shortInput, mixed, doubles, false);
+                    if (match == null) continue;
+                    PinyinDictionary.Entry entry = new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
+                            .withInput(constraint == null ? input.length() : constraint.raw.length(), reading);
+                    out.add(entry); primaryWords.add(entry.word);
+                }
+            }
+        }
         // Equality is a separate phase: longer high-frequency completions must not
         // consume the scan budget before complete short/mixed readings are retrieved.
         if (shortInput) {
@@ -311,12 +364,15 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 exactArgs.add(key);
             }
             exactWhere.insert(0, '(').append(')').append(lockedFilter);
+            // One-character readings were fetched by the full-code query and
+            // character index. Keep this broad initials pass for actual words.
+            if (plain.length() >= 2) exactWhere.append(" AND length(word)>1");
             if (!leadingReading.isEmpty()) {
                 exactArgs.add(leadingReading); exactArgs.add(leadingPattern);
             }
             int exactLimit = Math.max(96, Math.min(256, resultLimit * 4));
             // Recall matching two-character words before three-character heat fills the scan cap.
-            String exactOrder = CandidateRanker.isThreeLetterInput(input)
+            String exactOrder = (abbreviation || CandidateRanker.isThreeLetterInput(input))
                     ? "CASE WHEN length(word)=2 AND score>=4000 THEN 0 ELSE 1 END, score DESC, word"
                     : "score DESC, word";
             try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
@@ -324,26 +380,29 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                     exactOrder, Integer.toString(exactLimit))) {
                 while (cursor.moveToNext()) {
                     QueryWork.check();
-                    if (out.size() >= firstScreenTarget && QueryWork.shouldYield(out.size())) break;
+                    if (out.size() >= firstScreenTarget && primaryWords.size() >= 4
+                            && QueryWork.shouldYield(out.size())) break;
                     String reading = cursor.getString(2);
                     PinyinInput.Match match = constraint == null
                             ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, false)
                             : constraint.match(reading, full, shortInput, mixed, doubles, false);
-                    if (match != null) out.add(new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
-                            .withInput(constraint == null ? input.length() : constraint.raw.length(), reading));
+                    if (match != null) {
+                        PinyinDictionary.Entry entry = new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
+                                .withInput(constraint == null ? input.length() : constraint.raw.length(), reading);
+                        out.add(entry);
+                        if (entry.codePointLength > 1 && entry.matchTier <= PinyinDictionary.TIER_MIXED)
+                            primaryWords.add(entry.word);
+                    }
                 }
             }
         }
-        LinkedHashSet<String> primaryWords = new LinkedHashSet<>();
-        for (PinyinDictionary.Entry entry : out) {
-            if (entry.matchTier <= PinyinDictionary.TIER_MIXED) primaryWords.add(entry.word);
-        }
-        // Once complete readings fill the strip, neither full nor initials
-        // prefix ranges can outrank them; avoid both scans on this hot path.
+        // Single-character matches alone must not suppress phrase completion.
+        // Stop the prefix scans only after complete words fill the strip.
         if (primaryWords.size() >= firstScreenTarget)
             return rankFlexible(out, abbreviation, resultLimit, input);
-        if (QueryWork.shouldYield(out.size())) return rankFlexible(out, abbreviation, resultLimit, input);
-        if (prefix && (full || constraint != null)) {
+        if (primaryWords.size() >= 4 && QueryWork.shouldYield(out.size()))
+            return rankFlexible(out, abbreviation, resultLimit, input);
+        if (prefix && (full || constraint != null) && !earlyFullPrefix) {
             List<String> prefixArgs = new ArrayList<>();
             prefixArgs.add(plain); prefixArgs.add(prefixUpperBound(plain));
             if (!leadingReading.isEmpty()) {

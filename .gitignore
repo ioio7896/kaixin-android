@@ -23,6 +23,7 @@ AGENTS.md
 
 # Generated packages and machine-specific files
 *.apk
+*.idsig
 *.aab
 *.iml
 *.hprof

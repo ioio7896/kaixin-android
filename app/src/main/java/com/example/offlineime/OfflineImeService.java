@@ -116,6 +116,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private boolean prewarmFinished;
     private final Runnable dictionaryPrewarmRunnable = this::startDictionaryPrewarmIfIdle;
     private ClipboardHistoryStore clipboardHistory;
+    private QuickPhraseStore quickPhrases;
     private volatile UserContextModel contextModel;
     private String previousCommittedWord = "";
     private String previousPreviousCommittedWord = "";
@@ -302,6 +303,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     boolean candidateSurfaceReady() { return currentCandidateKey().equals(candidateSelectableKey); }
     boolean pinyinCandidatesEmpty() { return candidateResults.isEmpty(); }
     boolean nineKeyMode() { return mode == Mode.NINE; }
+    boolean compactNineLayout() { return mode == Mode.NINE && !handwritingShown; }
     void refreshPinyinPaths() { if (!destroyed) refresh(); }
     String pinyinDisplayReading(PinyinPathEditor.Segment segment) {
         if (isShuangpin()) return segment.reading;
@@ -359,6 +361,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         settingsPreferences.registerOnSharedPreferenceChangeListener(settingsListener);
         dictionary = new PinyinDictionary(getAssets(), this);
         clipboardHistory = new ClipboardHistoryStore(this);
+        quickPhrases = new QuickPhraseStore(this);
         loaderExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(() -> {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
@@ -466,9 +469,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (window == null) return;
         WindowManager.LayoutParams params = window.getAttributes();
         android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
-        boolean floating = p.getBoolean("floating", false);
-        String side = KeyboardPlacement.side(p);
-        boolean resized = floating || landscape || !"off".equals(side);
+        boolean floating = KeyboardPlacement.floating(this, p);
+        String side = KeyboardPlacement.side(this, p);
+        boolean resized = floating || landscape || !"off".equals(side)
+                || KeyboardPlacement.width(this, p) < getResources().getConfiguration().screenWidthDp;
         if (resized) {
             if (!originalImeWindowLayoutSaved) {
                 originalImeWindowWidth = params.width; originalImeWindowHeight = params.height;
@@ -500,7 +504,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     void moveFloatingKeyboard(float dx, float dy, boolean save) {
         android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
-        if (!p.getBoolean("floating", false) || getWindow() == null || getWindow().getWindow() == null) return;
+        if (!KeyboardPlacement.floating(this, p) || getWindow() == null || getWindow().getWindow() == null) return;
         android.view.Window window = getWindow().getWindow();
         WindowManager.LayoutParams params = window.getAttributes();
         float density = getResources().getDisplayMetrics().density;
@@ -516,7 +520,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onComputeInsets(android.inputmethodservice.InputMethodService.Insets out) {
         super.onComputeInsets(out);
-        if (keyboardView != null && getSharedPreferences("settings", MODE_PRIVATE).getBoolean("floating", false)) {
+        if (keyboardView != null && KeyboardPlacement.floating(this, getSharedPreferences("settings", MODE_PRIVATE))) {
             int[] position = new int[2]; keyboardView.getLocationInWindow(position);
             int bottom = position[1] + keyboardView.getHeight();
             out.contentTopInsets = bottom; out.visibleTopInsets = bottom;
@@ -892,7 +896,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (composing.length() > 0) insertPinyin("'");
             return;
         }
-        if (("中英".equals(key) || "123".equals(key) || "符".equals(key) || "26键".equals(key) || "ABC".equals(key) || "字".equals(key) || "9键".equals(key) || "笔画".equals(key)) && composing.length() > 0) clearComposing(true);
+        if (("中英".equals(key) || "123".equals(key) || "符".equals(key) || "26键".equals(key) || "ABC".equals(key) || "字".equals(key) || "9键".equals(key) || "笔画".equals(key)) && composing.length() > 0 && !clearComposing(true)) return;
         if ("中英".equals(key) || "123".equals(key) || "符".equals(key)
                 || "26键".equals(key) || "ABC".equals(key) || "字".equals(key)
                 || "9键".equals(key) || "笔画".equals(key)) hidePanels();
@@ -975,9 +979,28 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             candidatePage = 0; refresh(); return;
         }
         if (key.startsWith("屏蔽词:")) { getSharedPreferences("blocked_words", MODE_PRIVATE).edit().putBoolean(key.substring(4), true).apply(); refresh(); return; }
-        if (key.startsWith("长按数字:")) { clearComposing(true); commit(key.substring(5)); return; }
+        if (key.startsWith("长按数字:")) { if (clearComposing(true)) commit(key.substring(5)); return; }
         if (key.startsWith("固定:")) { toggleClipboardPin(key.substring(3)); return; }
         if (key.startsWith("删除剪贴板:")) { removeClipboard(key.substring(6)); return; }
+        if (key.startsWith("保存为快捷短语:")) {
+            showQuickPhraseEditor(null, key.substring("保存为快捷短语:".length())); return;
+        }
+        if (key.startsWith("编辑快捷短语:")) {
+            QuickPhraseStore.Entry phrase = quickPhrases.find(key.substring("编辑快捷短语:".length()));
+            if (phrase != null) showQuickPhraseEditor(phrase.id, phrase.text);
+            else toastWord("短语已被删除");
+            return;
+        }
+        if (key.startsWith("输入快捷短语:")) {
+            QuickPhraseStore.Entry phrase = quickPhrases.find(key.substring("输入快捷短语:".length()));
+            if (phrase != null) { commit(phrase.text); clipboardShown = false; refresh(); }
+            else { toastWord("短语已被删除"); refresh(); }
+            return;
+        }
+        if (key.startsWith("删除快捷短语:")) {
+            if (!quickPhrases.remove(key.substring("删除快捷短语:".length()))) toastWord("删除短语失败");
+            refresh(); return;
+        }
         if (key.startsWith("选择剪贴板:")) {
             String value = key.substring("选择剪贴板:".length());
             if (!clipboardSelection.add(value)) clipboardSelection.remove(value);
@@ -992,6 +1015,11 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
         if (key.startsWith("剪贴板筛选:")) {
             clipboardFilter = key.substring("剪贴板筛选:".length());
+            clipboardMultiSelect = false;
+            clipboardSelection.clear();
+            clipboardEnablePromptShown = !"phrases".equals(clipboardFilter)
+                    && !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("clipboard_enabled", false);
+            if (!clipboardEnablePromptShown && !"phrases".equals(clipboardFilter)) captureClipboardOnDemand();
             refresh();
             return;
         }
@@ -1057,7 +1085,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         lockedPinyinPath = ""; refresh(); return;
             case "符号":
                 boolean openSymbols = !symbolsShown;
-                if (openSymbols) clearComposing(true);
+                if (openSymbols && !clearComposing(true)) return;
                 hidePanels(); symbolsShown = openSymbols;
                 if (keyboardView != null) { if (symbolsShown) keyboardView.showSymbols(); else refresh(); }
                 return;
@@ -1066,7 +1094,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         lockedPinyinPath = ""; updateComposing(); return;
             case "26键": mode = Mode.PINYIN; rememberKeyboardMode(mode); composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); lockedPinyinPath = ""; refresh(); return;
             case "笔画": mode = Mode.STROKE; rememberKeyboardMode(mode); composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); lockedPinyinPath = ""; refresh(); return;
-            case "标点": clearComposing(true); modeBeforeSymbols = mode; mode = Mode.SYMBOLS; refresh(); return;
+            case "标点": if (!clearComposing(true)) return; modeBeforeSymbols = mode; mode = Mode.SYMBOLS; refresh(); return;
             case "ABC": modeBeforeEnglish = mode == Mode.ENGLISH ? restoreLastChineseMode() : mode; mode = Mode.ENGLISH; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
         lockedPinyinPath = ""; refresh(); return;
             case "字": mode = Mode.PINYIN; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
@@ -1105,6 +1133,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             case "取消清空剪贴板": clipboardClearConfirmShown = false; refresh(); return;
             case "撤销清空剪贴板": undoClipboardClear(); return;
             case "搜索剪贴板": searchingEmoji = false; showClipboardSearchDialog(); return;
+            case "添加快捷短语": showQuickPhraseEditor(null, ""); return;
             case "搜索表情": searchingEmoji = true; showClipboardSearchDialog(); return;
             case "清除表情搜索": emojiSearchQuery = ""; if (keyboardView != null) keyboardView.showEmoji(); return;
             case "启用剪贴板历史":
@@ -1148,10 +1177,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 refresh(); return;
             case "←": if (composing.length() > 0) { composingCursor = Math.max(0, Math.min(composing.length(), composingCursor) - 1); refresh(); } else moveCaretBy(-1); return;
             case "→": if (composing.length() > 0) { composingCursor = Math.min(composing.length(), composingCursor + 1); refresh(); } else moveCaretBy(1); return;
-            case "↑": clearComposing(true); sendKey(KeyEvent.KEYCODE_DPAD_UP); return;
-            case "↓": clearComposing(true); sendKey(KeyEvent.KEYCODE_DPAD_DOWN); return;
-            case "行首": clearComposing(true); sendKey(KeyEvent.KEYCODE_MOVE_HOME); return;
-            case "行尾": clearComposing(true); sendKey(KeyEvent.KEYCODE_MOVE_END); return;
+            case "↑": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_DPAD_UP); return;
+            case "↓": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_DPAD_DOWN); return;
+            case "行首": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_MOVE_HOME); return;
+            case "行尾": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_MOVE_END); return;
             case "选择": toggleSelectionMode(); return;
             case "复制": contextAction(android.R.id.copy, KeyEvent.KEYCODE_C); return;
             case "粘贴": contextAction(android.R.id.paste, KeyEvent.KEYCODE_V); return;
@@ -1180,7 +1209,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             case "⌫词": deleteWord(); return;
             case "工具":
                 boolean openTools = !toolsShown;
-                if (openTools) clearComposing(true);
+                if (openTools && !clearComposing(true)) return;
                 hidePanels(); toolsShown = openTools;
                 if (keyboardView != null) { if (toolsShown) keyboardView.showTools(); else refresh(); }
                 return;
@@ -1194,7 +1223,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         } else if (mode == Mode.NINE && key.length() == 1 && key.charAt(0) == '0') {
             space();
         } else if (mode == Mode.NINE && key.length() == 1 && key.charAt(0) == '1') {
-            clearComposing(true); commit("，");
+            if (clearComposing(true)) commit("，");
         } else if (mode == Mode.NINE && key.length() == 1 && key.charAt(0) >= '2' && key.charAt(0) <= '9') {
             if (composing.length() >= 192) return;
             lockedPinyinPath = "";
@@ -1217,8 +1246,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             candidatePage = 0;
             if (englishWordMode) updateComposing(); else refresh();
         } else {
-            clearComposing(true);
-            commitPunctuationOrText(key);
+            if (clearComposing(true)) commitPunctuationOrText(key);
         }
     }
 
@@ -1333,7 +1361,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     @Override public void onMode(Mode requested) {
-        if (!wordCreation.active && composing.length() > 0) clearComposing(true);
+        if (!wordCreation.active && composing.length() > 0 && !clearComposing(true)) return;
         ordinaryWordAssembly.clear();
         if (wordCreation.active) { switchWordCreationMode(requested); return; }
         hidePanels();
@@ -1610,7 +1638,11 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 candidateFirstFrameKey = key;
                 candidateFirstFrameAt = android.os.SystemClock.uptimeMillis();
             }
-            if (complete) { candidateCompleteKey = key; candidatePendingKey = ""; candidateCache.put(key, new CandidateFrame(raw, isShuangpin(), entries)); }
+            if (complete) {
+                candidateCompleteKey = key; candidatePendingKey = "";
+                candidateCache.put(key, new CandidateFrame(raw, isShuangpin(), entries));
+                ImePerformanceMonitor.candidateFrameCompleted(raw);
+            }
             refresh();
             ImePerformanceMonitor.stage(this, complete ? "candidate_ready" : "first_selectable", requestedAt, entries.size(), queryMode == Mode.NINE);
             if (key.equals(deferredCommitKey)) {
@@ -1663,8 +1695,14 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         ArrayList<PinyinDictionary.Entry> eligible = new ArrayList<>();
         if (source != null) for (PinyinDictionary.Entry entry : source) {
             if ((queryMode == Mode.PINYIN || queryMode == Mode.NINE)
-                    && (entry.matchTier == PinyinDictionary.TIER_COMPOSED
-                    || entry.matchTier == PinyinDictionary.TIER_FUZZY)) continue;
+                    && entry.matchTier == PinyinDictionary.TIER_FUZZY) continue;
+            if (entry.matchTier == PinyinDictionary.TIER_COMPOSED) {
+                // Only complete long phonetic input may surface a decoded sentence.
+                if (queryMode == Mode.PINYIN && rawInput.length() >= 8
+                        && entry.consumedLength == rawInput.length()
+                        && entry.codePointLength >= 5) eligible.add(entry);
+                continue;
+            }
             if (queryMode != Mode.PINYIN && queryMode != Mode.NINE
                     || entry.codePointLength < 5 || entry.codePointLength > 8
                     || !containsHan(entry.word)
@@ -1691,6 +1729,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (!PinyinPathEditor.isCompleteReading(syllable)) return false;
             fullSpelling.append(syllable);
         }
+        if (queryMode == Mode.PINYIN && !shuangpinInput
+                && (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
+                    || entry.matchTier == PinyinDictionary.TIER_MIXED))
+            return true;
         if (queryMode == Mode.PINYIN) return !shuangpinInput
                 && rawInput.matches("[A-Za-z']+")
                 && fullSpelling.toString().equals(rawInput.toLowerCase(Locale.ROOT).replace("'", ""));
@@ -1992,6 +2034,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (composing.length() == 0) { commit(" "); return; }
         if (deferCandidateCommit("space")) return;
         List<PinyinDictionary.Entry> list = candidatesForCommit();
+        if (list.isEmpty() && mode == Mode.NINE) { toastWord("暂无候选，请继续输入或修改拼音"); return; }
         if (list.isEmpty()) { commit(composing.toString()); composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); composingCursor = 0; lockedPinyinPath = ""; refresh(); }
         else onCandidateEntry(list.get(0));
         if (!wordCreation.active && "space".equals(getSharedPreferences("settings", MODE_PRIVATE).getString("space_behavior", "select"))) {
@@ -2010,7 +2053,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 onCandidateEntry(list.get(0)); enter(); return;
             }
         }
-        clearComposing(true);
+        if (!clearComposing(true)) return;
         InputConnection connection = getCurrentInputConnection();
         if (connection == null) return;
         int action = editorInfo == null ? EditorInfo.IME_ACTION_NONE
@@ -2050,12 +2093,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
     }
 
-    private void clearComposing(boolean commitBest) {
+    private boolean clearComposing(boolean commitBest) {
         ordinaryWordAssembly.clear();
-        if (wordCreation.active && commitBest) { showWordCreationMenu(); return; }
-        if (composing.length() == 0) return;
+        if (wordCreation.active && commitBest) { showWordCreationMenu(); return true; }
+        if (composing.length() == 0) return true;
         if (commitBest) {
             List<PinyinDictionary.Entry> list = candidatesForCommit();
+            if (list.isEmpty() && mode == Mode.NINE) {
+                toastWord("暂无候选，请继续输入或修改拼音");
+                return false;
+            }
             String word = list.isEmpty() ? composing.toString() : list.get(0).word;
             if (!list.isEmpty() && mode == Mode.PINYIN && lockedPinyinPath.isEmpty()
                     && list.get(0).consumedLength > 0 && list.get(0).consumedLength < composing.length())
@@ -2075,6 +2122,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         lockedPinyinPath = "";
         candidateExpanded = false;
         refresh();
+        return true;
     }
 
     private boolean commit(CharSequence text) {
@@ -2136,8 +2184,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (!settings.getBoolean("clipboard_enabled", false)) {
             hidePanels();
             clipboardShown = true;
-            clipboardEnablePromptShown = true;
-            if (keyboardView != null) keyboardView.showClipboardEnablePrompt();
+            clipboardEnablePromptShown = !"phrases".equals(clipboardFilter);
+            if (keyboardView != null && clipboardEnablePromptShown) keyboardView.showClipboardEnablePrompt();
+            else refresh();
             return;
         }
         hidePanels();
@@ -2306,48 +2355,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 })
                 .setNegativeButton("取消", null)
                 .create();
-        try {
-            android.view.Window window = dialog.getWindow();
-            android.view.Window parent = getWindow() == null ? null : getWindow().getWindow();
-            if (window != null && parent != null) {
-                window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_ATTACHED_DIALOG);
-                WindowManager.LayoutParams params = window.getAttributes();
-                params.token = parent.getDecorView().getWindowToken();
-                if (params.token == null) params.token = parent.getAttributes().token;
-                window.setAttributes(params);
-            }
-        } catch (RuntimeException error) {
-            android.util.Log.w("OfflineImeClipboard", "search dialog attachment failed: " + error.getClass().getSimpleName());
-        }
-        dialog.setOnDismissListener(ignored -> {
-            clipboardSearchDialogOpen = false;
-            if (!clipboardSearchRestorePanel) {
-                clipboardSearchReturnEditorInfo = null;
-                return;
-            }
-            clipboardShown = !searchingEmoji; emojiShown = searchingEmoji;
-            clipboardEnablePromptShown = false;
-            clipboardSearchResumePending = true;
-            mainHandler.postDelayed(() -> {
-                if (!clipboardSearchResumePending) return;
-                clipboardSearchResumePending = false;
-                clipboardSearchRestorePanel = false;
-                EditorInfo restoreInfo = clipboardSearchReturnEditorInfo;
-                clipboardSearchReturnEditorInfo = null;
-                if (restoreInfo != null && (editorInfo == null || getPackageName().equals(editorInfo.packageName))) {
-                    editorInfo = restoreInfo;
-                    secureEditor = isSensitiveEditor(restoreInfo);
-                    int cls = restoreInfo.inputType & InputType.TYPE_MASK_CLASS;
-                    numericEditor = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE
-                            || cls == InputType.TYPE_CLASS_DATETIME;
-                    editorLayoutKind = classifyEditorLayout(restoreInfo);
-                    editorForcesKeyboardLayout = numericEditor || "email".equals(editorLayoutKind)
-                            || "uri".equals(editorLayoutKind);
-                }
-                startClipboardListenerIfNeeded();
-                refresh();
-            }, 250L);
-        });
+        attachPanelDialog(dialog);
+        dialog.setOnDismissListener(ignored -> restorePanelAfterDialog());
         try {
             dialog.show();
         } catch (RuntimeException error) {
@@ -2362,6 +2371,107 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
             input.requestFocus();
         }
+    }
+
+    private void showQuickPhraseEditor(String id, String initialText) {
+        if (!clipboardShown || secureEditor
+                || getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false)) return;
+        clipboardSearchDialogOpen = true;
+        clipboardSearchRestorePanel = true;
+        clipboardSearchResumePending = false;
+        clipboardSearchReturnEditorInfo = editorInfo;
+        searchingEmoji = false;
+        EditText input = new EditText(this);
+        input.setMinLines(3);
+        input.setMaxLines(6);
+        input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setPrivateImeOptions("offlineime-panel-search");
+        input.setImeOptions(EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
+        input.setHint("输入常用文字");
+        input.setText(initialText == null ? "" : initialText);
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(1000)});
+        input.setSelection(input.length());
+        android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
+                .setTitle(id == null ? "添加快捷短语" : "编辑快捷短语")
+                .setView(input)
+                .setPositiveButton("保存", null)
+                .setNegativeButton("取消", null)
+                .create();
+        attachPanelDialog(dialog);
+        dialog.setOnDismissListener(ignored -> restorePanelAfterDialog());
+        try {
+            dialog.show();
+        } catch (RuntimeException error) {
+            clipboardSearchDialogOpen = false;
+            clipboardSearchRestorePanel = false;
+            clipboardSearchReturnEditorInfo = null;
+            android.util.Log.w("OfflineImeClipboard", "phrase dialog could not be shown: " + error.getClass().getSimpleName());
+            refresh();
+            return;
+        }
+        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                if (!quickPhrases.save(id, input.getText().toString())) {
+                    input.setError("保存失败，请重试");
+                    return;
+                }
+                clipboardFilter = "phrases";
+                dialog.dismiss();
+            } catch (IllegalArgumentException invalid) {
+                input.setError(invalid.getMessage());
+            }
+        });
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
+            input.requestFocus();
+        }
+    }
+
+    private void attachPanelDialog(android.app.AlertDialog dialog) {
+        try {
+            android.view.Window window = dialog.getWindow();
+            android.view.Window parent = getWindow() == null ? null : getWindow().getWindow();
+            if (window != null && parent != null) {
+                window.setType(WindowManager.LayoutParams.TYPE_APPLICATION_ATTACHED_DIALOG);
+                WindowManager.LayoutParams params = window.getAttributes();
+                params.token = parent.getDecorView().getWindowToken();
+                if (params.token == null) params.token = parent.getAttributes().token;
+                window.setAttributes(params);
+            }
+        } catch (RuntimeException error) {
+            android.util.Log.w("OfflineImeClipboard", "panel dialog attachment failed: " + error.getClass().getSimpleName());
+        }
+    }
+
+    private void restorePanelAfterDialog() {
+        clipboardSearchDialogOpen = false;
+        if (!clipboardSearchRestorePanel) {
+            clipboardSearchReturnEditorInfo = null;
+            return;
+        }
+        clipboardShown = !searchingEmoji; emojiShown = searchingEmoji;
+        clipboardEnablePromptShown = false;
+        clipboardSearchResumePending = true;
+        mainHandler.postDelayed(() -> {
+            if (!clipboardSearchResumePending) return;
+            clipboardSearchResumePending = false;
+            clipboardSearchRestorePanel = false;
+            EditorInfo restoreInfo = clipboardSearchReturnEditorInfo;
+            clipboardSearchReturnEditorInfo = null;
+            if (restoreInfo != null && (editorInfo == null || getPackageName().equals(editorInfo.packageName))) {
+                editorInfo = restoreInfo;
+                secureEditor = isSensitiveEditor(restoreInfo);
+                int cls = restoreInfo.inputType & InputType.TYPE_MASK_CLASS;
+                numericEditor = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE
+                        || cls == InputType.TYPE_CLASS_DATETIME;
+                editorLayoutKind = classifyEditorLayout(restoreInfo);
+                editorForcesKeyboardLayout = numericEditor || "email".equals(editorLayoutKind)
+                        || "uri".equals(editorLayoutKind);
+            }
+            startClipboardListenerIfNeeded();
+            refresh();
+        }, 250L);
     }
 
     private void clearClipboardWithUndo() {
@@ -2444,8 +2554,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     boolean isChoosingWordParts() {
-        return (mode == Mode.PINYIN || mode == Mode.NINE)
-                && (wordCreation.active || !ordinaryWordAssembly.parts.isEmpty());
+        // Ordinary partial selection still needs normal phrase candidates for
+        // the remaining input; only explicit word creation selects single parts.
+        return (mode == Mode.PINYIN || mode == Mode.NINE) && wordCreation.active;
     }
     String wordCreationStatus() {
         // Ordinary typing must never insert a save/undo row into the keyboard.
@@ -2914,7 +3025,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void toggleSelectionMode() {
-        clearComposing(true);
+        if (!clearComposing(true)) return;
         InputConnection connection = getCurrentInputConnection();
         if (connection == null) return;
         android.view.inputmethod.ExtractedText extracted = connection.getExtractedText(
@@ -2952,7 +3063,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void contextAction(int actionId, int fallbackKey) {
-        clearComposing(true);
+        if (!clearComposing(true)) return;
         InputConnection c = getCurrentInputConnection();
         if (c == null) return;
         c.finishComposingText();
@@ -3020,15 +3131,24 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         keyboardView.postOnAnimation(renderRefreshRunnable);
     }
 
+    private String lastPlacementGeometry = "";
     private void renderRefreshNow() {
         long renderStarted = ImePerformanceMonitor.start();
         try {
         refreshScheduled = false;
         if (destroyed) return;
         if (keyboardView != null) {
+            android.content.SharedPreferences placementPrefs = getSharedPreferences("settings", MODE_PRIVATE);
+            String placementGeometry = KeyboardPlacement.width(this, placementPrefs) + ":"
+                    + KeyboardPlacement.side(this, placementPrefs) + ":" + KeyboardPlacement.floating(this, placementPrefs);
+            if (!placementGeometry.equals(lastPlacementGeometry)) {
+                lastPlacementGeometry = placementGeometry;
+                updateInputViewLayout();
+            }
             if (clipboardSearchDialogOpen) keyboardView.refresh(mode, shift, composing.toString(), candidates());
             else if (toolsShown) keyboardView.showTools();
             else if (clipboardShown && clipboardEnablePromptShown) keyboardView.showClipboardEnablePrompt();
+            else if (clipboardShown && "phrases".equals(clipboardFilter)) keyboardView.showQuickPhrases(quickPhrases.list());
             else if (clipboardShown) keyboardView.showClipboardHistory(readClipboardHistory(), clipboardFilter,
                     clipboardSearchQuery, clipboardClearConfirmShown, clipboardClearBackup != null,
                     clipboardMultiSelect, new java.util.LinkedHashSet<>(clipboardSelection));

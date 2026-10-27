@@ -18,8 +18,27 @@ final class ImePerformanceMonitor {
     private static long inputStarted;
     private static final int[] candidateFrameCounts = new int[2];
     private static final int[] candidateTopChanges = new int[2];
+    private static volatile CompletedCandidateFrame lastCompletedCandidateFrame;
+    private static final class CompletedCandidateFrame {
+        final int inputHash, inputLength;
+        final long atMs;
+        CompletedCandidateFrame(String input) {
+            inputHash = input.hashCode(); inputLength = input.length();
+            atMs = SystemClock.elapsedRealtime();
+        }
+    }
     private ImePerformanceMonitor() { }
     static long start() { return SystemClock.elapsedRealtimeNanos(); }
+    /** Debug-only timing probe; it retains no typed text. */
+    static void candidateFrameCompleted(String input) {
+        if (BuildConfig.DEBUG) lastCompletedCandidateFrame = new CompletedCandidateFrame(input);
+    }
+    static long completedCandidateMs(String input, long sinceMs) {
+        CompletedCandidateFrame frame = lastCompletedCandidateFrame;
+        return frame != null && frame.inputLength == input.length()
+                && frame.inputHash == input.hashCode() && frame.atMs >= sinceMs
+                ? frame.atMs - sinceMs : -1;
+    }
     static synchronized void inputStarted() {
         phase = shown ? 1 : 0; shown = true; inputStarted = start();
     }
