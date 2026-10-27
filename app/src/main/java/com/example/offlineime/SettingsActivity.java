@@ -19,7 +19,6 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.EditText;
 import android.widget.Toast;
-import android.widget.SeekBar;
 import android.widget.ImageView;
 import android.view.inputmethod.InputMethodInfo;
 import android.view.inputmethod.InputMethodManager;
@@ -90,7 +89,7 @@ public final class SettingsActivity extends Activity {
         LinearLayout dataGroup = addSettingsGroup(content);
         addCategoryRow(dataGroup, "词库管理", "自定义词与学习记录", true, false);
         addCategoryRow(dataGroup, "隐私安全", "本地数据与隐私模式", false, false);
-        addCategoryRow(dataGroup, "剪贴板", "历史记录与固定内容", false, false);
+        addCategoryRow(dataGroup, "剪贴板", "历史记录与快捷短语", false, false);
         addCategoryRow(dataGroup, "关于", "版本与词库来源", false, true);
         TextView setup = text("启用与切换输入法  ›", 13, palette.textSecondary);
         setup.setPadding(dp(4), 0, dp(4), 0);
@@ -114,11 +113,13 @@ public final class SettingsActivity extends Activity {
         addChoice(content, "明暗模式", "appearance_mode", new String[]{"跟随系统", "浅色", "深色"}, new String[]{"system", "light", "dark"}, preferences.getBoolean("dark", false) ? "dark" : "system");
         addSwitch(content, "高对比度", "high_contrast", false);
         addChoice(content, "单手键盘", "one_hand_side", new String[]{"关闭", "左侧", "右侧"}, new String[]{"off", "left", "right"}, KeyboardPlacement.side(preferences));
-        addSettingSlider(content, "单手宽度（百分比）", "one_hand_width", 70, 95, preferences.getInt("one_hand_width", 82));
+        addSettingNumber(content, "单手宽度", "one_hand_width", 70, 90, 80, 10, "%");
         addSwitch(content, "大屏分离式键盘（宽屏时生效）", "split_keyboard", false);
+        addSettingNumber(content, "分离键盘中间间距", "split_gap", 1, 4, 2, 1, " 级");
         addSwitch(content, "浮动键盘（可拖动、调节尺寸）", "floating", false);
-        addSettingSlider(content, "浮动宽度", "floating_width", 280, Math.max(280, getResources().getConfiguration().screenWidthDp), preferences.getInt("floating_width", 340));
-        addSettingSlider(content, "浮动高度", "floating_height", 200, 560, preferences.getInt("floating_height", 300));
+        addSettingNumber(content, "浮动宽度", "floating_width", 280,
+                Math.max(280, getResources().getConfiguration().screenWidthDp), 340, 10, " dp");
+        addSettingNumber(content, "浮动高度", "floating_height", 200, 560, 300, 10, " dp");
         addSubheading(content, "尺寸与按键");
         addAppearanceControls(content);
         addSubheading(content, "声音与震动");
@@ -182,7 +183,7 @@ public final class SettingsActivity extends Activity {
         clearAll.setBackground(pressableRoundRect(palette.dangerSoft, palette.surfaceMuted, UiTokens.RADIUS_CONTROL));
         clearAll.setOnClickListener(v -> RoundedCardPopup.showDialog(new AlertDialog.Builder(this)
                 .setTitle("确认清除？")
-                .setMessage("主动保存的词、用户词库、上下文学习、拼音路径偏好、屏蔽词、表情记录和剪贴板历史将被删除。键盘外观设置会保留。")
+                .setMessage("主动保存的词、用户词库、上下文学习、拼音路径偏好、屏蔽词、表情记录、快捷短语和剪贴板历史将被删除。键盘外观设置会保留。")
                 .setNegativeButton("取消", null)
                 .setPositiveButton("清除", (dialog, which) -> {
                     boolean cleared = clearLocalPersonalData();
@@ -203,7 +204,7 @@ public final class SettingsActivity extends Activity {
                 new String[]{"1 天", "7 天", "30 天", "永久"},
                 new String[]{"1", "7", "30", "0"}, "7");
         addSubheading(content, "记录说明");
-        TextView clipboardInfo = text("默认只在你打开剪贴板面板时读取系统当前文本。开启自动记录后，仅当本输入法正在显示、剪贴板历史已启用且不在隐私/密码输入时，才监听新复制的文本；离开键盘后立即停止。带有系统敏感标记、密码类标签或验证码特征的内容会跳过。\n\n固定内容独立保留；剪贴板页面支持固定分组、搜索、批量选择和删除。清空后可在键盘上撤销 10 秒。", 14, palette.textSecondary); content.addView(clipboardInfo, new LinearLayout.LayoutParams(-1, -2));
+        TextView clipboardInfo = text("默认只在你打开剪贴板面板时读取系统当前文本。开启自动记录后，仅当本输入法正在显示、剪贴板历史已启用且不在隐私/密码输入时，才监听新复制的文本；离开键盘后立即停止。带有系统敏感标记、密码类标签或验证码特征的内容会跳过。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。", 14, palette.textSecondary); content.addView(clipboardInfo, new LinearLayout.LayoutParams(-1, -2));
         TextView privacy = text("隐私说明\n\n本应用只在当前输入框中完成本地组合和候选。密码、支付和验证码输入不会写入用户词库。本版本没有网络权限、语音权限、联系人权限、存储权限和无障碍服务。", 14, palette.textSecondary);
         privacy.setPadding(0, dp(18), 0, 0);
         addSection(content, "关于");
@@ -580,69 +581,110 @@ public final class SettingsActivity extends Activity {
 
     private void addAppearanceControls(LinearLayout parent) {
         LinearLayout presets = new LinearLayout(this);
+        presets.setPadding(dp(10), dp(8), dp(10), dp(8));
         String[] names = {"紧凑", "标准", "大字"};
         for (int i = 0; i < names.length; i++) {
             final int preset = i;
-            Button button = new Button(this); button.setText(names[i]);
+            TextView button = text(names[i], 14, palette.textPrimary);
+            button.setGravity(Gravity.CENTER);
+            int selectedHeight = new int[]{240, 300, 320}[i];
+            bindPalette(button, () -> {
+                boolean selected = KeyboardSizing.height(preferences) == selectedHeight;
+                button.setTextColor(selected ? palette.accent : palette.textSecondary);
+                button.setBackground(pressableRoundRect(selected ? palette.accentSoft : palette.background,
+                        palette.accentSoft, 12));
+            });
             button.setOnClickListener(v -> {
-                preferences.edit().putInt("key_height", new int[]{240, 250, 320}[preset])
+                preferences.edit().putInt("key_height", new int[]{240, 300, 320}[preset])
                         .putInt("key_font", new int[]{18, 20, 24}[preset]).putInt("key_gap", 2).putInt("key_radius", 12)
                         .putString("candidate_font_size", new String[]{"15", "17", "21"}[preset])
                         .putString("candidate_bar_height", new String[]{"44", "48", "56"}[preset])
                         .putString("expanded_candidate_density", preset == 2 ? "comfortable" : "standard").apply();
                 recreate();
-            }); presets.addView(button, new LinearLayout.LayoutParams(0, dp(48), 1));
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(42), 1);
+            params.setMargins(dp(3), 0, dp(3), 0);
+            presets.addView(button, params);
         }
         parent.addView(presets);
-        addSettingSlider(parent, "横屏高度", "key_height_landscape", 180, 360, preferences.getInt("key_height_landscape", 240));
-        addSettingSlider(parent, "键盘高度", "key_height", KeyboardSizing.MIN_HEIGHT,
-                KeyboardSizing.MAX_HEIGHT, KeyboardSizing.height(preferences));
-        addSettingSlider(parent, "按键字体大小", "key_font", 14, 24, preferences.getInt("key_font", 20));
-        addSettingSlider(parent, "按键圆角", "key_radius", 0, 16, preferences.getInt("key_radius", 12));
-        addSettingSlider(parent, "按键间距（单边）", "key_gap", 0, 3, Math.min(3, preferences.getInt("key_gap", 2)));
+        addSettingNumber(parent, "横屏高度", "key_height_landscape", 180, 360, 240, 10, " dp");
+        addSettingNumber(parent, "键盘高度", "key_height", KeyboardSizing.MIN_HEIGHT,
+                KeyboardSizing.MAX_HEIGHT, KeyboardSizing.DEFAULT_HEIGHT, 10, " dp");
+        addSettingNumber(parent, "按键字号", "key_font", 14, 24, 20, 2, " sp");
+        addSettingNumber(parent, "按键圆角", "key_radius", 0, 16, 12, 2, " dp");
+        addSettingNumber(parent, "按键间距", "key_gap", 0, 3, 2, 1, " dp");
     }
 
-    private void addSettingSlider(LinearLayout parent, String label, String key,
-                                  int minimum, int maximum, int current) {
-        LinearLayout heading = new LinearLayout(this);
-        heading.setTag("setting-slider-label");
-        heading.setGravity(Gravity.CENTER_VERTICAL);
-        heading.setPadding(dp(12), dp(12), dp(12), 0);
-        heading.addView(text(label, 15, palette.textPrimary), new LinearLayout.LayoutParams(0, -2, 1));
-        TextView value = text(Integer.toString(Math.max(minimum, Math.min(maximum, current))), 14, palette.accent);
+    private void addSettingNumber(LinearLayout parent, String label, String key,
+                                  int minimum, int maximum, int fallback, int step, String unit) {
+        int first = ((minimum + step - 1) / step) * step;
+        int last = (maximum / step) * step;
+        int stored = numericPreference(key, fallback);
+        int initial = Math.max(first, Math.min(last,
+                Math.round(stored / (float) step) * step));
+        Object rawValue = preferences.getAll().get(key);
+        if (rawValue != null && (!(rawValue instanceof Integer) || stored != initial))
+            preferences.edit().putInt(key, initial).apply();
+        LinearLayout row = new LinearLayout(this);
+        row.setTag("setting-choice");
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(12), dp(4), dp(12), dp(4));
+        row.setMinimumHeight(dp(56));
+        TextView title = text(label, 15, palette.textPrimary);
+        row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
+        TextView minus = numberAction("−", "减小" + label);
+        TextView value = text(initial + unit, 14, palette.accent);
+        value.setGravity(Gravity.CENTER);
+        value.setSingleLine(true);
+        value.setContentDescription(label + "，" + initial + unit);
         bindPalette(value, () -> value.setTextColor(palette.accent));
-        heading.addView(value);
-        Button reset = new Button(this); reset.setText("重置"); reset.setContentDescription("重置" + label);
-        reset.setOnClickListener(v -> { preferences.edit().remove(key).apply(); recreate(); });
-        heading.addView(reset, new LinearLayout.LayoutParams(dp(72), dp(48)));
-        parent.addView(heading, new LinearLayout.LayoutParams(-1, -2));
-        SeekBar slider = new SeekBar(this);
-        slider.setPadding(dp(12), 0, dp(12), 0);
-        slider.setMax(maximum - minimum);
-        slider.setProgress(Math.max(0, Math.min(maximum - minimum, current - minimum)));
-        slider.setContentDescription(label);
-        styleSlider(slider);
-        slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                value.setText(Integer.toString(minimum + progress));
-                if (fromUser) preferences.edit().putInt(key, minimum + progress).apply();
-            }
-            public void onStartTrackingTouch(SeekBar bar) { }
-            public void onStopTrackingTouch(SeekBar bar) { }
+        TextView plus = numberAction("+", "增大" + label);
+        TextView reset = numberAction("↺", "重置" + label);
+        reset.setTextSize(18);
+        row.addView(minus, new LinearLayout.LayoutParams(dp(36), dp(40)));
+        row.addView(value, new LinearLayout.LayoutParams(dp(unit.equals("%") ? 56 : 64), dp(40)));
+        row.addView(plus, new LinearLayout.LayoutParams(dp(36), dp(40)));
+        row.addView(reset, new LinearLayout.LayoutParams(dp(36), dp(40)));
+        minus.setOnClickListener(v -> updateSettingNumber(key, label, unit, step, first, last, -1, value));
+        plus.setOnClickListener(v -> updateSettingNumber(key, label, unit, step, first, last, 1, value));
+        reset.setOnClickListener(v -> {
+            preferences.edit().remove(key).apply();
+            int restored = Math.max(first, Math.min(last, Math.round(fallback / (float) step) * step));
+            value.setText(restored + unit);
+            value.setContentDescription(label + "，" + restored + unit);
         });
-        parent.addView(slider, new LinearLayout.LayoutParams(-1, dp(48)));
+        parent.addView(row, new LinearLayout.LayoutParams(-1, -2));
     }
 
-    private void styleSlider(SeekBar slider) {
-        bindPalette(slider, () -> {
-            slider.setThumbTintList(ColorStateList.valueOf(palette.accent));
-            slider.setProgressTintList(ColorStateList.valueOf(palette.accent));
-            slider.setProgressBackgroundTintList(ColorStateList.valueOf(palette.divider));
-        });
+    private TextView numberAction(String symbol, String description) {
+        TextView action = text(symbol, 20, palette.textPrimary);
+        action.setGravity(Gravity.CENTER);
+        action.setContentDescription(description);
+        bindPalette(action, () -> action.setBackground(pressableRoundRect(
+                palette.background, palette.accentSoft, 10)));
+        return action;
+    }
+
+    private void updateSettingNumber(String key, String label, String unit, int step,
+                                     int first, int last, int direction, TextView value) {
+        int current = numericPreference(key, Integer.parseInt(value.getText().toString().replace(unit, "")));
+        int next = Math.max(first, Math.min(last, current + direction * step));
+        if (next == current) return;
+        preferences.edit().putInt(key, next).apply();
+        value.setText(next + unit);
+        value.setContentDescription(label + "，" + next + unit);
+    }
+
+    private int numericPreference(String key, int fallback) {
+        try { return preferences.getInt(key, fallback); }
+        catch (ClassCastException oldValue) {
+            try { return Integer.parseInt(preferences.getString(key, Integer.toString(fallback))); }
+            catch (ClassCastException | NumberFormatException invalid) { return fallback; }
+        }
     }
 
     private void addCustomWordControls(LinearLayout parent) {
-        TextView hint = text("键盘 → 布局 → 造词，可逐段选字并保存完整读音。保存与固定首选分别设置。", 14, palette.textSecondary);
+        TextView hint = text("可在这里添加和管理自定义词，保存后供输入时使用。", 14, palette.textSecondary);
         parent.addView(hint, new LinearLayout.LayoutParams(-1, -2));
         for (String title : new String[]{"添加自定义词", "管理自定义词与学习词", "导入、导出与备份词库"}) {
             Button button = new Button(this); button.setText(title);
@@ -680,16 +722,12 @@ public final class SettingsActivity extends Activity {
             final int slot = i;
             TextView choiceButton = createChoiceButton("工具栏第" + (i + 1) + "项", "toolbar_item_" + i,
                     defaults[i], labels, values, choice -> {
-                if (!choice.isEmpty()) {
-                    for (int other = 0; other < defaults.length; other++) {
-                        if (other != slot && choice.equals(preferences.getString("toolbar_item_" + other, defaults[other]))) {
-                            Toast.makeText(this, "该功能已添加，请先将原位置设为不显示", Toast.LENGTH_SHORT).show();
-                            return false;
-                        }
-                    }
+                if (!toolbarChoiceAvailable(slot, choice)) {
+                    Toast.makeText(this, "该功能已添加，请先将原位置设为不显示", Toast.LENGTH_SHORT).show();
+                    return false;
                 }
                 return true;
-            });
+            }, choice -> toolbarChoiceAvailable(slot, choice));
             LinearLayout line = new LinearLayout(this);
             line.setGravity(Gravity.CENTER_VERTICAL);
             line.setPadding(dp(12), 0, dp(8), 0);
@@ -722,6 +760,16 @@ public final class SettingsActivity extends Activity {
             recreate();
         });
         parent.addView(reset, new LinearLayout.LayoutParams(-1, dp(48)));
+    }
+
+    private boolean toolbarChoiceAvailable(int slot, String choice) {
+        if (choice.isEmpty()) return true;
+        String[] defaults = ToolbarConfig.DEFAULTS;
+        for (int other = 0; other < defaults.length; other++) {
+            if (other != slot && choice.equals(ToolbarConfig.normalize(
+                    preferences.getString("toolbar_item_" + other, defaults[other]), other))) return false;
+        }
+        return true;
     }
 
     private void addSection(LinearLayout parent, String title) {
@@ -938,6 +986,7 @@ public final class SettingsActivity extends Activity {
         cleared &= CustomWordStore.clear(this);
         cleared &= SecureLocalStore.clear(this, "context_model", "offline_ime_context");
         cleared &= SecureLocalStore.clear(this, "clipboard_history", "offline_ime_clipboard");
+        cleared &= SecureLocalStore.clear(this, "quick_phrases", "offline_ime_quick_phrases");
         for (String preferencesName : new String[]{"blocked_words", "pinyin_path_usage", "emoji", "symbol_recent", "gesture_tips"}) {
             cleared &= getSharedPreferences(preferencesName, MODE_PRIVATE).edit().clear().commit();
         }
@@ -1012,8 +1061,6 @@ public final class SettingsActivity extends Activity {
                 params.bottomMargin = 0;
                 button.setLayoutParams(params);
             }
-        } else if (view instanceof SeekBar) {
-            styleSlider((SeekBar) view);
         } else if (view instanceof EditText) {
             EditText field = (EditText) view;
             field.setTextColor(palette.textPrimary);
@@ -1025,7 +1072,7 @@ public final class SettingsActivity extends Activity {
         } else if (view instanceof TextView) {
             TextView label = (TextView) view;
             Object parentTag = label.getParent() instanceof View ? ((View) label.getParent()).getTag() : null;
-            if (!"setting-choice".equals(parentTag) && !"setting-slider-label".equals(parentTag)
+            if (!"setting-choice".equals(parentTag)
                     && label.getPaddingLeft() == 0 && label.getPaddingRight() == 0) {
                 label.setPadding(dp(12), Math.max(dp(8), label.getPaddingTop()),
                         dp(12), Math.max(dp(8), label.getPaddingBottom()));
@@ -1070,9 +1117,15 @@ public final class SettingsActivity extends Activity {
         title.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         row.addView(title, new LinearLayout.LayoutParams(0, -2, 1));
         TextView value = createChoiceButton(label, key, defaultValue, labels, values, ignored -> true);
-        value.setGravity(Gravity.END | Gravity.CENTER_VERTICAL);
+        value.setGravity(Gravity.CENTER);
+        value.setMinimumHeight(dp(36));
+        value.setPadding(dp(10), dp(5), dp(10), dp(5));
         value.setMaxWidth(dp(152));
         value.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
+        bindPalette(value, () -> {
+            value.setTextColor(palette.accent);
+            value.setBackground(pressableRoundRect(palette.accentSoft, palette.accentSoft, 10));
+        });
         row.addView(value, new LinearLayout.LayoutParams(-2, -2));
         row.setOnClickListener(v -> value.performClick());
         row.setFocusable(true);
@@ -1083,6 +1136,13 @@ public final class SettingsActivity extends Activity {
     private TextView createChoiceButton(String label, String key, String defaultValue,
                                        String[] labels, String[] values,
                                        java.util.function.Predicate<String> canSelect) {
+        return createChoiceButton(label, key, defaultValue, labels, values, canSelect, ignored -> true);
+    }
+
+    private TextView createChoiceButton(String label, String key, String defaultValue,
+                                       String[] labels, String[] values,
+                                       java.util.function.Predicate<String> canSelect,
+                                       java.util.function.Predicate<String> showOption) {
         TextView button = text("", 14, palette.accent);
         button.setPadding(dp(4), dp(8), dp(2), dp(8));
         button.setMinimumHeight(dp(48));
@@ -1094,6 +1154,7 @@ public final class SettingsActivity extends Activity {
             String selected = preferences.getString(key, defaultValue);
             RoundedCardPopup menu = RoundedCardPopup.settings(this, label);
             for (int i = 0; i < values.length; i++) {
+                if (!showOption.test(values[i])) continue;
                 final int option = i;
                 menu.item(labels[i], null, null, values[i].equals(selected), false, () -> {
                     if (!canSelect.test(values[option])) return;

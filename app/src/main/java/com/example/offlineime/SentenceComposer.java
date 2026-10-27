@@ -10,6 +10,7 @@ import java.util.Map;
 final class SentenceComposer {
     private static final int MAX_WORD_LENGTH = 32;
     private static final int MAX_SEGMENT_CANDIDATES = 6;
+    static final double WORD_LOG_BASE = 9.5;
 
     private SentenceComposer() {}
 
@@ -69,7 +70,7 @@ final class SentenceComposer {
                     for (int i = 0; i < Math.min(4, words.size()); i++) {
                         PinyinDictionary.Entry word = words.get(i);
                         if (word.matchTier >= PinyinDictionary.TIER_PREFIX) continue;
-                        int probability = (int) Math.round(1000 * (Math.log1p(Math.max(1, word.corpusScore)) - 14));
+                        int probability = (int) Math.round(1000 * (Math.log1p(Math.max(1, word.corpusScore)) - WORD_LOG_BASE));
                         State next = new State(prior.text + word.word, prior.score + probability + transitions.score(prior.last, word.word), word.word);
                         next.words = new ArrayList<>(prior.words); next.words.add(word.word);
                         next.reading = (prior.reading + " " + word.pronunciation).trim();

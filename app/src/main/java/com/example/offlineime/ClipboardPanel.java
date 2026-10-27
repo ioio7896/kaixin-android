@@ -67,13 +67,7 @@ final class ClipboardPanel extends LinearLayout {
         }
         addView(header, new LayoutParams(-1, dp(36)));
 
-        LinearLayout filters = new LinearLayout(getContext());
-        filters.setGravity(Gravity.CENTER_VERTICAL);
-        filters.setPadding(dp(10), 0, dp(10), dp(4));
-        addClipboardFilter(filters, "全部", "all", filter);
-        addClipboardFilter(filters, "固定", "pinned", filter);
-        addClipboardFilter(filters, "最近", "recent", filter);
-        addView(filters, new LayoutParams(-1, dp(32)));
+        addClipboardFilters(filter);
 
         ScrollView scroll = new ScrollView(getContext());
         scroll.setFillViewport(true);
@@ -95,6 +89,45 @@ final class ClipboardPanel extends LinearLayout {
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
         addView(scroll, new LayoutParams(-1, 0, 1f));
         addClipboardBackButton();
+    }
+
+    public void showQuickPhrases(List<QuickPhraseStore.Entry> phrases) {
+        removeAllViews();
+        LinearLayout header = clipboardHeader();
+        addPanelTextAction(header, "添加", "添加快捷短语");
+        addView(header, new LayoutParams(-1, dp(36)));
+        addClipboardFilters("phrases");
+
+        ScrollView scroll = new ScrollView(getContext());
+        scroll.setFillViewport(true);
+        scroll.setVerticalScrollBarEnabled(true);
+        LinearLayout list = new LinearLayout(getContext());
+        list.setOrientation(VERTICAL);
+        list.setPadding(dp(10), dp(2), dp(10), dp(2));
+        if (phrases == null || phrases.isEmpty()) {
+            list.setGravity(Gravity.CENTER);
+            addClipboardEmptyState(list, "暂无快捷短语", "点击右上角添加常用文字，点按短语即可输入");
+        } else for (QuickPhraseStore.Entry phrase : phrases) addQuickPhraseRow(list, phrase);
+        scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
+        addView(scroll, new LayoutParams(-1, 0, 1f));
+        addClipboardBackButton();
+    }
+
+    private void addClipboardFilters(String selected) {
+        HorizontalScrollView scroll = new HorizontalScrollView(getContext());
+        scroll.setHorizontalScrollBarEnabled(false);
+        scroll.setHorizontalFadingEdgeEnabled(true);
+        scroll.setFadingEdgeLength(dp(16));
+        LinearLayout filters = new LinearLayout(getContext());
+        filters.setGravity(Gravity.CENTER_VERTICAL);
+        filters.setPadding(dp(10), 0, dp(10), dp(4));
+        addClipboardFilter(filters, "全部", "all", selected);
+        addClipboardFilter(filters, "固定", "pinned", selected);
+        addClipboardFilter(filters, "最近", "recent", selected);
+        addClipboardFilter(filters, "快捷短语", "phrases", selected);
+        scroll.addView(filters, new HorizontalScrollView.LayoutParams(-2, -1));
+        addView(scroll, new LayoutParams(-1, dp(32)));
+        if ("phrases".equals(selected)) scroll.post(() -> scroll.scrollTo(filters.getWidth(), 0));
     }
 
     private LinearLayout clipboardHeader() {
@@ -164,7 +197,7 @@ final class ClipboardPanel extends LinearLayout {
         tab.setBackground(panelButtonBackground(selected));
         tab.setContentDescription(label);
         tab.setOnClickListener(v -> callback.onKey("剪贴板筛选:" + value));
-        LayoutParams params = new LayoutParams(dp(64), dp(30));
+        LayoutParams params = new LayoutParams(dp("phrases".equals(value) ? 76 : 64), dp(30));
         params.setMargins(0, 0, dp(4), 0);
         row.addView(tab, params);
     }
@@ -229,6 +262,7 @@ final class ClipboardPanel extends LinearLayout {
         LinearLayout actions = new LinearLayout(getContext());
         actions.setGravity(Gravity.CENTER);
         addPanelTextAction(actions, "开启剪贴板历史", "启用剪贴板历史");
+        addPanelTextAction(actions, "快捷短语", "剪贴板筛选:phrases");
         addPanelTextAction(actions, "暂不开启", "暂不开启剪贴板");
         addView(actions, new LayoutParams(-1, dp(40)));
         addClipboardBackButton();
@@ -277,7 +311,7 @@ final class ClipboardPanel extends LinearLayout {
             android.widget.ImageButton more = addClipboardIcon(card, R.drawable.ic_panel_more,
                     "剪贴板内容操作：" + entry.text, "", true);
             more.setOnClickListener(v -> showClipboardItemMenu(more, entry));
-            more.setTooltipText("固定或删除");
+            more.setTooltipText("固定、存为短语或删除");
         }
         LayoutParams params = new LayoutParams(-1, -2);
         params.setMargins(0, dp(3), 0, dp(3));
@@ -288,6 +322,8 @@ final class ClipboardPanel extends LinearLayout {
         RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "剪贴板操作", theme);
         menu.item(entry.pinned ? "取消固定" : "固定", entry.pinned ? null : "保留这条剪贴板内容", null,
                 false, false, () -> callback.onKey("固定:" + entry.text));
+        menu.item("存为快捷短语", null, null, false, false,
+                () -> callback.onKey("保存为快捷短语:" + entry.text));
         menu.item("查看完整内容", "长文本可滚动查看", null, false, false, () -> {
             RoundedCardPopup preview = RoundedCardPopup.keyboard(getContext(), "剪贴板内容", theme);
             ScrollView scroll = new ScrollView(getContext()); TextView text = new TextView(getContext());
@@ -297,6 +333,59 @@ final class ClipboardPanel extends LinearLayout {
         });
         menu.divider().item("删除", null, null, false, true,
                 () -> callback.onKey("删除剪贴板:" + entry.text));
+        menus.accept(anchor, menu);
+    }
+
+    private void addQuickPhraseRow(LinearLayout list, QuickPhraseStore.Entry phrase) {
+        LinearLayout card = new LinearLayout(getContext());
+        card.setOrientation(HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dp(12), dp(10), dp(4), dp(10));
+        card.setBackground(roundRect(theme.key, 12));
+        TextView content = new TextView(getContext());
+        content.setText(phrase.text);
+        content.setTextSize(14);
+        content.setTextColor(theme.text);
+        content.setMaxLines(2);
+        content.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        card.addView(content, new LayoutParams(0, -2, 1f));
+        card.setContentDescription("输入快捷短语：" + phrase.text);
+        card.setOnClickListener(v -> callback.onKey("输入快捷短语:" + phrase.id));
+        card.setOnLongClickListener(v -> { showQuickPhraseMenu(card, phrase); return true; });
+        android.widget.ImageButton more = addClipboardIcon(card, R.drawable.ic_panel_more,
+                "快捷短语操作：" + phrase.text, "", true);
+        more.setOnClickListener(v -> showQuickPhraseMenu(more, phrase));
+        more.setTooltipText("编辑或删除");
+        LayoutParams params = new LayoutParams(-1, -2);
+        params.setMargins(0, dp(3), 0, dp(3));
+        list.addView(card, params);
+    }
+
+    private void showQuickPhraseMenu(View anchor, QuickPhraseStore.Entry phrase) {
+        RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "快捷短语", theme);
+        menu.item("编辑", null, null, false, false,
+                () -> callback.onKey("编辑快捷短语:" + phrase.id));
+        menu.item("查看完整内容", null, null, false, false, () -> {
+            RoundedCardPopup preview = RoundedCardPopup.keyboard(getContext(), "快捷短语", theme);
+            ScrollView scroll = new ScrollView(getContext());
+            TextView text = new TextView(getContext());
+            text.setText(phrase.text);
+            text.setTextSize(16);
+            text.setTextColor(theme.text);
+            text.setPadding(dp(12), dp(12), dp(12), dp(12));
+            scroll.addView(text);
+            scroll.setLayoutParams(new LayoutParams(-1, dp(160)));
+            preview.content(scroll);
+            preview.item("输入", null, null, false, false,
+                    () -> callback.onKey("输入快捷短语:" + phrase.id));
+            menus.accept(anchor, preview);
+        });
+        menu.divider().item("删除", null, null, false, true, () -> {
+            RoundedCardPopup confirm = RoundedCardPopup.keyboard(getContext(), "删除快捷短语？", theme);
+            confirm.item("确认删除", null, null, false, true,
+                    () -> callback.onKey("删除快捷短语:" + phrase.id));
+            menus.accept(anchor, confirm);
+        });
         menus.accept(anchor, menu);
     }
 

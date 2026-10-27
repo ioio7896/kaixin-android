@@ -38,6 +38,8 @@ public final class KeyButton extends Button {
     void setInputLetter(char value) { inputLetter = value; }
     char inputLetter() { return inputLetter; }
     private Runnable alternate;
+    private boolean alternateSwipeEnabled = true;
+    private int alternateHoldTimeout;
     private Runnable swipeLeft, swipeRight;
     private java.util.function.IntConsumer trackpadMove;
     private Runnable trackpadSelection;
@@ -59,6 +61,11 @@ public final class KeyButton extends Button {
         alternate = action;
         setOnLongClickListener(v -> { action.run(); return true; });
         AccessibilitySupport.longClick(this, "输入副符号");
+    }
+    public void setLongPressOnlyAction(Runnable action) {
+        setAlternateAction(action);
+        alternateSwipeEnabled = false;
+        alternateHoldTimeout = Math.max(800, ViewConfiguration.getLongPressTimeout());
     }
     public void setSwipeUpSymbol(String symbol, Runnable action) {
         swipeUpHint = symbol;
@@ -118,7 +125,7 @@ public final class KeyButton extends Button {
         GradientDrawable normal = new GradientDrawable(); normal.setColor(normalColor); normal.setCornerRadius(radius);
         normal.setStroke(1, blend(normalColor, theme.text, 0.06f));
         GradientDrawable pressed = new GradientDrawable();
-        int pressedColor = blend(normalColor, theme.accent, theme.isDark ? 0.28f : 0.16f);
+        int pressedColor = blend(normalColor, theme.accent, theme.isDark ? 0.32f : 0.22f);
         pressed.setColor(pressedColor); pressed.setCornerRadius(radius);
         pressed.setStroke(1, blend(pressedColor, theme.accent, 0.08f));
         StateListDrawable states = new StateListDrawable(); states.addState(new int[]{android.R.attr.state_pressed}, pressed); states.addState(new int[]{}, normal); setBackground(states);
@@ -355,8 +362,8 @@ public final class KeyButton extends Button {
         animate().cancel();
         boolean animations = android.animation.ValueAnimator.areAnimatorsEnabled();
         if (!animations) { setScaleX(1f); setScaleY(1f); return; }
-        if (pressed) { setScaleX(0.982f); setScaleY(0.982f); }
-        else animate().scaleX(1f).scaleY(1f).setDuration(50)
+        if (pressed) { setScaleX(0.975f); setScaleY(0.975f); }
+        else animate().scaleX(1f).scaleY(1f).setDuration(45)
                 .setInterpolator(RELEASE_INTERPOLATOR).withEndAction(null).start();
     }
 
@@ -384,7 +391,8 @@ public final class KeyButton extends Button {
             touch.hold = () -> holdTouch(touch);
             if (touches.get(id) == touch && (repeatDelete || trackpadMove != null
                     || alternate != null || isLongClickable()))
-                postDelayed(touch.hold, repeatDelete ? 360 : ViewConfiguration.getLongPressTimeout());
+                postDelayed(touch.hold, repeatDelete ? 360 : alternateHoldTimeout > 0
+                        ? alternateHoldTimeout : ViewConfiguration.getLongPressTimeout());
             return true;
         }
         if (action == MotionEvent.ACTION_CANCEL) { cancelTouch(); return true; }
@@ -425,7 +433,7 @@ public final class KeyButton extends Button {
                     touch.trackpadSteps = steps;
                     trackpadMove.accept(change);
                 }
-            } else if (!touch.consumed && alternate != null && -dy >= dp(swipeUpHint.isEmpty() ? 28 : 24)
+            } else if (!touch.consumed && alternate != null && alternateSwipeEnabled && -dy >= dp(swipeUpHint.isEmpty() ? 28 : 24)
                     && -dy > Math.abs(dx)) {
                 touch.consumed = true; touch.swipeUpArmed = true; removeCallbacks(touch.hold);
             } else if (!touch.consumed && swipeLeft != null && Math.abs(dx) > dp(30) && Math.abs(dx) > Math.abs(dy)) {
@@ -435,7 +443,7 @@ public final class KeyButton extends Button {
                     || y < -dp(8) || y > getHeight() + dp(8))) {
                 // Keep tracking an upward flick after it leaves the small key.
                 // Horizontal exits and downward drags still cancel normally.
-                boolean trackingUp = alternate != null && dy < 0 && -dy > Math.abs(dx)
+                boolean trackingUp = alternate != null && alternateSwipeEnabled && dy < 0 && -dy > Math.abs(dx)
                         && x >= -dp(8) && x <= getWidth() + dp(8);
                 if (!trackingUp) {
                     touch.consumed = true; removeCallbacks(touch.hold);

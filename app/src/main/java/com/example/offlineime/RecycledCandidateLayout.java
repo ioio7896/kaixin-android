@@ -83,6 +83,7 @@ final class RecycledCandidateLayout extends ViewGroup {
         for (int i = first; i < end; i++) {
             Rect rect = bounds.get(i);
             int extra = Math.max(0, spare) / count + (i - first < Math.max(0, spare) % count ? 1 : 0);
+            extra = Math.min(extra, Math.round(32 * getResources().getDisplayMetrics().density));
             rect.offset(offset, 0); rect.right += extra; offset += extra;
         }
     }

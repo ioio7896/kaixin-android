@@ -11,6 +11,7 @@ final class KeyFeedback {
     private static KeyFeedback instance;
     private volatile int hapticLevel;
     private volatile float soundVolume;
+    private volatile long lastPressAt;
     private final SharedPreferences preferences;
     private final AudioManager audioManager;
     private final SharedPreferences.OnSharedPreferenceChangeListener listener = (prefs, key) -> {
@@ -42,6 +43,7 @@ final class KeyFeedback {
     }
 
     void press(View view) {
+        lastPressAt = android.os.SystemClock.uptimeMillis();
         if (hapticLevel > 0) {
             // Keep every key pulse short so successive presses stay distinct.
             // LONG_PRESS lingers and feels smeared during rapid typing.
@@ -53,5 +55,9 @@ final class KeyFeedback {
         view.setSoundEffectsEnabled(false);
         if (soundVolume > 0 && audioManager != null)
             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, soundVolume);
+    }
+
+    boolean quietFor(long milliseconds) {
+        return android.os.SystemClock.uptimeMillis() - lastPressAt >= milliseconds;
     }
 }

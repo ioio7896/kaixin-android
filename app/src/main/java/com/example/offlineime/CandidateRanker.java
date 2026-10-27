@@ -3,7 +3,6 @@ package com.example.offlineime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.PriorityQueue;
 
 /** Deterministic ranking with well-matched common characters before short words. */
 final class CandidateRanker {
@@ -47,7 +46,8 @@ final class CandidateRanker {
             // Word decoder scores sum log frequencies. Normalize per word before
             // comparing with corpus candidates so sentence length is not a penalty.
             if (!entry.wordSegments.isEmpty()) {
-                double averageLogFrequency = base / (1000.0 * entry.wordSegments.size()) + 14.0;
+                double averageLogFrequency = base / (1000.0 * entry.wordSegments.size())
+                        + SentenceComposer.WORD_LOG_BASE;
                 int normalized = (int) Math.round(1000 * Math.log1p(Math.exp(Math.max(0, Math.min(18, averageLogFrequency))) / 1000));
                 return normalized - 260 - Math.min(240, entry.wordSegments.size() * 30) + personal + context;
             }
@@ -163,24 +163,6 @@ final class CandidateRanker {
         if (limit <= 0) return new ArrayList<>();
         boolean preferTwoCharacters = isThreeLetterInput(input);
         Comparator<RankedEntry> ranking = comparator(preferSingleCharacter);
-        if (limit != Integer.MAX_VALUE) {
-            PriorityQueue<RankedEntry> best = new PriorityQueue<>(
-                    Math.max(1, limit), ranking.reversed());
-            for (PinyinDictionary.Entry entry : source) {
-                QueryWork.check();
-                if (entry == null || entry.word == null) continue;
-                RankedEntry ranked = new RankedEntry(entry, preferTwoCharacters, input);
-                if (best.size() < limit) best.add(ranked);
-                else if (ranking.compare(ranked, best.peek()) < 0) {
-                    best.poll();
-                    best.add(ranked);
-                }
-            }
-            ArrayList<RankedEntry> out = new ArrayList<>(best);
-            out.sort(ranking);
-            QueryWork.check();
-            return entries(out);
-        }
         ArrayList<RankedEntry> out = new ArrayList<>();
         for (PinyinDictionary.Entry entry : source) {
             QueryWork.check();
@@ -188,7 +170,52 @@ final class CandidateRanker {
         }
         out.sort(ranking);
         QueryWork.check();
-        return entries(out);
+        // Preserve the leading choice, then reserve a few places for common
+        // complete words and phrase completions. The order follows the input:
+        // full spellings favor full-word completions; initials favor short words.
+        if (!preferSingleCharacter && input != null && input.replace("'", "").length() >= 2
+                && out.size() > 1) {
+            ArrayList<RankedEntry> ordered = new ArrayList<>(out.size());
+            int at = 0;
+            while (at < out.size() && out.get(at).entry.pinned) ordered.add(out.get(at++));
+            if (at < out.size()) ordered.add(out.get(at++));
+            boolean[] moved = new boolean[out.size()];
+            boolean fullSpelling = !input.matches("[2-9']+")
+                    && !PinyinInput.isAbbreviationQuery(input, true);
+            int[] groups = fullSpelling ? new int[]{0, 2, 1, 3} : new int[]{1, 0, 2, 3};
+            int[] quotas = fullSpelling ? new int[]{3, 2, 2, 1} : new int[]{4, 2, 1, 1};
+            for (int group : groups) {
+                int promoted = 0;
+                for (int i = at; i < out.size() && promoted < quotas[group]; i++) {
+                    RankedEntry candidate = out.get(i);
+                    if (!moved[i] && phraseGroup(candidate.entry) == group) {
+                        ordered.add(candidate);
+                        moved[i] = true;
+                        promoted++;
+                    }
+                }
+            }
+            for (int i = at; i < out.size(); i++) {
+                if (!moved[i]) ordered.add(out.get(i));
+            }
+            out = ordered;
+        }
+        return entries(out.subList(0, Math.min(limit, out.size())));
+    }
+
+    private static int phraseGroup(PinyinDictionary.Entry entry) {
+        if (entry.codePointLength < 2 || !containsHan(entry.word)
+                || entry.rankingTier >= 35 && entry.matchTier != PinyinDictionary.TIER_COMPOSED)
+            return -1;
+        if (entry.matchTier == PinyinDictionary.TIER_COMPOSED)
+            return entry.codePointLength >= 3 && entry.wordSegments.size() > 1 ? 3 : -1;
+        if (entry.corpusScore < COMMON_CORPUS_SCORE
+                && personalScore(entry.personalBonus) < STRONG_PERSONAL_SCORE
+                && contextScore(entry.contextBonus) < STRONG_CONTEXT_SCORE) return -1;
+        if (entry.matchTier == PinyinDictionary.TIER_EXACT_FULL) return 0;
+        if (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
+                || entry.matchTier == PinyinDictionary.TIER_MIXED) return 1;
+        return entry.matchTier == PinyinDictionary.TIER_PREFIX ? 2 : -1;
     }
 
     private static ArrayList<PinyinDictionary.Entry> entries(List<RankedEntry> ranked) {
