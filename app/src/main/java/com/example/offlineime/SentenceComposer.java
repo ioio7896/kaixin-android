@@ -71,8 +71,17 @@ final class SentenceComposer {
                         PinyinDictionary.Entry word = words.get(i);
                         if (word.matchTier >= PinyinDictionary.TIER_PREFIX) continue;
                         int probability = (int) Math.round(1000 * (Math.log1p(Math.max(1, word.corpusScore)) - WORD_LOG_BASE));
-                        State next = new State(prior.text + word.word, prior.score + probability + transitions.score(prior.last, word.word), word.word);
+                        int transition = transitions.score(prior.last, word.word);
+                        int single = word.codePointLength == 1 ? 1 : 0;
+                        int weak = word.corpusScore < 1000 ? 1 : 0;
+                        int unsupported = !prior.last.isEmpty() && transition < 120 ? 1 : 0;
+                        State next = new State(prior.text + word.word, prior.score + probability
+                                + transition - unsupported * 360 - single * 180 - weak * 300, word.word);
+                        next.singleWords = prior.singleWords + single;
+                        next.weakWords = prior.weakWords + weak;
+                        next.unsupportedLinks = prior.unsupportedLinks + unsupported;
                         next.words = new ArrayList<>(prior.words); next.words.add(word.word);
+                        if (next.words.size() > 8 || next.weakWords > 1 || next.unsupportedLinks > 2) continue;
                         next.reading = (prior.reading + " " + word.pronunciation).trim();
                         State existing = unique.get(next.text);
                         if (existing == null || existing.score < next.score) unique.put(next.text, next);
@@ -89,6 +98,8 @@ final class SentenceComposer {
         List<PinyinDictionary.Entry> out = new ArrayList<>();
         for (State state : beams.get(tokens.size())) {
             if (out.size() >= 8) break;
+            if (state.words.size() < 2 || state.singleWords * 2 > state.words.size()
+                    || state.weakWords > 0 && state.unsupportedLinks == state.words.size() - 1) continue;
             PinyinDictionary.Entry entry = new PinyinDictionary.Entry(state.text, state.score, PinyinDictionary.TIER_COMPOSED, false, 0, 32)
                     .withInput(consumed, state.reading.isEmpty() ? String.join(" ", tokens) : state.reading);
             entry.wordSegments = java.util.Collections.unmodifiableList(state.words); out.add(entry);
@@ -156,6 +167,7 @@ final class SentenceComposer {
     private static final class State {
         List<String> words = java.util.Collections.emptyList();
         String reading = "";
+        int singleWords, weakWords, unsupportedLinks;
         final String text;
         final int score;
         final String last;

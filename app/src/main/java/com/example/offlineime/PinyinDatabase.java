@@ -30,6 +30,12 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                     return size() > 2048;
                 }
             });
+    private final Map<String, Map<String, Integer>> successorCache = Collections.synchronizedMap(
+            new LinkedHashMap<String, Map<String, Integer>>(32, .75f, true) {
+                @Override protected boolean removeEldestEntry(Map.Entry<String, Map<String, Integer>> entry) {
+                    return size() > 128;
+                }
+            });
 
     private Cursor select(String table, String[] columns, String selection, String[] args,
                           String groupBy, String having, String orderBy, String limit) {
@@ -60,6 +66,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
     /** Called exclusively by the lexicon loader, before any candidate database queries. */
     void prepareBundledDatabase(int lexiconVersion) {
         transitionCache.clear();
+        successorCache.clear();
         close();
         installBundledDatabase(applicationContext, lexiconVersion);
     }
@@ -134,6 +141,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX idx_pron_word ON pronunciations(word,score DESC)");
         db.execSQL("CREATE TABLE metadata(name TEXT PRIMARY KEY, value TEXT NOT NULL)");
         db.execSQL("CREATE TABLE word_transitions(previous TEXT NOT NULL, next TEXT NOT NULL, weight INTEGER NOT NULL, PRIMARY KEY(previous,next))");
+        db.execSQL("CREATE INDEX idx_transition_rank ON word_transitions(previous,weight DESC,next)");
         db.execSQL("CREATE TABLE characters AS SELECT * FROM pronunciations WHERE length(word)=1");
         for (String column : new String[]{"code", "digits", "initials", "initial_digits"})
             db.execSQL("CREATE INDEX idx_char_" + column + " ON characters(" + column + ",score DESC,word,syllables)");
@@ -141,6 +149,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
 
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         transitionCache.clear();
+        successorCache.clear();
         db.execSQL("DROP TABLE IF EXISTS word_transitions");
         db.execSQL("DROP TABLE IF EXISTS pronunciations");
         db.execSQL("DROP TABLE IF EXISTS characters");
@@ -158,12 +167,14 @@ final class PinyinDatabase extends SQLiteOpenHelper {
 
     void beginLexiconImport() {
         transitionCache.clear();
+        successorCache.clear();
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         db.delete("words", null, null);
         db.delete("pronunciations", null, null);
         db.delete("characters", null, null);
         db.delete("metadata", null, null);
+        db.delete("word_transitions", null, null);
         importDatabase = db;
     }
 
@@ -253,7 +264,6 @@ final class PinyinDatabase extends SQLiteOpenHelper {
             for (PinyinInput.Path path : paths) keys.add(path.initials);
             if (numeric) keys.addAll(PinyinInput.numericKeys(input, full, shortInput, doubles));
         }
-        if (keys.isEmpty()) return new ArrayList<>();
         StringBuilder where = new StringBuilder();
         List<String> args = new ArrayList<>();
         for (String key : keys) {
@@ -299,6 +309,9 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 }
             }
         }
+        // The bounded path parser may have no initials path for a long code.
+        // The indexed exact full-code lookup above remains valid in that case.
+        if (keys.isEmpty()) return rankFlexible(out, abbreviation, resultLimit, input);
         // A complete syllable can also be the beginning of a word ("ni" ->
         // "nihao"). Fetch a small phrase-only prefix pool before the broad
         // initials scan can exhaust the first-screen time budget.
@@ -331,13 +344,13 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 primaryWords.add(entry.word);
         // Recall the literal initials independently. Other parsed keys can be
         // much broader and must not consume its score-ordered SQL limit.
-        if (shortInput && !numeric && plain.length() >= 2 && keys.contains(plain)) {
+        if (shortInput && plain.length() >= 2 && keys.contains(plain)) {
             List<String> literalArgs = new ArrayList<>(); literalArgs.add(plain);
             if (!leadingReading.isEmpty()) {
                 literalArgs.add(leadingReading); literalArgs.add(leadingPattern);
             }
             try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
-                    "initials=? AND length(word)>1" + lockedFilter,
+                    (numeric ? "initial_digits" : "initials") + "=? AND length(word)>1" + lockedFilter,
                     literalArgs.toArray(new String[0]), null, null, "score DESC, word", "32")) {
                 while (cursor.moveToNext()) {
                     QueryWork.check();
@@ -346,6 +359,38 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                             ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, false)
                             : constraint.match(reading, full, shortInput, mixed, doubles, false);
                     if (match == null) continue;
+                    PinyinDictionary.Entry entry = new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
+                            .withInput(constraint == null ? input.length() : constraint.raw.length(), reading);
+                    out.add(entry); primaryWords.add(entry.word);
+                }
+            }
+        }
+        // Reserve bounded recall for four/five syllable words before the broad
+        // scan limit. Only complete pronunciation matches enter these pools.
+        if (shortInput) for (int length = 4; length <= 5; length++) {
+            StringBuilder protectedWhere = new StringBuilder();
+            List<String> protectedArgs = new ArrayList<>();
+            for (String key : keys) {
+                if (key.length() != length) continue;
+                if (protectedWhere.length() > 0) protectedWhere.append(" OR ");
+                protectedWhere.append(numeric ? "initial_digits=?" : "initials=?");
+                protectedArgs.add(key);
+            }
+            if (protectedArgs.isEmpty()) continue;
+            protectedWhere.insert(0, '(').append(") AND length(word)=").append(length).append(lockedFilter);
+            if (!leadingReading.isEmpty()) {
+                protectedArgs.add(leadingReading); protectedArgs.add(leadingPattern);
+            }
+            try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
+                    protectedWhere.toString(), protectedArgs.toArray(new String[0]),
+                    null, null, "score DESC, word", "32")) {
+                while (cursor.moveToNext()) {
+                    QueryWork.check();
+                    String reading = cursor.getString(2);
+                    PinyinInput.Match match = constraint == null
+                            ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, false)
+                            : constraint.match(reading, full, shortInput, mixed, doubles, false);
+                    if (match == null || match.tier == PinyinDictionary.TIER_PREFIX) continue;
                     PinyinDictionary.Entry entry = new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
                             .withInput(constraint == null ? input.length() : constraint.raw.length(), reading);
                     out.add(entry); primaryWords.add(entry.word);
@@ -371,13 +416,9 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 exactArgs.add(leadingReading); exactArgs.add(leadingPattern);
             }
             int exactLimit = Math.max(96, Math.min(256, resultLimit * 4));
-            // Recall matching two-character words before three-character heat fills the scan cap.
-            String exactOrder = (abbreviation || CandidateRanker.isThreeLetterInput(input))
-                    ? "CASE WHEN length(word)=2 AND score>=4000 THEN 0 ELSE 1 END, score DESC, word"
-                    : "score DESC, word";
             try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
                     exactWhere.toString(), exactArgs.toArray(new String[0]), null, null,
-                    exactOrder, Integer.toString(exactLimit))) {
+                    "score DESC, word", Integer.toString(exactLimit))) {
                 while (cursor.moveToNext()) {
                     QueryWork.check();
                     if (out.size() >= firstScreenTarget && primaryWords.size() >= 4
@@ -510,7 +551,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
     List<PinyinDictionary.Entry> queryContextWords(String input, List<String> words,
             boolean full, boolean shortInput, boolean mixed, boolean doubles) {
         if (words == null || words.isEmpty()) return Collections.emptyList();
-        int count = Math.min(8, words.size());
+        int count = Math.min(24, words.size());
         StringBuilder where = new StringBuilder("word IN (");
         String[] args = new String[count];
         for (int i = 0; i < count; i++) {
@@ -609,11 +650,30 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         if (cached != null) return cached;
         int bonus;
         try (Cursor cursor = selectRaw("SELECT weight FROM word_transitions WHERE previous=? AND next=?", new String[]{previous, next})) {
-            bonus = cursor.moveToFirst() ? Math.min(1500, (int)(180 * Math.log1p(cursor.getInt(0)))) : 0;
+            bonus = cursor.moveToFirst() ? Math.max(0, Math.min(1100, cursor.getInt(0))) : 0;
         }
         QueryWork.check();
         transitionCache.put(key, bonus);
         return bonus;
+    }
+
+    /** First-screen queries may reuse an already loaded context, never add IO. */
+    Map<String, Integer> transitionScores(String previous, boolean allowLoad) {
+        if (previous == null || previous.isEmpty()) return Collections.emptyMap();
+        Map<String, Integer> cached = successorCache.get(previous);
+        if (cached != null) return cached;
+        if (!allowLoad) return Collections.emptyMap();
+        LinkedHashMap<String, Integer> scores = new LinkedHashMap<>();
+        try (Cursor cursor = select("word_transitions", new String[]{"next", "weight"},
+                "previous=?", new String[]{previous}, null, null, "weight DESC,next", "64")) {
+            while (cursor.moveToNext()) {
+                QueryWork.check();
+                scores.put(cursor.getString(0), Math.max(0, Math.min(1100, cursor.getInt(1))));
+            }
+        }
+        Map<String, Integer> snapshot = Collections.unmodifiableMap(scores);
+        successorCache.put(previous, snapshot);
+        return snapshot;
     }
 
     List<PinyinDictionary.Entry> queryPinyin(

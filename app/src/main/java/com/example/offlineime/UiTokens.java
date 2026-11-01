@@ -1,7 +1,6 @@
 package com.example.offlineime;
 
 import android.content.Context;
-import android.content.res.Configuration;
 
 /** Shared visual tokens for settings surfaces and keyboard chrome. */
 public final class UiTokens {
@@ -17,37 +16,24 @@ public final class UiTokens {
     private UiTokens() {}
 
     public static boolean isDark(Context context) {
-        int mode = context.getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK;
-        return mode == Configuration.UI_MODE_NIGHT_YES;
+        return KeyboardTheme.resolveDark(context);
     }
 
     public static Palette palette(Context context) {
         boolean dark = isDark(context);
         Palette base = dark ? Palette.DARK : Palette.LIGHT;
-        String skin = context.getSharedPreferences("settings", Context.MODE_PRIVATE).getString("theme", "system");
-        int accent = KeyboardTheme.forSkin(context, skin, dark, false).accent;
-        if (dark && ("system".equals(skin) || "ocean".equals(skin)
-                || "mint".equals(skin) || "violet".equals(skin))) accent = blend(accent, 0xffffffff, 0.4f);
         return new Palette(base.background, base.surface, base.surfaceMuted,
-                base.textPrimary, base.textSecondary, base.divider, accent,
-                blend(base.surface, accent, dark ? 0.18f : 0.10f), base.danger, base.dangerSoft);
-    }
-
-    private static int blend(int base, int tint, float amount) {
-        return android.graphics.Color.rgb(
-                Math.round(android.graphics.Color.red(base) * (1 - amount) + android.graphics.Color.red(tint) * amount),
-                Math.round(android.graphics.Color.green(base) * (1 - amount) + android.graphics.Color.green(tint) * amount),
-                Math.round(android.graphics.Color.blue(base) * (1 - amount) + android.graphics.Color.blue(tint) * amount));
+                base.textPrimary, base.textSecondary, base.divider, base.accent,
+                base.accentSoft, base.danger, base.dangerSoft);
     }
 
     public static final class Palette {
         public static final Palette LIGHT = new Palette(
-                0xfff5f7fa, 0xffffffff, 0xfff8fafc, 0xff1d2430, 0xff626b79,
-                0xffdfe4ea, 0xff276ef1, 0xffedf3ff, 0xffba1a1a, 0xfffcebea);
+                0xfff2f2f7, 0xffffffff, 0xfff7f7fa, 0xff1c1c1e, 0xff636366,
+                0xffd1d1d6, 0xff0066cc, 0xffe8f2ff, 0xffd92d20, 0xffffebe9);
         public static final Palette DARK = new Palette(
-                0xff111419, 0xff1c2128, 0xff252b34, 0xfff2f5f8, 0xffaeb7c4,
-                0xff353d48, 0xff8ab4ff, 0xff1e355d, 0xffffb4ab, 0xff5c1f1f);
+                0xff000000, 0xff1c1c1e, 0xff2c2c2e, 0xfff5f5f7, 0xffaeaeb2,
+                0xff38383a, 0xff0a84ff, 0xff173a5e, 0xffff453a, 0xff4a211e);
 
         public final int background;
         public final int surface;

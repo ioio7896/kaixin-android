@@ -7,6 +7,11 @@ plugins {
 // pointing at app/build even though all intermediates live under root/build.
 layout.buildDirectory = rootProject.layout.buildDirectory.dir("offline-ime-app")
 
+// One timestamp identifies the installed version and the exported APK.
+def apkBuildTime = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+def apkVersionName = apkBuildTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+def apkVersionCode = Math.toIntExact(apkBuildTime.toEpochSecond())
+
 android {
     namespace "com.example.offlineime"
     compileSdk 35
@@ -16,8 +21,8 @@ android {
         applicationId "com.example.offlineime"
         minSdk 26
         targetSdk 35
-        versionCode 23
-        versionName "0.5.3"
+        versionCode apkVersionCode
+        versionName apkVersionName
         testInstrumentationRunner "com.example.offlineime.FrontendStabilityInstrumentation"
         ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }
         externalNativeBuild {
@@ -99,6 +104,7 @@ tasks.register("buildLexiconDatabase", Exec) {
     inputs.files(fileTree("../lexicon") { include "**/*.txt" })
     inputs.files(fileTree("src/main/assets/lexicon-corrections") { include "**/*.txt"; include "**/*.tsv" })
     inputs.file("../data_sources/desktop_single_char_readings.txt")
+    inputs.file("src/main/assets/language-model/collocations.tsv")
     inputs.file("../tools/build_lexicon_db.py")
     inputs.file("src/main/java/com/example/offlineime/PinyinDictionary.java")
     outputs.file(generatedLexiconDb)

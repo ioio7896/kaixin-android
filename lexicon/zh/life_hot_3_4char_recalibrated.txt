@@ -1,0 +1,58 @@
+# 日常三、四字词的保守权重校准。依据本地 jieba 词频筛选，再人工排除人名、地名和专门术语。
+# 仅提升原有低权重词；分数是排序权重，不是实际出现次数。
+不多时	bu duo shi	4800
+糯米饭	nuo mi fan	4500
+顾不得	gu bu de	4700
+顷刻间	qing ke jian	4500
+笑吟吟	xiao yin yin	4300
+霎时间	sha shi jian	4400
+糯米粉	nuo mi fen	4400
+恶狠狠	e hen hen	4400
+呆呆地	dai dai di	4300
+旧社会	jiu she hui	4300
+今儿个	jin er ge	4300
+名胜古迹	ming sheng gu ji	4800
+浩浩荡荡	hao hao dang dang	4700
+四通八达	si tong ba da	4700
+驰名中外	chi ming zhong wai	4500
+粮食作物	liang shi zuo wu	4400
+非同小可	fei tong xiao ke	4800
+神来之笔	shen lai zhi bi	4400
+同工同酬	tong gong tong chou	4400
+不动声色	bu dong sheng se	4700
+威风凛凛	wei feng lin lin	4500
+众星捧月	zhong xing peng yue	4400
+面面相觑	mian mian xiang qu	4500
+当家作主	dang jia zuo zhu	4400
+接连不断	jie lian bu duan	4500
+耀武扬威	yao wu yang wei	4400
+声势浩大	sheng shi hao da	4400
+卧薪尝胆	wo xin chang dan	4500
+不在话下	bu zai hua xia	4400
+出奇制胜	chu qi zhi sheng	4400
+马到成功	ma dao cheng gong	4600
+迷迷糊糊	mi mi hu hu	4700
+依山傍水	yi shan bang shui	4300
+死里逃生	si li tao sheng	4500
+各司其职	ge si qi zhi	4400
+一拥而上	yi yong er shang	4500
+光彩夺目	guang cai duo mu	4400
+回味无穷	hui wei wu qiong	4400
+慷慨激昂	kang kai ji ang	4400
+不知去向	bu zhi qu xiang	4400
+按捺不住	an na bu zhu	4500
+人杰地灵	ren jie di ling	4300
+变废为宝	bian fei wei bao	4400
+别有风味	bie you feng wei	4300
+星罗棋布	xing luo qi bu	4400
+紧要关头	jin yao guan tou	4400
+上上下下	shang shang xia xia	4300
+顷刻之间	qing ke zhi jian	4300
+摇摇晃晃	yao yao huang huang	4400
+目不转睛	mu bu zhuan jing	4500
+从容不迫	cong rong bu po	4500
+气喘吁吁	qi chuan xu xu	4500
+心旷神怡	xin kuang shen yi	4400
+喜出望外	xi chu wang wai	4500
+一声不吭	yi sheng bu keng	4500
+兴致勃勃	xing zhi bo bo	4500

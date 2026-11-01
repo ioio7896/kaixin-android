@@ -49,7 +49,8 @@ final class ClipboardPanel extends LinearLayout {
         removeAllViews();
         boolean empty = values == null || values.isEmpty();
         boolean searching = query != null && !query.isEmpty();
-        LinearLayout header = clipboardHeader();
+        LinearLayout header = clipboardControlHeader();
+        addClipboardFilters(header, filter);
         if (!multiSelect)
             addClipboardIcon(header, R.drawable.ic_panel_search, searching ? "搜索中" : "搜索", "搜索剪贴板", true);
         // Clear applies to the entire history, even if the active filter has no results.
@@ -62,12 +63,10 @@ final class ClipboardPanel extends LinearLayout {
             addPanelTextAction(header, "确定清空", "确认清空剪贴板");
             addPanelTextAction(header, "取消", "取消清空剪贴板");
         } else {
-            addPanelTextAction(header, "多选", "剪贴板多选", hasHistory);
+            addPanelTextAction(header, "多选", "剪贴板多选", hasHistory && !empty);
             addClipboardIcon(header, R.drawable.ic_panel_clear, "清空", "清空剪贴板", hasHistory);
         }
-        addView(header, new LayoutParams(-1, dp(36)));
-
-        addClipboardFilters(filter);
+        addView(header, new LayoutParams(-1, dp(40)));
 
         ScrollView scroll = new ScrollView(getContext());
         scroll.setFillViewport(true);
@@ -84,19 +83,19 @@ final class ClipboardPanel extends LinearLayout {
                     : "pinned".equals(filter) ? "长按内容卡片，可固定常用文字"
                     : "复制文字后，打开剪贴板即可查看";
             addClipboardEmptyState(list, title, hint);
-        } else for (ClipboardHistoryStore.Entry entry : values)
-            addClipboardRow(list, entry, multiSelect, selected.contains(entry.text));
+        } else for (int i = 0; i < values.size(); i++) {
+            ClipboardHistoryStore.Entry entry = values.get(i);
+            addClipboardRow(list, entry, i, multiSelect, selected.contains(entry.text));
+        }
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
         addView(scroll, new LayoutParams(-1, 0, 1f));
-        addClipboardBackButton();
     }
 
     public void showQuickPhrases(List<QuickPhraseStore.Entry> phrases) {
         removeAllViews();
-        LinearLayout header = clipboardHeader();
+        LinearLayout header = clipboardHeader("快捷短语");
         addPanelTextAction(header, "添加", "添加快捷短语");
-        addView(header, new LayoutParams(-1, dp(36)));
-        addClipboardFilters("phrases");
+        addView(header, new LayoutParams(-1, dp(48)));
 
         ScrollView scroll = new ScrollView(getContext());
         scroll.setFillViewport(true);
@@ -106,40 +105,56 @@ final class ClipboardPanel extends LinearLayout {
         list.setPadding(dp(10), dp(2), dp(10), dp(2));
         if (phrases == null || phrases.isEmpty()) {
             list.setGravity(Gravity.CENTER);
-            addClipboardEmptyState(list, "暂无快捷短语", "点击右上角添加常用文字，点按短语即可输入");
+            addClipboardEmptyState(list, "暂无快捷短语", "点击右上角添加；点按短语输入，长按可编辑或删除",
+                    R.drawable.ic_toolbar_phrases);
         } else for (QuickPhraseStore.Entry phrase : phrases) addQuickPhraseRow(list, phrase);
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
         addView(scroll, new LayoutParams(-1, 0, 1f));
-        addClipboardBackButton();
     }
 
-    private void addClipboardFilters(String selected) {
+    private void addClipboardFilters(LinearLayout header, String selected) {
         HorizontalScrollView scroll = new HorizontalScrollView(getContext());
         scroll.setHorizontalScrollBarEnabled(false);
         scroll.setHorizontalFadingEdgeEnabled(true);
         scroll.setFadingEdgeLength(dp(16));
         LinearLayout filters = new LinearLayout(getContext());
         filters.setGravity(Gravity.CENTER_VERTICAL);
-        filters.setPadding(dp(10), 0, dp(10), dp(4));
         addClipboardFilter(filters, "全部", "all", selected);
         addClipboardFilter(filters, "固定", "pinned", selected);
         addClipboardFilter(filters, "最近", "recent", selected);
-        addClipboardFilter(filters, "快捷短语", "phrases", selected);
         scroll.addView(filters, new HorizontalScrollView.LayoutParams(-2, -1));
-        addView(scroll, new LayoutParams(-1, dp(32)));
-        if ("phrases".equals(selected)) scroll.post(() -> scroll.scrollTo(filters.getWidth(), 0));
+        header.addView(scroll, new LayoutParams(0, -1, 1f));
     }
 
     private LinearLayout clipboardHeader() {
-        LinearLayout header = new LinearLayout(getContext());
-        header.setGravity(Gravity.CENTER_VERTICAL);
-        header.setPadding(dp(14), 0, dp(8), 0);
+        return clipboardHeader("剪贴板");
+    }
+
+    private LinearLayout clipboardHeader(String titleText) {
+        LinearLayout header = clipboardControlHeader();
         TextView title = new TextView(getContext());
-        title.setText("剪贴板");
+        title.setText(titleText);
         title.setTextSize(16);
         title.setTextColor(theme.text);
         title.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        title.setPadding(dp(6), 0, 0, 0);
         header.addView(title, new LayoutParams(0, -2, 1f));
+        return header;
+    }
+
+    private LinearLayout clipboardControlHeader() {
+        LinearLayout header = new LinearLayout(getContext());
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        header.setPadding(dp(4), 0, dp(8), 0);
+        TextView back = new TextView(getContext());
+        back.setText("‹");
+        back.setTextSize(28);
+        back.setTextColor(theme.accent);
+        back.setGravity(Gravity.CENTER);
+        back.setContentDescription("返回键盘");
+        back.setBackground(panelButtonBackground(false));
+        back.setOnClickListener(v -> callback.onKey("返回"));
+        header.addView(back, new LayoutParams(dp(40), dp(40)));
         return header;
     }
 
@@ -197,14 +212,18 @@ final class ClipboardPanel extends LinearLayout {
         tab.setBackground(panelButtonBackground(selected));
         tab.setContentDescription(label);
         tab.setOnClickListener(v -> callback.onKey("剪贴板筛选:" + value));
-        LayoutParams params = new LayoutParams(dp("phrases".equals(value) ? 76 : 64), dp(30));
-        params.setMargins(0, 0, dp(4), 0);
+        LayoutParams params = new LayoutParams(dp(50), dp(30));
+        params.setMargins(0, 0, dp(2), 0);
         row.addView(tab, params);
     }
 
     private void addClipboardEmptyState(LinearLayout parent, String title, String hint) {
+        addClipboardEmptyState(parent, title, hint, R.drawable.ic_toolbar_clipboard);
+    }
+
+    private void addClipboardEmptyState(LinearLayout parent, String title, String hint, int iconResource) {
         android.widget.ImageView icon = new android.widget.ImageView(getContext());
-        icon.setImageResource(R.drawable.ic_toolbar_clipboard);
+        icon.setImageResource(iconResource);
         icon.setColorFilter(blendColor(theme.text, theme.background, 0.60f));
         icon.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         parent.addView(icon, new LayoutParams(dp(32), dp(32)));
@@ -222,18 +241,6 @@ final class ClipboardPanel extends LinearLayout {
         detail.setTextColor(blendColor(theme.text, theme.background, 0.35f));
         detail.setGravity(Gravity.CENTER);
         parent.addView(detail, new LayoutParams(-1, -2));
-    }
-
-    private void addClipboardBackButton() {
-        TextView back = new TextView(getContext());
-        back.setText("‹  返回键盘");
-        back.setTextSize(14);
-        back.setTextColor(theme.accent);
-        back.setGravity(Gravity.CENTER);
-        back.setContentDescription("返回键盘");
-        back.setBackground(panelButtonBackground(false));
-        back.setOnClickListener(v -> callback.onKey("返回"));
-        addView(back, new LayoutParams(-1, dp(36)));
     }
 
     public void showClipboardEnablePrompt() {
@@ -262,20 +269,20 @@ final class ClipboardPanel extends LinearLayout {
         LinearLayout actions = new LinearLayout(getContext());
         actions.setGravity(Gravity.CENTER);
         addPanelTextAction(actions, "开启剪贴板历史", "启用剪贴板历史");
-        addPanelTextAction(actions, "快捷短语", "剪贴板筛选:phrases");
         addPanelTextAction(actions, "暂不开启", "暂不开启剪贴板");
         addView(actions, new LayoutParams(-1, dp(40)));
-        addClipboardBackButton();
     }
 
     private void addClipboardRow(LinearLayout list, ClipboardHistoryStore.Entry entry,
-                                 boolean multiSelect, boolean selected) {
+                                 int index, boolean multiSelect, boolean selected) {
         LinearLayout card = new LinearLayout(getContext());
         card.setOrientation(HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(12), dp(9), dp(4), dp(9));
+        int rowColor = (index & 1) == 0 ? theme.key
+                : blendColor(theme.key, theme.function, dark ? 0.42f : 0.55f);
         GradientDrawable cardBackground = roundRect(selected
-                ? blendColor(theme.key, theme.accent, dark ? 0.30f : 0.16f) : theme.key, 12);
+                ? blendColor(rowColor, theme.accent, dark ? 0.30f : 0.16f) : rowColor, 12);
         if (selected) cardBackground.setStroke(dp(2), theme.accent);
         card.setBackground(cardBackground);
         LinearLayout preview = new LinearLayout(getContext());
@@ -291,8 +298,8 @@ final class ClipboardPanel extends LinearLayout {
         String expiry = entry.pinned ? " · 固定保留" : retention == 0 ? " · 永久保留"
                 : " · 剩余" + Math.max(1, (int) Math.ceil((entry.timestamp + retention * 86400000L - System.currentTimeMillis()) / 86400000.0)) + "天";
         metadata.setText(clipboardTime(entry.timestamp) + expiry + " · " + entry.text.codePointCount(0, entry.text.length()) + "字");
-        metadata.setTextSize(10);
-        metadata.setTextColor(blendColor(theme.text, theme.key, 0.40f));
+        metadata.setTextSize(11);
+        metadata.setTextColor(blendColor(theme.text, rowColor, 0.28f));
         preview.addView(content, new LayoutParams(-1, -2));
         LayoutParams metadataParams = new LayoutParams(-1, -2);
         metadataParams.setMargins(0, dp(4), 0, 0);

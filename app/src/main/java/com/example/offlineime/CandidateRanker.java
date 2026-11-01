@@ -4,12 +4,13 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-/** Deterministic ranking with well-matched common characters before short words. */
+/** Deterministic ranking by frequency, usage and spelling quality. */
 final class CandidateRanker {
     private static final int COMMON_CORPUS_SCORE = 4000;
     private static final int COMMON_RANK_SCORE = corpusScore(COMMON_CORPUS_SCORE);
     private static final int STRONG_PERSONAL_SCORE = 200;
     private static final int STRONG_CONTEXT_SCORE = 240;
+    private static final int TOP_CHANGE_MARGIN = 150;
 
     private CandidateRanker() {}
 
@@ -30,11 +31,44 @@ final class CandidateRanker {
     }
 
     private static int personalScore(int bonus) {
-        return Math.max(-640, Math.min(1200, bonus)) / 3;
+        return Math.max(-640, Math.min(2100, bonus)) / 3;
     }
 
     private static int contextScore(int bonus) {
         return Math.max(0, Math.min(1550, bonus)) * 450 / 1550;
+    }
+
+    static boolean hasStrongWordSupport(PinyinDictionary.Entry entry) {
+        return entry.pinned || entry.corpusScore >= COMMON_CORPUS_SCORE
+                || personalScore(entry.personalBonus) >= STRONG_PERSONAL_SCORE
+                || contextScore(entry.contextBonus) >= STRONG_CONTEXT_SCORE;
+    }
+
+    private static boolean isCompleteMatch(PinyinDictionary.Entry entry) {
+        return entry.rankingTier < 35 && (entry.matchTier == PinyinDictionary.TIER_USER
+                || entry.matchTier == PinyinDictionary.TIER_EXACT_FULL
+                || entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
+                || entry.matchTier == PinyinDictionary.TIER_MIXED);
+    }
+
+    /** Keep a nearly tied first choice only within the same unchanged query. */
+    static List<PinyinDictionary.Entry> stabilizeTop(List<PinyinDictionary.Entry> previous,
+            List<PinyinDictionary.Entry> current, boolean preferSingleCharacter) {
+        if (previous.isEmpty() || current.isEmpty()) return current;
+        PinyinDictionary.Entry old = previous.get(0), first = current.get(0);
+        if (old.word.equals(first.word) || !isCompleteMatch(first)) return current;
+        for (int i = 1; i < current.size(); i++) {
+            PinyinDictionary.Entry retained = current.get(i);
+            if (!retained.word.equals(old.word) || !retained.pronunciation.equals(old.pronunciation)) continue;
+            if (!isCompleteMatch(retained) || retained.pinned != first.pinned
+                    || preferSingleCharacter && (retained.codePointLength == 1) != (first.codePointLength == 1)
+                    || new RankedEntry(first).score - new RankedEntry(retained).score >= TOP_CHANGE_MARGIN)
+                return current;
+            ArrayList<PinyinDictionary.Entry> stable = new ArrayList<>(current);
+            stable.remove(i); stable.add(0, retained);
+            return stable;
+        }
+        return current;
     }
 
     private static int rankingScore(PinyinDictionary.Entry entry) {
@@ -86,26 +120,6 @@ final class CandidateRanker {
                 && containsHan(entry.word);
     }
 
-    private static boolean isFrequentMatchingCharacter(PinyinDictionary.Entry entry, String input) {
-        if (entry.codePointLength != 1 || entry.corpusScore < COMMON_CORPUS_SCORE
-                || !containsHan(entry.word) || entry.rankingTier >= 35) return false;
-        if (entry.matchTier == PinyinDictionary.TIER_EXACT_FULL
-                || entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
-                || entry.matchTier == PinyinDictionary.TIER_MIXED) return true;
-        if (entry.matchTier != PinyinDictionary.TIER_PREFIX) return false;
-        String query = input == null || input.isEmpty() ? entry.queryText : input;
-        if (query == null) return false;
-        query = query.replace("'", "");
-        String reading = entry.pronunciation;
-        if (reading == null || reading.isEmpty() || query.length() < 2) return false;
-        if (query.charAt(0) >= '2' && query.charAt(0) <= '9')
-            reading = PinyinDictionary.toT9(reading);
-        // Promote a substantial single-syllable prefix, never a partial-input
-        // character or a broad one-key prefix with little spelling evidence.
-        return reading.startsWith(query) && query.length() * 2 >= reading.length()
-                && entry.consumedLength >= query.length();
-    }
-
     static int pageSize(int requested) {
         return Math.max(1, Math.min(15, requested));
     }
@@ -128,7 +142,7 @@ final class CandidateRanker {
         return rankTop(source, preferSingleCharacter, limit, "");
     }
 
-    /** Preserve small exact and common-short pools before later personal/context ranking. */
+    /** Preserve exact, common three/four-character and short-word pools for later ranking. */
     static List<PinyinDictionary.Entry> rankForRecall(
             Iterable<PinyinDictionary.Entry> source, boolean preferSingleCharacter,
             int limit, String input) {
@@ -137,85 +151,50 @@ final class CandidateRanker {
         for (PinyinDictionary.Entry entry : ranked) included.add(entry.word);
         ArrayList<PinyinDictionary.Entry> exact = new ArrayList<>();
         ArrayList<PinyinDictionary.Entry> commonShort = new ArrayList<>();
+        ArrayList<PinyinDictionary.Entry> commonLong = new ArrayList<>();
+        ArrayList<PinyinDictionary.Entry> four = new ArrayList<>();
+        ArrayList<PinyinDictionary.Entry> five = new ArrayList<>();
         for (PinyinDictionary.Entry entry : source) {
             QueryWork.check();
             if (entry == null || entry.word == null || included.contains(entry.word)) continue;
             if (entry.rankingTier < 35 && entry.matchTier == PinyinDictionary.TIER_EXACT_FULL)
                 exact.add(entry);
             if (entry.rankingTier < 35 && isFrequentShortWord(entry)) commonShort.add(entry);
+            if (isCompleteMatch(entry) && entry.corpusScore >= COMMON_CORPUS_SCORE
+                    && (entry.codePointLength == 3 || entry.codePointLength == 4)
+                    && containsHan(entry.word)) commonLong.add(entry);
+            if (isCompleteMatch(entry) && containsHan(entry.word)
+                    && (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
+                        || entry.matchTier == PinyinDictionary.TIER_MIXED)) {
+                if (entry.codePointLength == 4) four.add(entry);
+                if (entry.codePointLength == 5) five.add(entry);
+            }
         }
         for (PinyinDictionary.Entry entry : rankTop(exact, preferSingleCharacter, 4, input))
             if (included.add(entry.word)) ranked.add(entry);
         for (PinyinDictionary.Entry entry : rankTop(commonShort, preferSingleCharacter, 4, input))
             if (included.add(entry.word)) ranked.add(entry);
+        for (PinyinDictionary.Entry entry : rankTop(commonLong, preferSingleCharacter, 4, input))
+            if (included.add(entry.word)) ranked.add(entry);
+        for (PinyinDictionary.Entry entry : rankTop(four, preferSingleCharacter, 4, input))
+            if (included.add(entry.word)) ranked.add(entry);
+        for (PinyinDictionary.Entry entry : rankTop(five, preferSingleCharacter, 4, input))
+            if (included.add(entry.word)) ranked.add(entry);
         return ranked;
-    }
-
-    static boolean isThreeLetterInput(String input) {
-        if (input == null || input.length() != 3) return false;
-        for (int i = 0; i < 3; i++)
-            if (input.charAt(i) < 'a' || input.charAt(i) > 'z') return false;
-        return true;
     }
 
     static List<PinyinDictionary.Entry> rankTop(
             Iterable<PinyinDictionary.Entry> source, boolean preferSingleCharacter, int limit, String input) {
         if (limit <= 0) return new ArrayList<>();
-        boolean preferTwoCharacters = isThreeLetterInput(input);
         Comparator<RankedEntry> ranking = comparator(preferSingleCharacter);
         ArrayList<RankedEntry> out = new ArrayList<>();
         for (PinyinDictionary.Entry entry : source) {
             QueryWork.check();
-            if (entry != null && entry.word != null) out.add(new RankedEntry(entry, preferTwoCharacters, input));
+            if (entry != null && entry.word != null) out.add(new RankedEntry(entry));
         }
         out.sort(ranking);
         QueryWork.check();
-        // Preserve the leading choice, then reserve a few places for common
-        // complete words and phrase completions. The order follows the input:
-        // full spellings favor full-word completions; initials favor short words.
-        if (!preferSingleCharacter && input != null && input.replace("'", "").length() >= 2
-                && out.size() > 1) {
-            ArrayList<RankedEntry> ordered = new ArrayList<>(out.size());
-            int at = 0;
-            while (at < out.size() && out.get(at).entry.pinned) ordered.add(out.get(at++));
-            if (at < out.size()) ordered.add(out.get(at++));
-            boolean[] moved = new boolean[out.size()];
-            boolean fullSpelling = !input.matches("[2-9']+")
-                    && !PinyinInput.isAbbreviationQuery(input, true);
-            int[] groups = fullSpelling ? new int[]{0, 2, 1, 3} : new int[]{1, 0, 2, 3};
-            int[] quotas = fullSpelling ? new int[]{3, 2, 2, 1} : new int[]{4, 2, 1, 1};
-            for (int group : groups) {
-                int promoted = 0;
-                for (int i = at; i < out.size() && promoted < quotas[group]; i++) {
-                    RankedEntry candidate = out.get(i);
-                    if (!moved[i] && phraseGroup(candidate.entry) == group) {
-                        ordered.add(candidate);
-                        moved[i] = true;
-                        promoted++;
-                    }
-                }
-            }
-            for (int i = at; i < out.size(); i++) {
-                if (!moved[i]) ordered.add(out.get(i));
-            }
-            out = ordered;
-        }
         return entries(out.subList(0, Math.min(limit, out.size())));
-    }
-
-    private static int phraseGroup(PinyinDictionary.Entry entry) {
-        if (entry.codePointLength < 2 || !containsHan(entry.word)
-                || entry.rankingTier >= 35 && entry.matchTier != PinyinDictionary.TIER_COMPOSED)
-            return -1;
-        if (entry.matchTier == PinyinDictionary.TIER_COMPOSED)
-            return entry.codePointLength >= 3 && entry.wordSegments.size() > 1 ? 3 : -1;
-        if (entry.corpusScore < COMMON_CORPUS_SCORE
-                && personalScore(entry.personalBonus) < STRONG_PERSONAL_SCORE
-                && contextScore(entry.contextBonus) < STRONG_CONTEXT_SCORE) return -1;
-        if (entry.matchTier == PinyinDictionary.TIER_EXACT_FULL) return 0;
-        if (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
-                || entry.matchTier == PinyinDictionary.TIER_MIXED) return 1;
-        return entry.matchTier == PinyinDictionary.TIER_PREFIX ? 2 : -1;
     }
 
     private static ArrayList<PinyinDictionary.Entry> entries(List<RankedEntry> ranked) {
@@ -228,31 +207,22 @@ final class CandidateRanker {
         final PinyinDictionary.Entry entry;
         final int score;
         final int incomplete;
-        final int singleCharacterPriority;
-        final int shortWordPriority;
-        final int twoCharacterPriority;
 
-        RankedEntry(PinyinDictionary.Entry entry, boolean preferTwoCharacters, String input) {
+        RankedEntry(PinyinDictionary.Entry entry) {
             this.entry = entry;
-            score = rankingScore(entry) - matchPenalty(entry);
-            // General prefixes stay behind complete matches; well-matched common
-            // single characters receive their own priority before this comparison.
+            score = rankingScore(entry) - matchPenalty(entry) - Math.max(0, entry.correctionPenalty);
             incomplete = entry.matchTier == PinyinDictionary.TIER_PREFIX
                     || entry.rankingTier >= 35 && entry.matchTier != PinyinDictionary.TIER_COMPOSED ? 1 : 0;
-            singleCharacterPriority = isFrequentMatchingCharacter(entry, input) ? 0 : 1;
-            shortWordPriority = incomplete == 0 && isFrequentShortWord(entry) ? 0 : 1;
-            // Three letters can match two syllables via zh/ch/sh or mixed spelling.
-            // Keep frequent complete two-character matches ahead of three-character heat.
-            twoCharacterPriority = (preferTwoCharacters || isThreeLetterInput(entry.queryText))
-                    && shortWordPriority == 0 && entry.codePointLength == 2 ? 0 : 1;
         }
     }
 
     private static int matchPenalty(PinyinDictionary.Entry entry) {
         if (entry.matchTier == PinyinDictionary.TIER_COMPOSED) return 0;
-        if (entry.rankingTier <= PinyinDictionary.TIER_EXACT_FULL) return 0;
-        if (entry.rankingTier <= PinyinDictionary.TIER_MIXED) return 120;
         if (entry.matchTier == PinyinDictionary.TIER_FUZZY) return 1100;
+        if (entry.rankingTier >= 35) return 1800;
+        if (entry.matchTier <= PinyinDictionary.TIER_EXACT_FULL) return 0;
+        if (entry.matchTier == PinyinDictionary.TIER_MIXED) return 60;
+        if (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT) return 120;
         if (entry.matchTier == PinyinDictionary.TIER_PREFIX) return 700;
         return 350;
     }
@@ -262,13 +232,21 @@ final class CandidateRanker {
                 ? Comparator.comparingInt((RankedEntry value) -> value.entry.codePointLength == 1 ? 0 : 1)
                         .thenComparingInt(value -> value.entry.pinned ? 0 : 1)
                 : Comparator.comparingInt((RankedEntry value) -> value.entry.pinned ? 0 : 1);
-        return ranking.thenComparingInt(value -> value.singleCharacterPriority)
-                .thenComparingInt(value -> value.incomplete)
-                .thenComparingInt(value -> value.shortWordPriority)
-                .thenComparingInt(value -> value.twoCharacterPriority)
+        return ranking.thenComparingInt(value -> reliabilityGroup(value.entry))
                 .thenComparing(Comparator.comparingInt((RankedEntry value) -> value.score).reversed())
+                .thenComparingInt(value -> value.incomplete)
                 .thenComparingInt(value -> value.entry.rankingTier)
                 .thenComparing(Comparator.comparingInt((RankedEntry value) -> value.entry.corpusScore).reversed())
                 .thenComparing(value -> value.entry.word);
+    }
+
+    private static int reliabilityGroup(PinyinDictionary.Entry entry) {
+        // A high-frequency correction may not displace a complete valid input.
+        // Complete full, abbreviated and mixed words compete on one score scale.
+        // Decoded sentences, corrections and incomplete completions follow.
+        if (entry.matchTier == PinyinDictionary.TIER_COMPOSED) return 1;
+        if (entry.matchTier == PinyinDictionary.TIER_FUZZY) return 2;
+        if (entry.rankingTier >= 35 || entry.matchTier == PinyinDictionary.TIER_PREFIX) return 3;
+        return 0;
     }
 }

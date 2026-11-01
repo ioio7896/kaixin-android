@@ -51,7 +51,37 @@ public final class KeyboardTheme {
                     new int[]{0xff1c2228, 0xff303a43, 0xff46535f, 0xffb8d2e8, 0xffeef3f7}),
             new Skin("amber", "琥珀橙",
                     new int[]{0xfff6e5d3, 0xfffff9f0, 0xffefc69c, 0xff99501b, 0xff513921},
-                    new int[]{0xff2b2017, 0xff433123, 0xff5e452f, 0xffffc084, 0xfffff2e0})
+                    new int[]{0xff2b2017, 0xff433123, 0xff5e452f, 0xffffc084, 0xfffff2e0}),
+            new Skin("lavender", "薰衣草",
+                    new int[]{0xffeae4f2, 0xfffdfaff, 0xffd3c4e3, 0xff725092, 0xff40334c},
+                    new int[]{0xff241c2d, 0xff382b46, 0xff50405f, 0xffd4b6f3, 0xfff6edff}),
+            new Skin("peach", "蜜桃珊瑚",
+                    new int[]{0xfff9e4dd, 0xfffffaf7, 0xfff0c4b5, 0xffad4d3d, 0xff53352e},
+                    new int[]{0xff2d1e1a, 0xff452e28, 0xff62443a, 0xffffb5a1, 0xfffff0e9}),
+            new Skin("lemon", "柠檬黄",
+                    new int[]{0xfff2edcf, 0xfffffef2, 0xffe2d99e, 0xff78620b, 0xff453e21},
+                    new int[]{0xff292616, 0xff403b22, 0xff5a5330, 0xffe8d671, 0xfffaf5db}),
+            new Skin("sky", "晴空蓝",
+                    new int[]{0xffdceef7, 0xfff7fcff, 0xffb7d9ea, 0xff226887, 0xff29424e},
+                    new int[]{0xff17262e, 0xff253d49, 0xff365564, 0xff9cd8f2, 0xffeaf8ff}),
+            new Skin("teal", "孔雀青",
+                    new int[]{0xffd9ece9, 0xfff5fffc, 0xffafd7d0, 0xff126e65, 0xff26433f},
+                    new int[]{0xff162927, 0xff233f3b, 0xff335953, 0xff8adbd0, 0xffe8faf5}),
+            new Skin("olive", "橄榄绿",
+                    new int[]{0xffe9ebd9, 0xfffbfdf3, 0xffd1d8b2, 0xff596d2d, 0xff3a422b},
+                    new int[]{0xff222719, 0xff363e29, 0xff4d573b, 0xffc2da91, 0xfff1f8e4}),
+            new Skin("rose", "玫瑰豆沙",
+                    new int[]{0xfff0e2e2, 0xfffff9f8, 0xffddc0c1, 0xff98545d, 0xff4d3437},
+                    new int[]{0xff2b1e21, 0xff422e32, 0xff5c4247, 0xffedb0b9, 0xffffeff0}),
+            new Skin("plum", "暮色梅紫",
+                    new int[]{0xffece0eb, 0xfffff8fe, 0xffd7bfd4, 0xff824d7b, 0xff483349},
+                    new int[]{0xff291b29, 0xff402b40, 0xff5a3e59, 0xffedb4e2, 0xffffeeff}),
+            new Skin("sand", "沙漠暖棕",
+                    new int[]{0xffeee2cf, 0xfffffaf1, 0xffdac5a5, 0xff86603a, 0xff493b2c},
+                    new int[]{0xff292219, 0xff403428, 0xff594936, 0xffe7c397, 0xfffff2e1}),
+            new Skin("slate", "雾霭青灰",
+                    new int[]{0xffdfe9e9, 0xfff7fbfb, 0xffbfd0d1, 0xff46696c, 0xff304143},
+                    new int[]{0xff1b2627, 0xff2c3c3d, 0xff405556, 0xffafd4d4, 0xffedf8f7})
     ));
 
     private static Skin original(String id, String label, int accent) {
@@ -68,7 +98,16 @@ public final class KeyboardTheme {
     public final int background, key, function, accent, text;
     public final boolean isDark;
     public final float radius, font, gap;
-    private KeyboardTheme(int b, int k, int f, int a, int t, float r, float fs, float g, boolean dark) { background=b; key=k; function=f; accent=a; text=t; radius=r; font=fs; gap=g; isDark=dark; }
+    private final int candidateHighlight, candidatePrimaryText, candidateRegularText;
+    private final int candidatePressedPrimaryText, candidatePressedText;
+    private KeyboardTheme(int b, int k, int f, int a, int t, float r, float fs, float g, boolean dark) {
+        background=b; key=k; function=f; accent=a; text=t; radius=r; font=fs; gap=g; isDark=dark;
+        candidateHighlight = mix(key, accent, dark ? 0.18 : 0.12);
+        candidatePrimaryText = readableText(accent, candidateHighlight);
+        candidateRegularText = readableText(text, background);
+        candidatePressedPrimaryText = readableText(accent, function);
+        candidatePressedText = readableText(text, function);
+    }
     public static KeyboardTheme from(Context c, boolean dark) {
         SharedPreferences p = c.getSharedPreferences("settings", Context.MODE_PRIVATE);
         dark = resolveDark(c);
@@ -100,5 +139,48 @@ public final class KeyboardTheme {
         int green = ((key >> 8) & 255) * (255 - amount) / 255 + ((accent >> 8) & 255) * amount / 255;
         int blue = (key & 255) * (255 - amount) / 255 + (accent & 255) * amount / 255;
         return 0xff000000 | (red << 16) | (green << 8) | blue;
+    }
+
+    int candidateBackground(boolean first) { return first ? candidateHighlight : background; }
+
+    int candidateForeground(boolean first, boolean pressed) {
+        return pressed ? (first ? candidatePressedPrimaryText : candidatePressedText)
+                : (first ? candidatePrimaryText : candidateRegularText);
+    }
+
+    /** Retain the skin hue while bringing candidate text to at least 4.5:1. */
+    static int readableText(int foreground, int surface) {
+        if (contrast(foreground, surface) >= 4.5) return foreground;
+        int target = contrast(0xff000000, surface) >= contrast(0xffffffff, surface)
+                ? 0xff000000 : 0xffffffff;
+        double low = 0, high = 1;
+        for (int i = 0; i < 12; i++) {
+            double middle = (low + high) / 2;
+            if (contrast(mix(foreground, target, middle), surface) >= 4.5) high = middle;
+            else low = middle;
+        }
+        return mix(foreground, target, high);
+    }
+
+    private static int mix(int base, int overlay, double amount) {
+        int red = (int) Math.round(((base >> 16) & 255) * (1 - amount) + ((overlay >> 16) & 255) * amount);
+        int green = (int) Math.round(((base >> 8) & 255) * (1 - amount) + ((overlay >> 8) & 255) * amount);
+        int blue = (int) Math.round((base & 255) * (1 - amount) + (overlay & 255) * amount);
+        return 0xff000000 | (red << 16) | (green << 8) | blue;
+    }
+
+    private static double contrast(int first, int second) {
+        double a = luminance(first), b = luminance(second);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    }
+
+    private static double luminance(int color) {
+        return 0.2126 * linear((color >> 16) & 255) + 0.7152 * linear((color >> 8) & 255)
+                + 0.0722 * linear(color & 255);
+    }
+
+    private static double linear(int channel) {
+        double value = channel / 255.0;
+        return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
     }
 }

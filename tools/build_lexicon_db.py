@@ -3,6 +3,8 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import math
+from collections import defaultdict
 
 root = Path(__file__).resolve().parents[1]
 lexicon = root / "lexicon"
@@ -186,24 +188,64 @@ CREATE INDEX idx_char_initials ON characters(initials,score DESC,word,syllables)
 CREATE INDEX idx_char_initial_digits ON characters(initial_digits,score DESC,word,syllables);
 """)
 
-# Derive bounded word bigrams from the same licensed phrase corpus. Every edge
-# is backed by a phrase containing both words; no network/model is required.
+# Phrase fragments are weak evidence, not sentence occurrence counts. Only
+# well-supported phrases contribute; low-weight expansion terms create noisy
+# predecessor edges that can distort a common next-word choice.
 frequencies = dict(db.execute("SELECT word,MAX(score) FROM pronunciations GROUP BY word"))
 edges = {}
 for phrase, score in frequencies.items():
-    if not 3 <= len(phrase) <= 16:
+    if not 3 <= len(phrase) <= 16 or score < 3500:
         continue
     for boundary in range(1, len(phrase)):
         left = next((phrase[start:boundary] for start in range(max(0,boundary-6), boundary)
                      if phrase[start:boundary] in frequencies), None)
         right = next((phrase[boundary:end] for end in range(min(len(phrase),boundary+6),boundary,-1)
                       if phrase[boundary:end] in frequencies), None)
-        if left and right:
+        if left and right and frequencies[left] >= 2000 and frequencies[right] >= 2000:
             edge = (left,right)
             edges[edge] = min(1000000, edges.get(edge,0) + max(1,int(score ** .5)))
-db.executemany("INSERT INTO word_transitions VALUES(?,?,?)", ((a,b,w) for (a,b),w in edges.items()))
+editorial = set()
+collocations = root / "app/src/main/assets/language-model/collocations.tsv"
+with collocations.open(encoding="utf-8") as source:
+    for number, line in enumerate(source, 1):
+        if not line.strip() or line.startswith("#"):
+            continue
+        columns = line.rstrip("\r\n").split("\t")
+        if len(columns) != 3:
+            raise ValueError(f"Invalid collocation at line {number}")
+        previous, following, support = columns
+        support = int(support)
+        if not previous or not following or not 1 <= support <= 1000:
+            raise ValueError(f"Invalid collocation support at line {number}")
+        if previous not in frequencies or following not in frequencies:
+            continue
+        edge = (previous, following)
+        editorial.add(edge)
+        edges[edge] = min(1000000, edges.get(edge, 0) + support)
+
+# Calibrate once at build time. Conditional support prevents frequent words
+# from dominating every context; editorial support has a higher ceiling.
+totals = defaultdict(int)
+for (previous, following), weight in edges.items():
+    totals[previous] += weight
+successors = defaultdict(list)
+for (previous, following), weight in edges.items():
+    confidence = 1.0 - math.exp(-weight / 120.0)
+    conditional = weight / totals[previous]
+    ceiling = 1100 if (previous, following) in editorial else 450
+    bonus = round(ceiling * confidence * (0.4 + 0.6 * math.sqrt(conditional)))
+    if bonus >= 40:
+        successors[previous].append((following, bonus))
+transition_rows = []
+for previous in sorted(successors):
+    ranked = sorted(successors[previous], key=lambda item: (-item[1], item[0]))[:64]
+    transition_rows.extend((previous, following, bonus) for following, bonus in ranked)
+db.executemany("INSERT INTO word_transitions VALUES(?,?,?)", transition_rows)
+db.execute("CREATE INDEX idx_transition_rank ON word_transitions(previous,weight DESC,next)")
 db.executemany("INSERT INTO metadata(name,value) VALUES(?,?)",
-               (("lexicon_version", lexicon_version), ("entry_count", str(entries))))
+               (("lexicon_version", lexicon_version), ("entry_count", str(entries)),
+                 ("transition_scoring", "conditional-support-v2"),
+                ("transition_count", str(len(transition_rows)))))
 db.execute("ANALYZE")
 db.commit()
 db.execute("VACUUM")

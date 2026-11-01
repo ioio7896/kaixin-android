@@ -18,7 +18,9 @@ final class CandidateQueryCoordinator {
         return thread;
         });
     }
-    private final ThreadPoolExecutor executor = lane("offline-candidate-screen", android.os.Process.THREAD_PRIORITY_DEFAULT);
+    // The first selectable row competes with input callbacks for the next
+    // frame; keep this worker responsive while supplemental ranking stays low priority.
+    private final ThreadPoolExecutor executor = lane("offline-candidate-screen", android.os.Process.THREAD_PRIORITY_DISPLAY);
     private final ThreadPoolExecutor supplement = lane("offline-candidate-supplement", android.os.Process.THREAD_PRIORITY_BACKGROUND);
     private volatile int generation;
     private CancellationSignal cancellation;

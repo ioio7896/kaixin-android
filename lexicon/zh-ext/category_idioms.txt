@@ -1,14 +1,16 @@
 # 开心离线输入法分类补充：成语惯用语
 # 项目词表与匹配模板：项目整理，生成式 AI 辅助；不使用私人消息或用户输入。
-# 语料补充：jieba 0.42.1 本地 dict.txt；MIT 许可全文见 category-LICENSE.jieba.md。
-# 拼音：pypinyin 0.55.0，优先沿用已有词语读音及项目多音词校正。
+# 语料：jieba 0.42.1 本地词典及项目分类词条；完整来源与许可见项目词库说明。
+# 拼音：实际无声调拼音，保留项目校正读音。
 # 格式：词语<TAB>实际无声调拼音<TAB>基础排序分数；不扩散错拼别名。
 九曲回肠	jiu qu hui chang	5416
 浩浩荡荡	hao hao dang dang	5213
 驰名中外	chi ming zhong wai	5149
 流芳百世	liu fang bai shi	5078
+令狐冲笑	ling hu chong xiao	5077
 凯旋归来	kai xuan gui lai	5071
 神来之笔	shen lai zhi bi	5067
+令狐冲心	ling hu chong xin	4924
 众星捧月	zhong xing peng yue	4924
 面面相觑	mian mian xiang qu	4916
 兵家必争之地	bing jia bi zheng zhi di	4850
@@ -123,6 +125,7 @@
 唉声叹气	ai sheng tan qi	4282
 奇耻大辱	qi chi da ru	4282
 七嘴八舌	qi zui ba she	4273
+令狐冲叹	ling hu chong tan	4270
 大喜过望	da xi guo wang	4268
 聪明伶俐	cong ming ling li	4268
 若有所思	ruo you suo si	4268
@@ -145,6 +148,7 @@
 怒气冲冲	nu qi chong chong	4235
 易如反掌	yi ru fan zhang	4235
 痛心疾首	tong xin ji shou	4235
+令狐冲奇	ling hu chong qi	4231
 水泄不通	shui xie bu tong	4230
 一夫一妻制	yi fu yi qi zhi	4220
 作恶多端	zuo e duo duan	4220
@@ -241,6 +245,8 @@
 颠三倒四	dian san dao si	4084
 一走了之	yi zou liao zhi	4077
 人迹罕至	ren ji han zhi	4077
+令狐冲剑	ling hu chong jian	4077
+令狐冲喜	ling hu chong xi	4077
 寻欢作乐	xun huan zuo le	4077
 开天辟地	kai tian pi di	4077
 畅通无阻	chang tong wu zu	4077
@@ -277,6 +283,8 @@
 据为己有	ju wei ji you	4043
 眉开眼笑	mei kai yan xiao	4043
 豁然开朗	huo ran kai lang	4043
+令狐冲知	ling hu chong zhi	4039
+令狐冲身	ling hu chong shen	4039
 交相辉映	jiao xiang hui ying	4036
 养尊处优	yang zun chu you	4036
 冲口而出	chong kou er chu	4036
@@ -321,6 +329,10 @@
 耳濡目染	er ru mu ran	4007
 肝硬变	gan ying bian	4007
 阴阳怪气	yin yang guai qi	4007
+令狐冲听	ling hu chong ting	4000
+令狐冲大	ling hu chong da	4000
+令狐冲怒	ling hu chong nu	4000
+令狐冲转	ling hu chong zhuan	4000
 一举两得	yi ju liang de	3999
 一见如故	yi jian ru gu	3999
 乔装改扮	qiao zhuang gai ban	3999
@@ -377,6 +389,7 @@
 百万雄师	bai wan xiong shi	3967
 秋毫无犯	qiu hao wu fan	3967
 趾高气扬	zhi gao qi yang	3967
+令狐冲见	ling hu chong jian	3962
 刀耕火种	dao geng huo zhong	3959
 功亏一篑	gong kui yi kui	3959
 化险为夷	hua xian wei yi	3959
@@ -529,6 +542,7 @@
 稳扎稳打	wen zha wen da	3888
 肺腑之言	fei fu zhi yan	3888
 风调雨顺	feng tiao yu shun	3888
+令狐冲伸	ling hu chong shen	3885
 不解之缘	bu jie zhi yuan	3879
 不言自明	bu yan zi ming	3879
 举棋不定	ju qi bu ding	3879
@@ -616,6 +630,8 @@
 道貌岸然	dao mao an ran	3849
 醉翁之意不在酒	zui weng zhi yi bu zai jiu	3849
 随声附和	sui sheng fu he	3849
+令狐冲好	ling hu chong hao	3847
+令狐冲惊	ling hu chong jing	3847
 不近人情	bu jin ren qing	3839
 兵强马壮	bing qiang ma zhuang	3839
 初出茅庐	chu chu mao lu	3839
@@ -694,6 +710,8 @@
 言而有信	yan er you xin	3817
 调虎离山	diao hu li shan	3817
 贪污腐化	tan wu fu hua	3817
+令狐冲双	ling hu chong shuang	3808
+令狐冲摇	ling hu chong yao	3808
 不义之财	bu yi zhi cai	3807
 与人为善	yu ren wei shan	3807
 别来无恙	bie lai wu yang	3807
@@ -890,6 +908,9 @@
 误入歧途	wu ru qi tu	3735
 门户之见	men hu zhi jian	3735
 骄奢淫逸	jiao she yin yi	3735
+令狐冲右	ling hu chong you	3731
+令狐冲耳	ling hu chong er	3731
+令狐冲越	ling hu chong yue	3731
 一片汪洋	yi pian wang yang	3722
 不畏强暴	bu wei qiang bao	3722
 不能自已	bu neng zi yi	3722
@@ -981,6 +1002,7 @@
 话锋一转	hua feng yi zhuan	3696
 连篇累牍	lian pian lei du	3696
 鸡犬不留	ji quan bu liu	3696
+令狐冲微	ling hu chong wei	3693
 一塌胡涂	yi ta hu tu	3682
 一扫而空	yi sao er kong	3682
 不无道理	bu wu dao li	3682
@@ -1204,6 +1226,8 @@
 饥寒交迫	ji han jiao po	3622
 骁勇善战	xiao yong shan zhan	3622
 高深莫测	gao shen mo ce	3622
+令狐冲提	ling hu chong ti	3616
+令狐冲连	ling hu chong lian	3616
 一官半职	yi guan ban zhi	3606
 三足鼎立	san zu ding li	3606
 不毛之地	bu mao zhi di	3606

@@ -184,28 +184,46 @@ def main():
 
     output.mkdir(parents=True, exist_ok=True)
     file_reports = []
+    written_buckets = {}
     for category, rows in buckets.items():
         title = categories[category][0] if category in categories else extra_titles[category]
         relative = f'zh-ext/category_{category}.txt'
         path = output / relative
         path.parent.mkdir(parents=True, exist_ok=True)
+        combined = dict(rows)
+        existing_path = baseline / relative
+        if existing_path.is_file():
+            for line in existing_path.read_text(encoding='utf-8').splitlines():
+                if not line or line.startswith('#'):
+                    continue
+                columns = line.split('\t')
+                if len(columns) != 3:
+                    continue
+                key = (columns[0], columns[1])
+                if key not in combined:
+                    combined[key] = int(columns[2])
+                    provenance['retained_category_entries'] += 1
         comments = [f'# 开心离线输入法分类补充：{title}',
                     '# 项目词表与匹配模板：项目整理，生成式 AI 辅助；不使用私人消息或用户输入。',
-                    '# 语料补充：jieba 0.42.1 本地 dict.txt；MIT 许可全文见 category-LICENSE.jieba.md。',
-                    '# 拼音：pypinyin 0.55.0，优先沿用已有词语读音及项目多音词校正。',
+                    '# 语料补充：jieba 0.42.1 本地 dict.txt 与项目已分类词条；来源详见项目词库说明。',
+                    '# 拼音：无声调拼音；生成词条优先沿用已有读音及项目多音词校正。',
                     '# 格式：词语<TAB>实际无声调拼音<TAB>基础排序分数；不扩散错拼别名。']
-        ordered = sorted(rows.items(), key=lambda pair: (-pair[1], pair[0]))
-        path.write_text('\n'.join(comments + [f'{word}\t{raw}\t{score}' for (word, raw), score in ordered]) + '\n', encoding='utf-8')
-        file_reports.append({'category': category, 'title': title, 'file': relative, 'rows': len(rows),
-                             'new_readings': sum(key not in old for key in rows), 'sha256': digest(path)})
+        ordered = sorted(combined.items(), key=lambda pair: (-pair[1], pair[0]))
+        lines = comments + [f'{word}\t{raw}\t{score}' for (word, raw), score in ordered]
+        path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        written_buckets[category] = combined
+        file_reports.append({'category': category, 'title': title, 'file': relative, 'rows': len(combined),
+                             'new_readings': sum(key not in old for key in combined), 'sha256': digest(path)})
     # Bounded hot cache complements the SQLite corpus; never load all categories into RAM.
     hot_path = output / 'zh/life_category_hot.txt'
     hot_path.parent.mkdir(parents=True, exist_ok=True)
     hot_rows = sorted(hot.items(), key=lambda pair: (-pair[1], pair[0]))
     hot_path.write_text('# 分类精选短语；内存加载有固定数量上限，完整分类由 SQLite 检索。\n'
                         + '\n'.join(f'{word}\t{raw}\t{score}' for (word, raw), score in hot_rows) + '\n', encoding='utf-8')
-    report = {'category_count': len(file_reports), 'category_rows': sum(len(b) for b in buckets.values()),
-              'unique_category_readings': len(set().union(*(set(b) for b in buckets.values()))),
+    all_category_readings = set().union(*(set(b) for b in written_buckets.values()))
+    new_readings = {key: 1 for key in all_category_readings if key not in old}
+    report = {'category_count': len(file_reports), 'category_rows': sum(len(b) for b in written_buckets.values()),
+              'unique_category_readings': len(all_category_readings),
               'new_word_readings': len(new_readings),
               'new_words': len({word for word, raw in new_readings} - set(preferred)),
               'new_by_length': dict(sorted(Counter(len(word) for word, raw in new_readings).items())),
@@ -215,7 +233,7 @@ def main():
     (output / 'category-expansion.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     notice = (f'分类词库扩充\n\n共 {len(file_reports)} 个分类，新增 {len(new_readings):,} 条不同词语/读音。\n'
               '日常场景词与短语由项目整理（生成式 AI 辅助），请求短语只组合匹配的动词与对象。\n'
-              '成语、三四字词和部分专名补充来自 jieba 0.42.1 本地词典，按词频和词性筛选。\n'
+              '部分成语、三四字词和专名来自 jieba 0.42.1 本地词典，按词频和词性筛选；保留词条的来源另见项目词库说明。\n'
               '已有词条、多音读音和基础词频保留；低频语料采用较低基础分，不强行占据首选。\n'
               '所有内容随 APK 离线打包。分类明细及校验值见 category-expansion.json。\n\n'
               + '\n'.join(f"{f['title']}：{f['rows']:,} 条" for f in file_reports) + '\n')

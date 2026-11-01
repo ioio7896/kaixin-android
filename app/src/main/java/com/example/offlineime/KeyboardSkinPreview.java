@@ -34,15 +34,23 @@ final class KeyboardSkinPreview extends View {
         int candidateSize = 17;
         try { candidateSize = Integer.parseInt(preferences.getString("candidate_font_size", "17")); }
         catch (RuntimeException ignored) { }
-        float header = dp(Math.max(18, candidateSize * 1.1f));
+        int candidateHeight = 48;
+        try { candidateHeight = Integer.parseInt(preferences.getString("candidate_bar_height", "48")); }
+        catch (RuntimeException ignored) { }
+        float header = dp(Math.max(20, Math.min(34, candidateHeight * 0.5f)));
         float rowHeight = (getHeight() - 2 * padding - header) / 3;
         if (width <= 0 || rowHeight <= 0) return;
         paint.setColor(theme.background);
         canvas.drawRoundRect(0, 0, getWidth(), getHeight(), dp(10), dp(10), paint);
-        paint.setColor(theme.accent);
         paint.setTextAlign(Paint.Align.LEFT);
         paint.setTextSize(Math.min(dp(candidateSize * 0.65f), width / 16));
-        canvas.drawText("你好   输入   开心", padding, padding + header * 0.7f, paint);
+        float candidateBaseline = padding + header / 2 - (paint.ascent() + paint.descent()) / 2;
+        paint.setColor(theme.candidateBackground(true));
+        canvas.drawRoundRect(padding, padding, padding + dp(33), padding + header, dp(5), dp(5), paint);
+        paint.setColor(theme.candidateForeground(true, false));
+        canvas.drawText("你好", padding + dp(4), candidateBaseline, paint);
+        paint.setColor(theme.candidateForeground(false, false));
+        canvas.drawText("输入   开心", padding + dp(36), candidateBaseline, paint);
         float gap = Math.min(dp(theme.gap), rowHeight / 8);
         for (int row = 0; row < ROWS.length; row++) {
             float left = padding;
