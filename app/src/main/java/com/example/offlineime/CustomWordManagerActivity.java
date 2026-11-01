@@ -117,7 +117,12 @@ public final class CustomWordManagerActivity extends Activity {
             row.setBackgroundColor(palette.surface); LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2); lp.bottomMargin = dp(6);
             rows.addView(row, lp); row.setOnClickListener(v -> wordMenu(word));
         }
-        if (pageSize < visible.size()) { Button more = new Button(this); more.setText("再显示 50 个词"); more.setOnClickListener(v -> { pageSize += 50; render(); }); rows.addView(more); }
+        if (pageSize < visible.size()) {
+            Button more = new Button(this); more.setText("再显示 50 个词"); styleActionButton(more);
+            more.setOnClickListener(v -> { pageSize += 50; render(); });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
+            params.topMargin = dp(4); rows.addView(more, params);
+        }
         if (visible.isEmpty()) rows.addView(label("没有匹配的词语，可以添加新词或更换筛选条件。", 14));
     }
     private void wordMenu(String word) {
@@ -316,8 +321,28 @@ public final class CustomWordManagerActivity extends Activity {
         view.setPrivateImeOptions("offlineime-word-editor"); return view;
     }
     private void button(LinearLayout parent, String text, Runnable action) {
-        Button view = new Button(this); view.setText(text); view.setTextColor(palette.accent); view.setOnClickListener(v -> action.run());
-        parent.addView(view, new LinearLayout.LayoutParams(0, dp(48), 1));
+        Button view = new Button(this); view.setText(text); styleActionButton(view);
+        view.setOnClickListener(v -> action.run());
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, dp(48), 1);
+        params.setMargins(dp(2), 0, dp(2), 0);
+        parent.addView(view, params);
+    }
+    private void styleActionButton(Button button) {
+        button.setAllCaps(false); button.setTextSize(14); button.setTextColor(palette.accent);
+        button.setGravity(Gravity.CENTER); button.setPadding(dp(4), 0, dp(4), 0);
+        button.setMinimumHeight(dp(UiTokens.MIN_TOUCH));
+        button.setStateListAnimator(null); button.setElevation(0f);
+        button.setBackgroundTintList(null);
+        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed}, actionSurface(palette.accentSoft));
+        states.addState(new int[]{}, actionSurface(palette.surface));
+        button.setBackground(states);
+    }
+    private android.graphics.drawable.GradientDrawable actionSurface(int fill) {
+        android.graphics.drawable.GradientDrawable surface = new android.graphics.drawable.GradientDrawable();
+        surface.setColor(fill); surface.setCornerRadius(dp(UiTokens.RADIUS_CONTROL));
+        surface.setStroke(dp(1), palette.accentSoft);
+        return surface;
     }
     private void postUi(Runnable action) { super.runOnUiThread(() -> { if (!isFinishing() && !isDestroyed()) action.run(); }); }
     private int dp(int value) { return Math.round(value * getResources().getDisplayMetrics().density); }

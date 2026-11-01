@@ -5,6 +5,7 @@ final class EmojiCatalog {
     static final String[] CATEGORIES = {"最近", "收藏", "颜文字", "笑脸", "人物", "动物", "食物", "旅行", "活动", "物品", "符号"};
     static String[] values(String category) {
         switch (category) {
+            case "微信": return WeChatEmojiCatalog.values();
             case "颜文字": return new String[]{
                 "(^_^)", "(≧▽≦)", "(＾▽＾)", "(*^▽^*)", "(｡•̀ᴗ-)✧", "(๑•̀ㅂ•́)و✧",
                 "٩(๑❛ᴗ❛๑)۶", "ヽ(✿ﾟ▽ﾟ)ノ", "(●°u°●)​", "(｡･ω･｡)", "(◕‿◕)", "(•̀ᴗ•́)و",

@@ -2,10 +2,10 @@
     <background android:drawable="@drawable/ic_launcher_background" />
     <foreground>
         <inset
-            android:drawable="@drawable/ic_launcher_mascot"
-            android:insetLeft="22dp"
-            android:insetTop="22dp"
-            android:insetRight="22dp"
-            android:insetBottom="22dp" />
+            android:drawable="@drawable/ic_launcher_mechanical"
+            android:insetLeft="16dp"
+            android:insetTop="16dp"
+            android:insetRight="16dp"
+            android:insetBottom="16dp" />
     </foreground>
 </adaptive-icon>

@@ -7,7 +7,7 @@ import android.widget.LinearLayout;
 import android.util.SparseArray;
 import java.util.ArrayList;
 
-/** Routes otherwise unhandled key-gap touches to the closest key, at most 6 dp away. */
+/** Routes unhandled key-gap touches to the closest key without changing its visual spacing. */
 final class KeyTouchRow extends LinearLayout {
     private final SparseArray<KeyButton> gapTargets = new SparseArray<>();
     private final ArrayList<KeyButton> dispatchTargets = new ArrayList<>();
@@ -20,8 +20,8 @@ final class KeyTouchRow extends LinearLayout {
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             int index = event.getActionIndex();
             KeyButton gapTarget = null;
-            float limit = 6 * getResources().getDisplayMetrics().density;
-            float nearest = limit * limit;
+            float density = getResources().getDisplayMetrics().density;
+            float nearest = Float.MAX_VALUE;
             for (int i = 0; i < getChildCount(); i++) {
                 View child = getChildAt(i);
                 if (!(child instanceof KeyButton) || !child.isEnabled()
@@ -29,8 +29,10 @@ final class KeyTouchRow extends LinearLayout {
                 float x = Math.max(child.getLeft(), Math.min(event.getX(index), child.getRight() - 1));
                 float y = Math.max(child.getTop(), Math.min(event.getY(index), child.getBottom() - 1));
                 float dx = x - event.getX(index), dy = y - event.getY(index);
-                if (dx * dx + dy * dy <= nearest) {
-                    nearest = dx * dx + dy * dy; gapTarget = (KeyButton) child;
+                float distance = dx * dx + dy * dy;
+                float limit = (((KeyButton) child).inputLetter() == 0 ? 8 : 10) * density;
+                if (distance <= limit * limit && distance < nearest) {
+                    nearest = distance; gapTarget = (KeyButton) child;
                 }
             }
             if (gapTarget != null) gapTargets.put(event.getPointerId(index), gapTarget);

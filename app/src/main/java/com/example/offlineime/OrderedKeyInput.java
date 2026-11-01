@@ -2,11 +2,11 @@ package com.example.offlineime;
 
 import java.util.ArrayDeque;
 
-/** Gesture results are resolved on UP, then delivered in the order fingers landed. */
+/** Gesture results are delivered in landing order; plain taps may resolve on the next DOWN. */
 final class OrderedKeyInput {
     static final class Press {
         boolean ready, discarded;
-        Runnable action;
+        Runnable action, earlyAction;
     }
     private final ArrayDeque<Press> pending = new ArrayDeque<>();
     private boolean draining;
@@ -17,13 +17,39 @@ final class OrderedKeyInput {
     Press begin() {
         Press press = new Press();
         pending.addLast(press);
+        // A second finger confirms an unmoved plain key as a tap. The new
+        // press stays queued so callbacks still run in landing order.
+        boolean resolved = false;
+        for (Press earlier : pending) {
+            if (earlier == press) break;
+            if (!earlier.ready && earlier.earlyAction != null) {
+                earlier.action = earlier.earlyAction;
+                earlier.earlyAction = null;
+                earlier.ready = true;
+                resolved = true;
+            }
+        }
+        if (resolved) drain();
         return press;
+    }
+
+    void armEarly(Press press, Runnable action) {
+        if (press != null && !press.ready && !press.discarded) press.earlyAction = action;
+    }
+
+    void disarmEarly(Press press) {
+        if (press != null) press.earlyAction = null;
     }
 
     void finish(Press press, Runnable action) {
         if (press == null || press.ready || press.discarded) return;
         press.action = action;
+        press.earlyAction = null;
         press.ready = true;
+        drain();
+    }
+
+    private void drain() {
         if (draining) return;
         draining = true;
         try {
@@ -38,7 +64,7 @@ final class OrderedKeyInput {
     }
 
     void cancelAll() {
-        for (Press press : pending) { press.discarded = true; press.action = null; }
+        for (Press press : pending) { press.discarded = true; press.action = press.earlyAction = null; }
         pending.clear();
     }
 }

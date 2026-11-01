@@ -20,7 +20,8 @@ final class EmojiStyleAssets {
     static final String TWEMOJI = "twemoji";
     static final String FLUENT = "fluent";
     static final String OPENMOJI = "openmoji";
-    static final String[] STYLES = {SYSTEM, TWEMOJI, FLUENT, OPENMOJI};
+    static final String WECHAT = "wechat";
+    static final String[] STYLES = {SYSTEM, WECHAT};
 
     private final Context context;
     private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -33,7 +34,7 @@ final class EmojiStyleAssets {
     void cancelPending() { generation++; decoder.getQueue().clear(); }
     void close() { cancelPending(); decoder.shutdownNow(); bitmaps.evictAll(); }
     void load(String style, String emoji, java.util.function.Consumer<Bitmap> ready) {
-        if (SYSTEM.equals(style) || decoder.isShutdown()) return;
+        if (SYSTEM.equals(style) || WECHAT.equals(style) || decoder.isShutdown()) return;
         int requested = generation;
         decoder.execute(() -> {
             if (requested != generation) return;
@@ -52,6 +53,7 @@ final class EmojiStyleAssets {
 
     static String label(String style) {
         switch (style) {
+            case WECHAT: return "微信小黄脸";
             case TWEMOJI: return "Twemoji";
             case FLUENT: return "Fluent";
             case OPENMOJI: return "OpenMoji";

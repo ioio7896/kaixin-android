@@ -3,6 +3,7 @@ package com.example.offlineime;
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.Bitmap;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.text.SpannableString;
 import android.text.Spanned;
@@ -14,7 +15,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowInsets;
 import android.graphics.Insets;
-import android.widget.Button;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -93,6 +93,10 @@ public final class KeyboardView extends LinearLayout {
     private int baseBottomPadding;
     private int preferredMinHeight;
     private View keyboardOverflowSpace;
+    private LinearLayout editorBody;
+    private KeyButton editorSelect, editorCopy, editorCut;
+    private Drawable editorSelectBackground;
+    private long editorStyleRevision = -1;
     private boolean floatingLandscape;
     private String activeToolbarAction = "";
     private OfflineImeService.Mode toolbarKeyboardMode = OfflineImeService.Mode.PINYIN;
@@ -120,7 +124,7 @@ public final class KeyboardView extends LinearLayout {
                 || name.equals("high_contrast") || name.startsWith("key_") || name.equals("keyboard_height")
                 || name.startsWith("one_hand") || name.startsWith("floating") || name.startsWith("tablet_preset_") || name.startsWith("split_") || name.equals("appearance_mode") || name.equals("privacy_mode")
                 || name.startsWith("candidate_") || name.equals("expanded_candidate_density")
-                || name.equals("pinyin_scheme")) styleRevision++;
+                || name.equals("pinyin_scheme") || name.startsWith("nine_key_")) styleRevision++;
     };
 
     private static final class CandidateSlot {
@@ -395,6 +399,7 @@ public final class KeyboardView extends LinearLayout {
         String editorAction = ((OfflineImeService) getContext()).editorActionLabel();
         String keyboardKey = mode.name() + ':' + shift + ':'
                 + ((OfflineImeService) getContext()).capsLockEnabled() + ':' + editorAction + ':' + renderedSurfaceKey
+                + ':' + ((OfflineImeService) getContext()).editorLayoutKind()
                 + ':' + (mode == OfflineImeService.Mode.ENGLISH && ((OfflineImeService) getContext()).englishWordMode());
         if (keyboardKey.equals(renderedKeyboardKey)) return;
         if (mode == renderedKeyboardMode && ((OfflineImeService) getContext()).keyInputOrder().hasPending()) {
@@ -638,48 +643,55 @@ public final class KeyboardView extends LinearLayout {
 
     private void addNumericStyle() {
         String kind = ((OfflineImeService) getContext()).editorLayoutKind();
-        if ("number".equals(kind) || "signed".equals(kind) || "decimal".equals(kind) || "signed_decimal".equals(kind)) {
-            LinearLayout grid = new LinearLayout(getContext()); grid.setOrientation(VERTICAL);
-            addNumericGridRow(grid, new String[]{"1", "2", "3"}); addNumericGridRow(grid, new String[]{"4", "5", "6"});
-            addNumericGridRow(grid, new String[]{"7", "8", "9"});
-            addNumericGridRow(grid, new String[]{kind.startsWith("signed") ? "-" : "", "0", kind.contains("decimal") ? "." : ""});
-            addView(grid, new LayoutParams(-1, 0, 4f));
-            addBottomFixed(new String[]{"符号", "返回", "⌫", "回车"}, bottomKeyHeight());
-            return;
-        }
+        boolean phone = "phone".equals(kind);
+        boolean signed = kind.startsWith("signed");
+        boolean number = signed || "number".equals(kind) || "decimal".equals(kind);
+        String secondAction = signed ? "-" : "符号";
+        String thirdAction = number ? (signed ? "符号" : "") : "空格";
+        String bottomLeft = "返回";
+        String bottomRight = number && !kind.contains("decimal") ? "" : ".";
+        if (phone) { bottomLeft = "*"; bottomRight = "#"; thirdAction = "返回"; }
+        else if ("date".equals(kind)) { bottomRight = "/"; thirdAction = "-"; }
+        else if ("time".equals(kind)) { bottomRight = ":"; thirdAction = ""; }
+        else if ("datetime".equals(kind)) { bottomRight = ":"; secondAction = "/"; thirdAction = "-"; }
+
+        // The four-column number grid keeps its geometry beside a narrow symbol strip.
+        // In particular, 0 always shares the centre line of 2, 5 and 8.
         LinearLayout body = new LinearLayout(getContext()); body.setOrientation(HORIZONTAL);
-        LinearLayout left = new LinearLayout(getContext()); left.setOrientation(VERTICAL);
-        String[] side = "phone".equals(kind) ? new String[]{"+", "*", "#", "-"}
-                : ("date".equals(kind) || "time".equals(kind) || "datetime".equals(kind))
-                ? new String[]{"/", "-", ":", "."}
-                : new String[]{"-", "+", "%", "/"};
-        for (String k : side) addVerticalKey(left, k, 1f);
-        body.addView(left, new LayoutParams(0, -1, 1f));
-        LinearLayout grid = new LinearLayout(getContext()); grid.setOrientation(VERTICAL);
-        addNumericGridRow(grid, new String[]{"1","2","3"}); addNumericGridRow(grid, new String[]{"4","5","6"}); addNumericGridRow(grid, new String[]{"7","8","9"});
-        body.addView(grid, new LayoutParams(0, -1, 4f));
-        LinearLayout right = new LinearLayout(getContext()); right.setOrientation(VERTICAL);
-        // 普通数字布局将 0 放在右侧，原底栏 0 的位置改为小数点。
-        String auxiliary = "phone".equals(kind) ? "#"
-                : ("date".equals(kind) || "datetime".equals(kind)) ? "/"
-                : "time".equals(kind) ? ":" : ".";
-        boolean decimalLayout = ".".equals(auxiliary);
-        addVerticalKey(right, "⌫", 1f);
-        addVerticalKey(right, decimalLayout ? "0" : auxiliary, 1f);
-        body.addView(right, new LayoutParams(0, -1, 1f)); addView(body, new LayoutParams(-1, 0, 3f));
-        addBottomFixed(new String[]{"返回", decimalLayout ? "." : "0", "空格", "中英", "回车"}, bottomKeyHeight());
+        LinearLayout symbols = new LinearLayout(getContext()); symbols.setOrientation(VERTICAL);
+        String[] sideSymbols = {"+", "-", "%", "/"};
+        if (phone) sideSymbols = new String[]{"+", "-", "*", "#"};
+        else if (number) sideSymbols = new String[]{signed ? "-" : "", "",
+                kind.contains("decimal") ? "." : "", "符号"};
+        else if ("date".equals(kind)) sideSymbols = new String[]{"/", "-", ".", "符号"};
+        else if ("time".equals(kind)) sideSymbols = new String[]{":", "", "", "符号"};
+        else if ("datetime".equals(kind)) sideSymbols = new String[]{"/", "-", ":", "符号"};
+        for (String symbol : sideSymbols) addVerticalKey(symbols, symbol, 1f);
+        int symbolWidth = Math.max(44, Math.min(56, Math.round(KeyboardPlacement.width(getContext(), renderSettings) * 0.14f)));
+        body.addView(symbols, new LayoutParams(dp(symbolWidth), -1));
+        LinearLayout grid = new LinearLayout(getContext());
+        grid.setOrientation(VERTICAL);
+        addNumericGridRow(grid, new String[]{"1", "2", "3", "⌫"}, phone);
+        addNumericGridRow(grid, new String[]{"4", "5", "6", secondAction}, phone);
+        addNumericGridRow(grid, new String[]{"7", "8", "9", thirdAction}, phone);
+        addNumericGridRow(grid, new String[]{bottomLeft, "0", bottomRight, "回车"}, phone);
+        body.addView(grid, new LayoutParams(0, -1, 1f));
+        addView(body, new LayoutParams(-1, 0, 1f));
     }
 
-    private void addNumericGridRow(LinearLayout parent, String[] labels) {
+    private void addNumericGridRow(LinearLayout parent, String[] actions, boolean phone) {
         LinearLayout row = new KeyTouchRow(getContext()); row.setGravity(Gravity.CENTER);
-        for (String label : labels) {
-            KeyButton button = new KeyButton(getContext(), label, false, theme);
-            button.setOnClickListener(v -> callback.onKey(label));
-            if (label.isEmpty()) { button.setEnabled(false); button.setVisibility(INVISIBLE); }
-            LayoutParams params = new LayoutParams(0, -1, 1f);
-            params.setMargins(dp(nineKeyHorizontalGap()), dp(nineKeyVerticalGap()),
-                    dp(nineKeyHorizontalGap()), dp(nineKeyVerticalGap()));
-            row.addView(button, params);
+        for (String action : actions) {
+            String label = phone && "0".equals(action) ? "+\n0" : action;
+            KeyButton button = addKey(row, label, action, 1f, nineKeyHorizontalGap(), nineKeyVerticalGap());
+            if (action.isEmpty()) {
+                button.setEnabled(false); button.setFocusable(false); button.setVisibility(INVISIBLE);
+                button.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+            } else if (phone && "0".equals(action)) {
+                button.setLongPressOnlyAction(() -> callback.onKey("+"));
+                button.setContentDescription("数字 0，长按输入加号");
+                AccessibilitySupport.longClick(button, "输入加号");
+            } else if ("返回".equals(action)) button.setContentDescription("返回进入数字页前的键盘");
         }
         parent.addView(row, new LayoutParams(-1, 0, 1f));
     }
@@ -688,11 +700,14 @@ public final class KeyboardView extends LinearLayout {
     private boolean symbolPanelShown;
     private ScrollView symbolContent;
     private LinearLayout symbolGrid;
+    private int savedSymbolScroll;
+    private int savedEmojiScroll;
     private final java.util.Map<String, TextView> symbolCategoryTabs = new java.util.LinkedHashMap<>();
 
     public void showSymbols() { showSymbols(selectedSymbolCategory); }
 
     public void showSymbols(String category) {
+        if (!category.equals(selectedSymbolCategory)) savedSymbolScroll = 0;
         selectedSymbolCategory = category;
         if (symbolPanelShown && symbolContent != null && symbolContent.getParent() == this) {
             updateSymbolCategory(category);
@@ -703,6 +718,7 @@ public final class KeyboardView extends LinearLayout {
         hideComposingHeader();
         removeRows();
         showSymbolCategories(category);
+        addPanelSwitches("符号");
 
         symbolContent = new ScrollView(getContext());
         symbolContent.setFillViewport(false);
@@ -715,6 +731,7 @@ public final class KeyboardView extends LinearLayout {
                 new String[]{"返回符号", "123", "空格", "⌫"}, dp(48));
         symbolPanelShown = true;
         updateSymbolCategory(category);
+        symbolContent.post(() -> { if (symbolContent != null) symbolContent.scrollTo(0, savedSymbolScroll); });
     }
 
     private void updateSymbolCategory(String category) {
@@ -724,7 +741,9 @@ public final class KeyboardView extends LinearLayout {
             tab.setSelected(active);
             tab.setTextColor(active ? theme.accent : theme.text);
             tab.setContentDescription(entry.getKey() + "符号" + (active ? "，已选中" : ""));
-            tab.setBackground(roundRect(active ? theme.function : Color.TRANSPARENT, 10));
+            tab.setBackground(active
+                    ? roundRect(blendColor(theme.key, theme.accent, dark ? 0.24f : 0.12f), 10)
+                    : null);
         }
         if (symbolContent == null || symbolGrid == null) return;
         symbolGrid.removeAllViews();
@@ -783,10 +802,12 @@ public final class KeyboardView extends LinearLayout {
             tab.setGravity(Gravity.CENTER);
             tab.setSelected(active);
             tab.setContentDescription(category + "符号" + (active ? "，已选中" : ""));
-            tab.setBackground(roundRect(active ? theme.function : Color.TRANSPARENT, 10));
+            tab.setBackground(active
+                    ? roundRect(blendColor(theme.key, theme.accent, dark ? 0.24f : 0.12f), 10)
+                    : null);
             tab.setOnClickListener(v -> callback.onKey("符号分类:" + category));
-            LayoutParams params = new LayoutParams(dp(54), dp(40));
-            params.setMargins(dp(2), dp(2), dp(2), dp(2));
+            LayoutParams params = new LayoutParams(dp(58), dp(48));
+            params.setMargins(dp(2), 0, dp(2), 0);
             row.addView(tab, params);
             symbolCategoryTabs.put(category, tab);
             if (active) tab.post(() -> scroll.scrollTo(Math.max(0, tab.getLeft() - dp(100)), 0));
@@ -797,6 +818,7 @@ public final class KeyboardView extends LinearLayout {
 
     private void addIconToolbar() {
         android.content.SharedPreferences settings = renderSettings;
+        ToolbarConfig.migrateFormerDefaults(settings);
         boolean toolbarEnabled = settings.getBoolean("toolbar", true) || KeyboardPlacement.floating(getContext(), settings);
         toolbarRow.setVisibility(toolbarEnabled ? VISIBLE : GONE);
         if (!toolbarEnabled) return;
@@ -837,7 +859,6 @@ public final class KeyboardView extends LinearLayout {
     }
     void trimArtwork() {
         if (emojiStyleAssets != null) emojiStyleAssets.trim();
-        if (emojiStylePreviewAssets != null) emojiStylePreviewAssets.trim();
     }
 
     private void addPlacementHandle() {
@@ -920,7 +941,10 @@ public final class KeyboardView extends LinearLayout {
         states.addState(new int[]{android.R.attr.state_pressed}, roundRect(blendColor(theme.function, theme.accent, 0.18f), 12));
         states.addState(new int[]{}, roundRect(selected ? softAccent : Color.TRANSPARENT, 12));
         button.setBackground(states);
-        button.setOnClickListener(v -> callback.onKey(action));
+        button.setOnClickListener(v -> {
+            if ("日期时间".equals(action)) showDateTimeMenu(button);
+            else callback.onKey(action);
+        });
         FrameLayout cell = new FrameLayout(getContext()) {
             @Override protected void onMeasure(int widthSpec, int heightSpec) {
                 FrameLayout.LayoutParams child = (FrameLayout.LayoutParams) getChildAt(0).getLayoutParams();
@@ -1031,7 +1055,7 @@ public final class KeyboardView extends LinearLayout {
             addKey(bottom, "空格", "空格", 46f, horizontalGap, verticalGap);
             addKey(bottom, "123", "123", 14f, horizontalGap, verticalGap);
             addKey(bottom, "符号", "符号", 12f, horizontalGap, verticalGap);
-            addView(bottom, new LayoutParams(-1, bottomKeyHeight()));
+            addView(bottom, new LayoutParams(-1, nineBottomKeyHeight()));
             return;
         }
         String editorKind = ((OfflineImeService) getContext()).editorLayoutKind();
@@ -1056,7 +1080,9 @@ public final class KeyboardView extends LinearLayout {
         else addKey(bottom, "中/英", "中英", english ? 11f : 12f, horizontalGap, verticalGap);
         String action = ((OfflineImeService) getContext()).editorActionLabel();
         addKey(bottom, action, "回车", english ? 15f : 16f, horizontalGap, verticalGap);
-        addView(bottom, equalLetterRows ? new LayoutParams(-1, 0, 1f) : new LayoutParams(-1, bottomKeyHeight()));
+        boolean nine = !english && ((OfflineImeService) getContext()).nineKeyMode();
+        addView(bottom, equalLetterRows ? new LayoutParams(-1, 0, 1f)
+                : new LayoutParams(-1, nine ? nineBottomKeyHeight() : bottomKeyHeight()));
     }
 
     private void addLetterRow(String letters, boolean upper, boolean inset, boolean english) {
@@ -1143,11 +1169,12 @@ public final class KeyboardView extends LinearLayout {
         LinearLayout body = new LinearLayout(getContext());
         body.setOrientation(HORIZONTAL);
         ninePathScroll = createNinePathPanel();
-        // Give the path strip and the right-side keys the same visible width.
-        int sideWidth = Math.max(44, Math.min(64,
-                KeyboardPlacement.width(getContext(), renderSettings) / 7));
+        // Keep the three letter columns wide on narrow and one-handed layouts.
+        int keyboardWidth = KeyboardPlacement.width(getContext(), renderSettings);
+        int pathWidth = Math.max(44, Math.min(60, Math.round(keyboardWidth * 0.125f)));
+        int controlWidth = Math.max(48, Math.min(60, Math.round(keyboardWidth * 0.125f)));
         int sideGutter = nineKeyHorizontalGap();
-        LayoutParams strip = new LayoutParams(dp(sideWidth), -1);
+        LayoutParams strip = new LayoutParams(dp(pathWidth), -1);
         strip.setMargins(dp(sideGutter), 0, dp(sideGutter), 0);
         boolean mirror = "left".equals(KeyboardPlacement.side(getContext(), renderSettings))
                 && getResources().getConfiguration().screenWidthDp >= 600;
@@ -1157,15 +1184,15 @@ public final class KeyboardView extends LinearLayout {
         addNineGridRow(grid, new String[]{"1\n@/.", "2\nABC", "3\nDEF"}, new String[]{"标点", "2", "3"}, 0);
         addNineGridRow(grid, new String[]{"4\nGHI", "5\nJKL", "6\nMNO"}, new String[]{"4", "5", "6"}, 0);
         addNineGridRow(grid, new String[]{"7\nPQRS", "8\nTUV", "9\nWXYZ"}, new String[]{"7", "8", "9"}, 0);
-        LinearLayout right = new LinearLayout(getContext());
+        LinearLayout right = new KeyTouchRow(getContext());
         right.setOrientation(VERTICAL);
-        addNineSideKey(right, "⌫", false);
-        addNineSideKey(right, "重输", false);
-        addNineSideKey(right, "分词", false);
-        if (mirror) body.addView(right, new LayoutParams(dp(sideWidth) + 2 * dp(sideGutter), -1));
+        addNineSideKey(right, "⌫", "⌫", 1f);
+        addNineSideKey(right, "清空拼音", "重输", 1f);
+        addNineSideKey(right, "分隔", "分隔", 1f);
+        if (mirror) body.addView(right, new LayoutParams(dp(controlWidth) + 2 * dp(sideGutter), -1));
         body.addView(grid, new LayoutParams(0, -1, 1f));
         if (mirror) body.addView(ninePathScroll, strip);
-        else body.addView(right, new LayoutParams(dp(sideWidth) + 2 * dp(sideGutter), -1));
+        else body.addView(right, new LayoutParams(dp(controlWidth) + 2 * dp(sideGutter), -1));
         addView(body, new LayoutParams(-1, 0, 1f));
         addSogouBottomRow(false);
     }
@@ -1213,13 +1240,19 @@ public final class KeyboardView extends LinearLayout {
         LinearLayout row = new KeyTouchRow(getContext()); row.setGravity(Gravity.CENTER);
         int horizontalGap = nineKeyHorizontalGap();
         int verticalGap = nineKeyVerticalGap();
+        boolean swipeNumbers = renderSettings.getBoolean("nine_key_swipe_numbers", true);
+        boolean lettersOnly = "letters".equals(renderSettings.getString("nine_key_labels", "letters_numbers"));
         for (int i = 0; i < labels.length; i++) {
             KeyButton b = new KeyButton(getContext(), labels[i], false, theme);
             final String action = actions[i]; b.setOnClickListener(v -> callback.onKey(action));
-            if (action.length() == 1 && Character.isDigit(action.charAt(0))) {
-                b.setLongPressOnlyAction(() -> callback.onKey("长按数字:" + action));
-                b.setContentDescription(labels[i].replace("\n", " ") + "，长按输入数字 " + action);
-            }
+            // The first key opens punctuation on tap, but flicks/holds still enter 1.
+            final String digit = labels[i].substring(0, labels[i].indexOf('\n'));
+            Runnable enterDigit = () -> callback.onKey("长按数字:" + digit);
+            if (swipeNumbers) b.setSwipeUpSymbol(digit, enterDigit);
+            else b.setLongPressOnlyAction(enterDigit);
+            b.setSecondaryLabelVisible(!lettersOnly);
+            String description = "标点".equals(action) ? "标点" : labels[i].substring(labels[i].indexOf('\n') + 1);
+            b.setContentDescription(description + (swipeNumbers ? "，上滑或长按输入数字 " : "，长按输入数字 ") + digit);
             LayoutParams lp = new LayoutParams(0, -1, 1f);
             lp.setMargins(dp(horizontalGap), dp(verticalGap), dp(horizontalGap), dp(verticalGap));
             row.addView(b, lp);
@@ -1227,19 +1260,27 @@ public final class KeyboardView extends LinearLayout {
         parent.addView(row, height == 0 ? new LayoutParams(-1, 0, 1f) : new LayoutParams(-1, height));
     }
 
+    private int nineBottomKeyHeight() {
+        int available = Math.max(0, KeyboardPlacement.height(getContext(), renderSettings) - candidateHeightDp());
+        return dp(Math.max(44, Math.min(68, Math.round(available * 0.22f))));
+    }
+
     private int bottomKeyHeight() {
         return dp(isLandscapeLayout() ? 44 : 54);
     }
 
-    private void addNineSideKey(LinearLayout column, String key, boolean emphasized) {
+    private void addNineSideKey(LinearLayout column, String label, String action, float weight) {
         KeyboardTheme current = theme == null ? KeyboardTheme.from(getContext(), dark) : theme;
-        KeyButton button = new KeyButton(getContext(), key, true, current);
-        if (emphasized) button.setEmphasized(current);
-        button.setOnClickListener(v -> callback.onKey("清空".equals(key) ? "重输" : key));
-        if ("⌫".equals(key)) enableRepeatDelete(button);
+        KeyButton button = new KeyButton(getContext(), label, !"重输".equals(action), current);
+        button.setOnClickListener(v -> callback.onKey(action));
+        if ("⌫".equals(action)) enableRepeatDelete(button);
+        if ("重输".equals(action)) {
+            button.setText("清空\n拼音"); button.setTextSize(12); button.setMaxLines(2);
+            button.setContentDescription("清空尚未上屏的拼音，不删除已输入文字");
+        } else if ("分隔".equals(action)) button.setContentDescription("在当前拼音位置插入分隔符");
         int horizontalGap = nineKeyHorizontalGap();
         int verticalGap = nineKeyVerticalGap();
-        LayoutParams params = new LayoutParams(-1, 0, 1f);
+        LayoutParams params = new LayoutParams(-1, 0, weight);
         params.setMargins(dp(horizontalGap), dp(verticalGap), dp(horizontalGap), dp(verticalGap));
         column.addView(button, params);
     }
@@ -1251,6 +1292,10 @@ public final class KeyboardView extends LinearLayout {
     private void addVerticalKey(LinearLayout parent, String key, float weight) {
         KeyButton b = new KeyButton(getContext(), key, isFunctionKey(key), theme);
         b.setOnClickListener(v -> callback.onKey(key));
+        if (key.isEmpty()) {
+            b.setEnabled(false); b.setFocusable(false); b.setVisibility(INVISIBLE);
+            b.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        }
         if ("⌫".equals(key)) enableRepeatDelete(b);
         LayoutParams params = new LayoutParams(-1, 0, weight);
         params.setMargins(dp(nineKeyHorizontalGap()), dp(nineKeyVerticalGap()),
@@ -1260,6 +1305,8 @@ public final class KeyboardView extends LinearLayout {
 
     private int toolbarIcon(String action) {
         if ("收起键盘".equals(action)) return R.drawable.ic_toolbar_hide;
+        if ("快捷短语".equals(action)) return R.drawable.ic_toolbar_phrases;
+        if ("日期时间".equals(action)) return R.drawable.ic_toolbar_calendar;
         if ("设置".equals(action)) return R.drawable.ic_toolbar_settings;
         if ("符号".equals(action)) return R.drawable.ic_toolbar_symbols;
         if ("😊".equals(action)) return R.drawable.ic_toolbar_emoji;
@@ -1273,6 +1320,16 @@ public final class KeyboardView extends LinearLayout {
         return R.drawable.ic_toolbar_tools;
     }
 
+    private void showDateTimeMenu(View anchor) {
+        RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "插入日期时间", theme);
+        for (String id : DateTimeInsertion.FORMATS) {
+            String value = DateTimeInsertion.format(id);
+            menu.item(DateTimeInsertion.label(id), value, null, false, false,
+                    () -> callback.onKey("插入日期时间:" + id));
+        }
+        showCardMenu(anchor, menu);
+    }
+
     /** Layout cards keep their content height inside the fixed-height IME. */
     public void showLayoutChooser(OfflineImeService.Mode currentMode) {
         applyLayoutPreferences();
@@ -1283,20 +1340,22 @@ public final class KeyboardView extends LinearLayout {
         ScrollView scroll = new ScrollView(getContext());
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
+        scroll.setScrollBarStyle(SCROLLBARS_INSIDE_OVERLAY);
         scroll.setOverScrollMode(OVER_SCROLL_IF_CONTENT_SCROLLS);
-        scroll.setPadding(dp(2), dp(2), dp(2), dp(2));
+        scroll.setPadding(dp(2), dp(2), dp(4), dp(4));
+        scroll.setContentDescription("键盘布局选项，可上下滑动查看更多");
         LinearLayout choices = new LinearLayout(getContext());
         choices.setOrientation(VERTICAL);
-        choices.setGravity(Gravity.CENTER_VERTICAL);
+        choices.setGravity(Gravity.TOP);
         boolean landscape = isLandscapeLayout();
-        int columns = landscape ? 4 : 2;
-        String[] titles = {"中文 26键", "中文 9键", "笔画输入", "English", "数字键盘"};
-        String[] subtitles = {"全拼、简拼与整句输入", "九宫格拼音，适合单手",
-                "横竖撇点折，支持简繁汉字", "英文拼写、联想与上划符号", "数字及常用运算符"};
-        String[] actions = {"字", "9键", "笔画", "ABC", "符"};
+        int columns = landscape ? 5 : 3;
+        String[] titles = {"中文 26键", "中文 9键", "数字键盘", "English", "笔画输入"};
+        String[] subtitles = {"全拼 · 简拼", "九宫格拼音",
+                "数字 · 运算", "拼写 · 联想", "横竖撇点折"};
+        String[] actions = {"字", "9键", "符", "ABC", "笔画"};
         OfflineImeService.Mode[] modes = {OfflineImeService.Mode.PINYIN,
-                OfflineImeService.Mode.NINE, OfflineImeService.Mode.STROKE, OfflineImeService.Mode.ENGLISH,
-                OfflineImeService.Mode.SYMBOLS};
+                OfflineImeService.Mode.NINE, OfflineImeService.Mode.SYMBOLS, OfflineImeService.Mode.ENGLISH,
+                OfflineImeService.Mode.STROKE};
         LinearLayout row = null;
         for (int i = 0; i < titles.length; i++) {
             if (i % columns == 0) {
@@ -1307,38 +1366,84 @@ public final class KeyboardView extends LinearLayout {
             }
             addLayoutChoice(row, titles[i], subtitles[i], actions[i], currentMode == modes[i]);
         }
-        Button help = new Button(getContext()); help.setText("拼音路径与小鹤双拼帮助");
+        LinearLayout utilities = new LinearLayout(getContext());
+        utilities.setOrientation(HORIZONTAL);
+        choices.addView(utilities, new LayoutParams(-1, dp(54)));
+        TextView help = addLayoutChooserAction(utilities, "拼音帮助", false, 13);
         help.setOnClickListener(v -> {
             RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "拼音输入提示", theme);
             TextView text = new TextView(getContext()); text.setTextSize(15); text.setTextColor(theme.text); text.setPadding(dp(12), dp(12), dp(12), dp(12));
             text.setText("拼音路径：长音节在前，同长度按 A–Z 排列。点击选择读音，长按可编辑、只解锁此音节或原文上屏。\n\n小鹤双拼：每个音节两个按键，键帽上方显示韵母。单字母零声母双击，如 a→aa；两字母零声母直接输入，如 ai；三字母零声母用首字母加韵母键，如 ang→ah。\n\n空格左右滑动移动光标，上滑切换选择。回车先确认拼音，再次点击才执行发送或换行。");
             ScrollView helpScroll = new ScrollView(getContext()); helpScroll.addView(text); menu.content(helpScroll); showCardMenu(help, menu);
-        }); choices.addView(help);
-        Button placement = new Button(getContext()); placement.setText("单手 · 浮动 · 尺寸");
-        placement.setOnClickListener(v -> showPlacementMenu(placement)); choices.addView(placement);
-        Button privacyToggle = new Button(getContext()); privacyToggle.setText(renderSettings.getBoolean("privacy_mode", false) ? "关闭隐私模式" : "开启隐私模式");
-        privacyToggle.setOnClickListener(v -> callback.onKey("隐私模式")); choices.addView(privacyToggle);
+        });
+        help.setContentDescription("拼音路径与小鹤双拼帮助");
+        TextView placement = addLayoutChooserAction(utilities, "单手 · 浮动", false, 13);
+        placement.setOnClickListener(v -> showPlacementMenu(placement));
+        placement.setContentDescription("单手、浮动与键盘尺寸");
+        boolean privacy = renderSettings.getBoolean("privacy_mode", false);
+        TextView privacyToggle = addLayoutChooserAction(utilities, privacy ? "关闭隐私" : "开启隐私", privacy, 13);
+        privacyToggle.setOnClickListener(v -> callback.onKey("隐私模式"));
+        privacyToggle.setContentDescription(privacy ? "关闭隐私模式" : "开启隐私模式");
         scroll.addView(choices, new ScrollView.LayoutParams(-1, -2));
         addView(scroll, new LayoutParams(-1, 0, 1f));
-        addBottomMappedFixed(new String[]{"手写", ((OfflineImeService) getContext()).isNameMode() ? "退出人名" : "人名", "返回"},
-                new String[]{"手写", "人名模式", "返回"}, bottomKeyHeight());
+        addLayoutChooserFooter();
+    }
+
+    private void addLayoutChooserFooter() {
+        LinearLayout footer = new LinearLayout(getContext());
+        footer.setOrientation(HORIZONTAL);
+        int height = Math.max(dp(54), bottomKeyHeight());
+        String[] labels = {"手写", ((OfflineImeService) getContext()).isNameMode() ? "退出人名" : "人名", "返回"};
+        String[] actions = {"手写", "人名模式", "返回"};
+        for (int i = 0; i < labels.length; i++) {
+            String action = actions[i];
+            TextView button = addLayoutChooserAction(footer, labels[i], false, 15);
+            button.setOnClickListener(v -> callback.onKey(action));
+            if ("人名模式".equals(action))
+                button.setContentDescription("退出人名".equals(labels[i]) ? "退出人名模式" : "开启人名模式");
+        }
+        addView(footer, new LayoutParams(-1, height));
+    }
+
+    private TextView addLayoutChooserAction(LinearLayout row, String label, boolean selected, int textSize) {
+        TextView action = new TextView(getContext());
+        action.setText(label); action.setTextSize(textSize); action.setTextColor(theme.accent);
+        action.setGravity(Gravity.CENTER); action.setIncludeFontPadding(false);
+        action.setSingleLine(true); action.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        action.setMinHeight(dp(UiTokens.MIN_TOUCH));
+        action.setBackground(layoutChooserBackground(selected));
+        LayoutParams params = new LayoutParams(0, dp(UiTokens.MIN_TOUCH), 1f);
+        int gap = dp(3);
+        params.setMargins(gap, gap, gap, gap);
+        row.addView(action, params);
+        return action;
+    }
+
+    private android.graphics.drawable.StateListDrawable layoutChooserBackground(boolean selected) {
+        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed}, layoutChooserSurface(selected, true));
+        states.addState(new int[]{}, layoutChooserSurface(selected, false));
+        return states;
+    }
+
+    private GradientDrawable layoutChooserSurface(boolean selected, boolean pressed) {
+        int surface = selected || pressed ? blendColor(theme.key, theme.accent,
+                selected ? (dark ? 0.23f : 0.10f) : (dark ? 0.18f : 0.07f)) : theme.key;
+        GradientDrawable background = roundRect(surface, UiTokens.RADIUS_CARD);
+        background.setStroke(dp(selected ? 2 : 1), selected ? theme.accent
+                : blendColor(theme.key, theme.accent, dark ? 0.55f : 0.28f));
+        return background;
     }
 
     private void addLayoutChoice(LinearLayout parent, String title, String subtitle,
                                  String action, boolean selected) {
         LinearLayout card = new LinearLayout(getContext());
         card.setOrientation(VERTICAL); card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(12), dp(10), dp(12), dp(10));
-        card.setMinimumHeight(dp(76));
-        int accent = theme == null ? 0xff3978d3 : theme.accent;
-        int foreground = theme == null ? 0xff34383e : theme.text;
-        GradientDrawable background = new GradientDrawable();
-        background.setColor(selected ? blendColor(theme.key, accent, dark ? 0.18f : 0.07f)
-                : (theme == null ? 0xfff8fafc : theme.function));
-        background.setCornerRadius(dp(UiTokens.RADIUS_CARD));
-        background.setStroke(dp(selected ? 2 : 1), selected ? accent
-                : (dark ? 0xff47515e : 0xffcbd3dc));
-        card.setBackground(background);
+        card.setPadding(dp(10), dp(3), dp(10), dp(3));
+        card.setMinimumHeight(dp(UiTokens.MIN_TOUCH));
+        int accent = theme.accent;
+        int foreground = theme.text;
+        card.setBackground(layoutChooserBackground(selected));
         card.setContentDescription(title + "，" + subtitle + "，"
                 + (selected ? "当前布局" : "点击切换"));
         card.setOnClickListener(view -> callback.onKey(selected ? "返回" : action));
@@ -1355,26 +1460,26 @@ public final class KeyboardView extends LinearLayout {
         TextView status = new TextView(getContext()); status.setText(selected ? "✓" : "›");
         status.setTextSize(selected ? 18 : 20); status.setGravity(Gravity.CENTER);
         status.setIncludeFontPadding(false);
-        status.setTextColor(selected ? accent : (dark ? 0xff8e99a8 : 0xff778291));
+        status.setTextColor(accent);
         titleRow.addView(label, new LayoutParams(0, -2, 1f));
         titleRow.addView(status, new LayoutParams(dp(24), -2));
         card.addView(titleRow, new LayoutParams(-1, -2));
         TextView description = new TextView(getContext());
         description.setText(subtitle);
-        description.setTextSize(12);
+        description.setTextSize(11);
         description.setTextColor(dark ? 0xffaeb7c4 : 0xff677180);
         description.setGravity(Gravity.CENTER_VERTICAL);
         description.setIncludeFontPadding(false);
-        description.setMaxLines(2);
+        description.setSingleLine(true);
         description.setEllipsize(android.text.TextUtils.TruncateAt.END);
         LayoutParams descriptionParams = new LayoutParams(-1, -2);
-        descriptionParams.topMargin = dp(UiTokens.SPACE_XS);
+        descriptionParams.topMargin = dp(2);
         card.addView(description, descriptionParams);
 
         // Equal-width columns with natural content height prevent both horizontal
         // overflow and vertically clipped subtitles at low keyboard heights.
         LayoutParams params = new LayoutParams(0, -1, 1f);
-        int gap = dp(UiTokens.SPACE_XS);
+        int gap = dp(3);
         params.setMargins(gap, gap, gap, gap);
         parent.addView(card, params);
     }
@@ -1443,7 +1548,7 @@ public final class KeyboardView extends LinearLayout {
                 selected ? android.graphics.Typeface.BOLD : android.graphics.Typeface.NORMAL);
         fitNinePathLabel(slot);
         int textColor = selected ? theme.accent : theme.text;
-        int backgroundColor = selected ? blendColor(theme.key, theme.accent, 0.16f) : Color.TRANSPARENT;
+        int backgroundColor = selected ? blendColor(theme.key, theme.accent, dark ? 0.24f : 0.12f) : Color.TRANSPARENT;
         if (selected != slot.selected || textColor != slot.textColor) {
             slot.view.setTextColor(textColor);
             slot.textColor = textColor;
@@ -1581,20 +1686,20 @@ public final class KeyboardView extends LinearLayout {
         SpannableString label = new SpannableString(marker + word);
         if (!marker.isEmpty()) {
             label.setSpan(new RelativeSizeSpan(0.62f), 0, marker.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            label.setSpan(new ForegroundColorSpan(first ? theme.accent : blendColor(foreground, theme.key, 0.32f)),
-                    0, marker.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         item.setText(label); item.setTextSize(candidateFontSp());
-        item.setTextColor(first ? theme.accent : foreground);
-        item.setGravity(Gravity.CENTER); item.setPadding(dp(7), 0, dp(7), 0);
+        item.setTextColor(new android.content.res.ColorStateList(
+                new int[][]{new int[]{android.R.attr.state_pressed}, new int[]{}},
+                new int[]{theme.candidateForeground(first, true), theme.candidateForeground(first, false)}));
+        item.setGravity(Gravity.CENTER); item.setPadding(dp(9), 0, dp(9), 0);
+        item.setSingleLine(true); item.setEllipsize(android.text.TextUtils.TruncateAt.END);
         item.setMinWidth(dp(30));
         item.setMinHeight(dp(candidateHeightDp()));
         android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed}, new android.graphics.drawable.ColorDrawable(theme.function));
-        GradientDrawable normal = roundRect(first ? blendColor(theme.key, theme.accent, 0.09f)
+        GradientDrawable normal = roundRect(first ? theme.candidateBackground(true)
                 : Color.TRANSPARENT, first ? 10 : 0);
-        if (first) normal.setStroke(dp(1), blendColor(theme.accent, theme.key, 0.35f));
-        states.addState(new int[]{}, normal);
+                states.addState(new int[]{}, normal);
         item.setBackground(states);
     }
 
@@ -1690,11 +1795,18 @@ public final class KeyboardView extends LinearLayout {
 
     public void showTools() {
         applyLayoutPreferences();
+        if (editorBody != null && editorBody.getParent() == this
+                && editorStyleRevision == styleRevision) {
+            updateEditorActionStates();
+            return;
+        }
         activeToolbarAction = "工具";
         addIconToolbar();
         hideComposingHeader();
         removeRows();
         LinearLayout body = new LinearLayout(getContext());
+        editorBody = body;
+        editorStyleRevision = styleRevision;
         body.setOrientation(LinearLayout.HORIZONTAL);
         LinearLayout directions = new LinearLayout(getContext());
         directions.setOrientation(LinearLayout.VERTICAL);
@@ -1702,7 +1814,7 @@ public final class KeyboardView extends LinearLayout {
         addEditorRow(directions, new String[]{"", "↑", ""});
         addEditorRow(directions, new String[]{"←", "光标", "→"});
         addEditorRow(directions, new String[]{"", "↓", ""});
-        int directionGap = Math.max(0, getIntPreference(renderSettings, "key_gap", 2));
+        int directionGap = 1;
         EditorDirectionPad directionPad = new EditorDirectionPad(getContext(), directions,
                 dp(3 * (54 + 2 * directionGap)));
         body.addView(directionPad, new LayoutParams(0, -1, 0.42f));
@@ -1710,18 +1822,14 @@ public final class KeyboardView extends LinearLayout {
         LinearLayout actions = new LinearLayout(getContext());
         actions.setOrientation(LinearLayout.VERTICAL);
         actions.setContentDescription("文本编辑操作区");
-        addEditorRow(actions, new String[]{"选择", "全选", "剪贴板"});
-        addEditorRow(actions, new String[]{"复制", "剪切", "粘贴"});
-        addEditorRow(actions, new String[]{"行首", "行尾", "⌫词"});
-        addEditorRow(actions, new String[]{"撤销", "重做", "删除"});
+        addEditorRow(actions, new String[]{"选择", "全选", "粘贴"});
+        addEditorRow(actions, new String[]{"复制", "剪切", "退格"});
+        addEditorRow(actions, new String[]{"撤销", "重做", "更多"});
         LayoutParams actionsParams = new LayoutParams(0, -1, 0.58f);
         actionsParams.leftMargin = dp(UiTokens.SPACE_XS);
         body.addView(actions, actionsParams);
-        addView(body, new LayoutParams(-1, 0, 4f));
-        if (((OfflineImeService) getContext()).hasWordSaveActions()) {
-            addBottomMappedFixed(new String[]{"词语操作", "返回"},
-                    new String[]{"造词菜单", "返回"}, bottomKeyHeight());
-        } else addBottom(new String[]{"返回"});
+        addView(body, new LayoutParams(-1, 0, 1f));
+        updateEditorActionStates();
     }
 
     /** Keep the cross square and centered when height, rotation or insets change. */
@@ -1767,23 +1875,89 @@ public final class KeyboardView extends LinearLayout {
                 title.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
                 row.addView(title, new LayoutParams(0, -1, 1f));
             } else {
-                KeyButton button = addKey(row, label, label, 1f);
-                OfflineImeService service = (OfflineImeService) getContext();
-                if ("复制".equals(label) || "剪切".equals(label)) {
-                    button.setEnabled(service.hasEditorSelection()); button.setAlpha(button.isEnabled() ? 1f : 0.45f);
-                }
+                KeyButton button = new KeyButton(getContext(), label, false, theme);
+                boolean direction = "↑".equals(label) || "↓".equals(label)
+                        || "←".equals(label) || "→".equals(label);
+                if (direction) button.setText("");
+                button.setActionIcon(editorIcon(label), direction ? editorDirectionDescription(label) : label);
+                String action = "退格".equals(label) ? "删除" : label;
+                if ("更多".equals(label)) button.setOnClickListener(v -> showEditorMoreMenu(button));
+                else button.setOnClickListener(v -> callback.onKey(action));
+                if ("←".equals(label) || "→".equals(label)) button.setRepeatAction();
                 if ("选择".equals(label)) {
-                    AccessibilitySupport.selected(button, service.selectionActive());
-                    button.setContentDescription(service.selectionActive() ? "选择模式已开启，点击退出" : "开启选择模式");
-                }
+                    editorSelect = button;
+                    editorSelectBackground = button.getBackground();
+                } else if ("复制".equals(label)) editorCopy = button;
+                else if ("剪切".equals(label)) editorCut = button;
+                LayoutParams params = new LayoutParams(0, -1, 1f);
+                params.setMargins(dp(1), dp(1), dp(1), dp(1));
+                row.addView(button, params);
             }
         }
         parent.addView(row, new LayoutParams(-1, 0, 1f));
     }
 
-    private ClipboardPanel clipboardPanel() {
-        applyLayoutPreferences(); activeToolbarAction = "剪贴板";
+    private int editorIcon(String label) {
+        switch (label) {
+            case "↑": return R.drawable.ic_edit_up;
+            case "↓": return R.drawable.ic_edit_down;
+            case "←": return R.drawable.ic_edit_left;
+            case "→": return R.drawable.ic_edit_right;
+            case "选择": return R.drawable.ic_edit_select;
+            case "全选": return R.drawable.ic_edit_select_all;
+            case "粘贴": return R.drawable.ic_edit_paste;
+            case "复制": return R.drawable.ic_edit_copy;
+            case "剪切": return R.drawable.ic_edit_cut;
+            case "退格": return R.drawable.ic_edit_backspace;
+            case "撤销": return R.drawable.ic_edit_undo;
+            case "重做": return R.drawable.ic_edit_redo;
+            default: return R.drawable.ic_edit_more;
+        }
+    }
+
+    private String editorDirectionDescription(String label) {
+        switch (label) {
+            case "↑": return "光标上移";
+            case "↓": return "光标下移";
+            case "←": return "光标左移，长按连续移动";
+            default: return "光标右移，长按连续移动";
+        }
+    }
+
+    private void updateEditorActionStates() {
+        if (editorSelect == null) return;
+        OfflineImeService service = (OfflineImeService) getContext();
+        boolean selecting = service.selectionActive();
+        if (editorSelect.isSelected() != selecting) {
+            AccessibilitySupport.selected(editorSelect, selecting);
+            if (selecting) editorSelect.setEmphasized(theme);
+            else {
+                editorSelect.setBackground(editorSelectBackground);
+                editorSelect.setTextColor(theme.text);
+            }
+        }
+        editorSelect.setContentDescription(selecting ? "选择模式已开启，点击退出" : "开启选择模式");
+        boolean hasSelection = service.hasEditorSelection();
+        if (editorCopy != null) { editorCopy.setEnabled(hasSelection); editorCopy.setAlpha(hasSelection ? 1f : 0.45f); }
+        if (editorCut != null) { editorCut.setEnabled(hasSelection); editorCut.setAlpha(hasSelection ? 1f : 0.45f); }
+    }
+
+    private void showEditorMoreMenu(View anchor) {
+        RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "更多文本操作", theme);
+        menu.item("行首", "移动到开头", null, false, false, () -> callback.onKey("行首"));
+        menu.item("行尾", "移动到结尾", null, false, false, () -> callback.onKey("行尾"));
+        menu.item("删词", "删除光标前的一个词", null, false, false, () -> callback.onKey("⌫词"));
+        menu.item("剪贴板", null, null, false, false, () -> callback.onKey("剪贴板"));
+        if (((OfflineImeService) getContext()).hasWordSaveActions())
+            menu.item("词语操作", null, null, false, false, () -> callback.onKey("造词菜单"));
+        menu.divider().item("返回键盘", null, null, false, false, () -> callback.onKey("返回"));
+        showCardMenu(anchor, menu);
+    }
+
+    private ClipboardPanel clipboardPanel(boolean phrases) {
+        applyLayoutPreferences(); activeToolbarAction = phrases ? "快捷短语" : "剪贴板";
         addIconToolbar(); hideComposingHeader(); removeRows();
+        if (!phrases) addPanelSwitches("剪贴板");
         ClipboardPanel panel = new ClipboardPanel(getContext(), callback, theme, dark, this::showCardMenu);
         addView(panel, new LayoutParams(-1, 0, 1f));
         return panel;
@@ -1791,12 +1965,12 @@ public final class KeyboardView extends LinearLayout {
     public void showClipboardHistory(List<ClipboardHistoryStore.Entry> values, String filter,
                                     String query, boolean confirmingClear, boolean undoAvailable,
                                     boolean multiSelect, Set<String> selected) {
-        clipboardPanel().showClipboardHistory(values, filter, query, confirmingClear, undoAvailable, multiSelect, selected);
+        clipboardPanel(false).showClipboardHistory(values, filter, query, confirmingClear, undoAvailable, multiSelect, selected);
     }
     public void showQuickPhrases(List<QuickPhraseStore.Entry> phrases) {
-        clipboardPanel().showQuickPhrases(phrases);
+        clipboardPanel(true).showQuickPhrases(phrases);
     }
-    public void showClipboardEnablePrompt() { clipboardPanel().showClipboardEnablePrompt(); }
+    public void showClipboardEnablePrompt() { clipboardPanel(false).showClipboardEnablePrompt(); }
 
     private GradientDrawable roundRect(int color, int radius) {
         GradientDrawable background = new GradientDrawable();
@@ -1896,7 +2070,7 @@ public final class KeyboardView extends LinearLayout {
             TextView candidate = new TextView(getContext());
             candidate.setText(value);
             candidate.setTextSize(20);
-            candidate.setTextColor(theme.text);
+            candidate.setTextColor(KeyboardTheme.readableText(theme.text, theme.key));
             candidate.setGravity(Gravity.CENTER);
             candidate.setPadding(dp(15), 0, dp(15), 0);
             candidate.setContentDescription(value);
@@ -1957,27 +2131,23 @@ public final class KeyboardView extends LinearLayout {
     private boolean emojiPanelShown;
     private ScrollView emojiContent;
     private LinearLayout emojiGrid;
-    private LinearLayout emojiSearchBar;
-    private String renderedEmojiSearchQuery;
+    private View emojiCategories;
     private EmojiStyleAssets emojiStyleAssets;
-    private EmojiStyleAssets emojiStylePreviewAssets;
     private final java.util.Map<String, View> emojiStyleTabs = new java.util.LinkedHashMap<>();
     private final java.util.Map<String, TextView> emojiCategoryTabs = new java.util.LinkedHashMap<>();
     public void showEmoji() {
         String savedStyle = getContext().getSharedPreferences("emoji", Context.MODE_PRIVATE)
                 .getString("style", EmojiStyleAssets.SYSTEM);
         selectedEmojiStyle = EmojiStyleAssets.known(savedStyle) ? savedStyle : EmojiStyleAssets.SYSTEM;
+        if (EmojiStyleAssets.WECHAT.equals(selectedEmojiStyle)) selectedEmojiCategory = "微信";
+        else if ("微信".equals(selectedEmojiCategory)) selectedEmojiCategory = "最近";
         showEmoji(selectedEmojiCategory);
     }
     public void showEmoji(String category) {
+        if (!category.equals(selectedEmojiCategory)) savedEmojiScroll = 0;
         selectedEmojiCategory = category;
         if (emojiPanelShown && emojiContent != null && emojiContent.getParent() == this) {
             updateEmojiCategory(category);
-            String query = ((OfflineImeService) getContext()).emojiSearchQuery();
-            if (!query.equals(renderedEmojiSearchQuery)) {
-                removeView(emojiSearchBar);
-                addEmojiSearchBar();
-            }
             return;
         }
         applyLayoutPreferences();
@@ -1990,11 +2160,12 @@ public final class KeyboardView extends LinearLayout {
         emojiGrid.setOrientation(VERTICAL);
         emojiContent = new ScrollView(getContext());
         emojiContent.setFillViewport(true);
+        emojiContent.setVerticalScrollBarEnabled(false);
         emojiContent.addView(emojiGrid, new ScrollView.LayoutParams(-1, -2));
         addView(emojiContent, new LayoutParams(-1, 0, 1f));
-        addEmojiSearchBar();
         emojiPanelShown = true;
         updateEmojiCategory(category);
+        emojiContent.post(() -> { if (emojiContent != null) emojiContent.scrollTo(0, savedEmojiScroll); });
     }
 
     public void setEmojiStyle(String style) {
@@ -2005,12 +2176,16 @@ public final class KeyboardView extends LinearLayout {
         for (java.util.Map.Entry<String, View> entry : emojiStyleTabs.entrySet()) {
             boolean active = entry.getKey().equals(style);
             View tab = entry.getValue();
-            tab.setSelected(active);
-            tab.setBackground(roundRect(active ? theme.function : Color.TRANSPARENT, 12));
+            updateCompactPanelSelection(tab, active);
             tab.setContentDescription(EmojiStyleAssets.label(entry.getKey()) + "表情样式"
                     + (active ? "，已选中" : ""));
         }
-        if (emojiPanelShown) updateEmojiCategory(selectedEmojiCategory, true);
+        if (emojiPanelShown) {
+            selectedEmojiCategory = EmojiStyleAssets.WECHAT.equals(style) ? "微信" : "最近";
+            if (emojiCategories != null) emojiCategories.setVisibility(
+                    EmojiStyleAssets.WECHAT.equals(style) ? GONE : VISIBLE);
+            updateEmojiCategory(selectedEmojiCategory);
+        }
     }
 
     private void updateEmojiCategory(String category) {
@@ -2024,7 +2199,9 @@ public final class KeyboardView extends LinearLayout {
             TextView tab = entry.getValue();
             tab.setSelected(active);
             tab.setTextColor(active ? theme.accent : theme.text);
-            tab.setBackground(roundRect(active ? theme.function : Color.TRANSPARENT, 12));
+            tab.setBackground(active
+                    ? roundRect(blendColor(theme.key, theme.accent, dark ? 0.24f : 0.12f), 12)
+                    : null);
         }
         if (emojiGrid == null || emojiContent == null) return;
         String[] values = emojiValues(category);
@@ -2032,21 +2209,22 @@ public final class KeyboardView extends LinearLayout {
         emojiGrid.removeAllViews();
         if (values.length == 0) {
             TextView empty = new TextView(getContext());
-            empty.setText(((OfflineImeService) getContext()).emojiSearchQuery().isEmpty() ? "长按表情或颜文字可收藏、选择肤色" : "没有匹配的表情，请换个关键词");
+            empty.setText("长按表情或颜文字可收藏、选择肤色");
             empty.setTextColor(theme.text);
             empty.setGravity(Gravity.CENTER);
             emojiGrid.addView(empty, new LayoutParams(-1, dp(90)));
         }
         // Keep long text wide even when it appears among recent/favorite emoji.
         for (int from = 0; from < values.length;) {
-            boolean text = EmojiCatalog.isKaomoji(values[from]);
+            boolean text = EmojiCatalog.isKaomoji(values[from]) || WeChatEmojiCatalog.contains(values[from]);
             int to = from + 1;
-            int columns = text ? Math.max(2, Math.min(4, KeyboardPlacement.width(getContext(), renderSettings) / 220))
-                    : Math.max(6, Math.min(14, KeyboardPlacement.width(getContext(), renderSettings) / 48));
+            int width = KeyboardPlacement.width(getContext(), renderSettings);
+            int columns = text ? Math.max(1, Math.min(4, width / 170))
+                    : Math.max(1, Math.min(14, width / 48));
             while (to < values.length && to - from < columns
-                    && EmojiCatalog.isKaomoji(values[to]) == text) to++;
-            if (text) addKaomojiRow(emojiGrid, values, from, to);
-            else addEmojiRow(emojiGrid, values, from, to);
+                    && (EmojiCatalog.isKaomoji(values[to]) || WeChatEmojiCatalog.contains(values[to])) == text) to++;
+            if (text) addKaomojiRow(emojiGrid, values, from, to, columns);
+            else addEmojiRow(emojiGrid, values, from, to, columns);
             from = to;
         }
         emojiContent.scrollTo(0, keepScroll ? previousScroll : 0);
@@ -2055,43 +2233,67 @@ public final class KeyboardView extends LinearLayout {
     private void showEmojiStylesInToolbar() {
         toolbarRenderKey = null;
         toolbarRow.removeAllViews();
-        toolbarRow.setPadding(dp(8), 0, dp(8), 0);
+        toolbarRow.setPadding(dp(4), 0, dp(4), 0);
         toolbarRow.setBackgroundColor(theme.background);
         toolbarRow.setVisibility(VISIBLE);
-        header.setLayoutParams(new LayoutParams(-1, dp(44)));
-        toolbarRow.setLayoutParams(new FrameLayout.LayoutParams(-1, dp(44), Gravity.TOP));
+        header.setLayoutParams(new LayoutParams(-1, dp(48)));
+        toolbarRow.setLayoutParams(new FrameLayout.LayoutParams(-1, dp(48), Gravity.TOP));
         LinearLayout row = new KeyTouchRow(getContext());
         row.setGravity(Gravity.CENTER_VERTICAL);
         emojiStyleTabs.clear();
-        if (emojiStylePreviewAssets == null) emojiStylePreviewAssets = new EmojiStyleAssets(getContext());
+        String[] actions = {"符号", "剪贴板"};
+        String[] labels = {"符号", "剪贴板"};
+        for (int i = 0; i < actions.length; i++) {
+            String action = actions[i];
+            addCompactPanelCell(row, labels[i], labels[i], false, 13,
+                    () -> callback.onKey(action));
+        }
         for (String style : EmojiStyleAssets.STYLES) {
-            FrameLayout tab = new FrameLayout(getContext());
             boolean active = style.equals(selectedEmojiStyle);
-            TextView glyph = new TextView(getContext());
-            glyph.setText("😀");
-            glyph.setTextSize(26);
-            glyph.setGravity(Gravity.CENTER);
-            glyph.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-            tab.addView(glyph, new FrameLayout.LayoutParams(-1, -1));
-            emojiStylePreviewAssets.load(style, "😀", artwork -> {
-                if (!tab.isAttachedToWindow()) return;
-                ImageView picture = new ImageView(getContext());
-                picture.setImageBitmap(artwork);
-                picture.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                picture.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-                tab.addView(picture, new FrameLayout.LayoutParams(dp(30), dp(30), Gravity.CENTER));
-            });
-            tab.setSelected(active);
-            tab.setContentDescription(EmojiStyleAssets.label(style) + "表情样式"
-                    + (active ? "，已选中" : ""));
-            tab.setBackground(roundRect(active ? theme.function : Color.TRANSPARENT, 12));
-            tab.setOnClickListener(v -> callback.onKey("表情样式:" + style));
-            LayoutParams lp = new LayoutParams(0, dp(40), 1f);
-            lp.setMargins(dp(2), dp(1), dp(2), dp(1));
-            row.addView(tab, lp);
+            View tab = addCompactPanelCell(row,
+                    EmojiStyleAssets.WECHAT.equals(style) ? "微信" : "Emoji",
+                    EmojiStyleAssets.label(style) + "表情样式" + (active ? "，已选中" : ""),
+                    active, 13, () -> callback.onKey("表情样式:" + style));
             emojiStyleTabs.put(style, tab);
         }
+        addCompactPanelCell(row, "⌫", "退格", false, 22, () -> callback.onKey("⌫"));
+        addCompactPanelCell(row, "返回", "返回键盘", false, 13,
+                () -> callback.onKey("返回表情"));
         toolbarRow.addView(row, new LayoutParams(-1, -1));
+    }
+
+    private View addCompactPanelCell(LinearLayout row, String label, String description,
+            boolean active, int textSize, Runnable action) {
+        FrameLayout cell = new FrameLayout(getContext());
+        cell.setContentDescription(description);
+        cell.setOnClickListener(v -> action.run());
+        TextView face = new TextView(getContext());
+        face.setText(label);
+        face.setTextSize(textSize);
+        face.setGravity(Gravity.CENTER);
+        face.setSingleLine(true);
+        face.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        face.setMinWidth(dp(40));
+        face.setPadding(dp(6), 0, dp(6), 0);
+        face.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
+        FrameLayout.LayoutParams faceParams = new FrameLayout.LayoutParams(-2, dp(36), Gravity.CENTER);
+        faceParams.setMargins(dp(2), 0, dp(2), 0);
+        cell.addView(face, faceParams);
+        updateCompactPanelSelection(cell, active);
+        row.addView(cell, new LayoutParams(0, dp(48), 1f));
+        return cell;
+    }
+
+    private void updateCompactPanelSelection(View cell, boolean active) {
+        AccessibilitySupport.selected(cell, active);
+        if (!(cell instanceof FrameLayout)) return;
+        View child = ((FrameLayout) cell).getChildAt(0);
+        if (!(child instanceof TextView)) return;
+        TextView face = (TextView) child;
+        face.setTextColor(active ? theme.accent : theme.text);
+        face.setBackground(active
+                ? roundRect(blendColor(theme.key, theme.accent, dark ? 0.24f : 0.12f), 12)
+                : null);
     }
 
     private void addEmojiCategories(String selected) {
@@ -2116,77 +2318,22 @@ public final class KeyboardView extends LinearLayout {
             if (value.equals(selected)) tab.post(() -> scroll.scrollTo(Math.max(0, tab.getLeft() - dp(100)), 0));
             tab.setPadding(dp(4), 0, dp(4), 0);
             tab.setTextColor(value.equals(selected) ? theme.accent : theme.text);
-            GradientDrawable bg = new GradientDrawable();
-            bg.setColor(value.equals(selected) ? theme.function : Color.TRANSPARENT);
-            bg.setCornerRadius(dp(12));
-            tab.setBackground(bg);
+            tab.setBackground(value.equals(selected)
+                    ? roundRect(blendColor(theme.key, theme.accent, dark ? 0.24f : 0.12f), 12)
+                    : null);
             tab.setOnClickListener(v -> callback.onKey("表情分类:" + value));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp("颜文字".equals(value) ? 64 : 48), dp(40));
-            lp.setMargins(dp(2), dp(1), dp(2), dp(1));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp("颜文字".equals(value) ? 76 : 52), dp(48));
+            lp.setMargins(dp(2), 0, dp(2), 0);
             row.addView(tab, lp);
             emojiCategoryTabs.put(value, tab);
         }
         scroll.addView(row, new HorizontalScrollView.LayoutParams(-2, -1));
-        addView(scroll, new LayoutParams(-1, dp(44)));
-    }
-
-    private void addEmojiSearchBar() {
-        LinearLayout bar = new LinearLayout(getContext());
-        bar.setGravity(Gravity.CENTER_VERTICAL);
-        String query = ((OfflineImeService) getContext()).emojiSearchQuery();
-        renderedEmojiSearchQuery = query;
-        LinearLayout search = new LinearLayout(getContext());
-        search.setGravity(Gravity.CENTER_VERTICAL);
-        search.setBackground(roundRect(theme.function, 12));
-        search.setContentDescription(query.isEmpty() ? "搜索表情" : "搜索表情，当前关键词：" + query);
-        search.setOnClickListener(v -> callback.onKey("搜索表情"));
-        ImageView icon = new ImageView(getContext());
-        icon.setImageResource(R.drawable.ic_panel_search);
-        icon.setColorFilter(theme.text);
-        icon.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        LayoutParams iconParams = new LayoutParams(dp(20), dp(20));
-        iconParams.setMargins(dp(12), 0, dp(10), 0);
-        search.addView(icon, iconParams);
-        TextView label = new TextView(getContext());
-        label.setText(query.isEmpty() ? "搜索表情" : query);
-        label.setTextSize(14);
-        label.setTextColor(theme.text);
-        label.setSingleLine(true);
-        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        label.setGravity(Gravity.CENTER_VERTICAL);
-        label.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
-        search.addView(label, new LayoutParams(0, -1, 1f));
-        if (!query.isEmpty()) {
-            TextView clear = new TextView(getContext());
-            clear.setText("×");
-            clear.setTextSize(24);
-            clear.setTextColor(theme.text);
-            clear.setGravity(Gravity.CENTER);
-            clear.setContentDescription("清除表情搜索");
-            clear.setOnClickListener(v -> callback.onKey("清除表情搜索"));
-            search.addView(clear, new LayoutParams(dp(44), -1));
-        }
-        LayoutParams searchParams = new LayoutParams(0, dp(48), 1f);
-        searchParams.setMargins(dp(2), dp(2), dp(2), dp(2));
-        bar.addView(search, searchParams);
-        TextView back = new TextView(getContext());
-        back.setText("返回");
-        back.setTextSize(15);
-        back.setTextColor(theme.text);
-        back.setGravity(Gravity.CENTER);
-        back.setBackground(roundRect(theme.function, 12));
-        back.setContentDescription("返回键盘");
-        back.setOnClickListener(v -> callback.onKey("返回"));
-        LayoutParams backParams = new LayoutParams(dp(64), dp(48));
-        backParams.setMargins(dp(2), dp(2), dp(2), dp(2));
-        bar.addView(back, backParams);
-        addView(bar, new LayoutParams(-1, dp(52)));
-        emojiSearchBar = bar;
+        emojiCategories = scroll;
+        scroll.setVisibility(EmojiStyleAssets.WECHAT.equals(selectedEmojiStyle) ? GONE : VISIBLE);
+        addView(scroll, new LayoutParams(-1, dp(48)));
     }
 
     private String[] emojiValues(String category) {
-        String query = ((OfflineImeService) getContext()).emojiSearchQuery();
-        if (!query.isEmpty()) return EmojiSearch.find(query);
         if ("最近".equals(category)) {
             String[] recent = EmojiCatalog.recent(getContext().getSharedPreferences("emoji", Context.MODE_PRIVATE));
             if (recent.length > 0) return recent;
@@ -2204,7 +2351,7 @@ public final class KeyboardView extends LinearLayout {
         return EmojiCatalog.values(category);
     }
 
-    private void addEmojiRow(LinearLayout grid, String[] values, int from, int to) {
+    private void addEmojiRow(LinearLayout grid, String[] values, int from, int to, int columns) {
         LinearLayout row = new KeyTouchRow(getContext());
         row.setGravity(Gravity.CENTER);
         if (emojiStyleAssets == null) emojiStyleAssets = new EmojiStyleAssets(getContext());
@@ -2238,14 +2385,14 @@ public final class KeyboardView extends LinearLayout {
             lp.setMargins(dp(gap), dp(gap), dp(gap), dp(gap));
             row.addView(button, lp);
         }
-        for (int i = to - from; i < 8; i++) {
+        for (int i = to - from; i < columns; i++) {
             row.addView(new View(getContext()), new LayoutParams(0, -1, 1f));
         }
         grid.addView(row, new LayoutParams(-1, dp(52)));
     }
 
     /** 颜文字使用独立的双列大卡片，避免长字符串被 Emoji 网格压缩或裁切。 */
-    private void addKaomojiRow(LinearLayout grid, String[] values, int from, int to) {
+    private void addKaomojiRow(LinearLayout grid, String[] values, int from, int to, int columns) {
         LinearLayout row = new KeyTouchRow(getContext());
         row.setGravity(Gravity.CENTER);
         int gap = getIntPreference(getContext().getSharedPreferences("settings", Context.MODE_PRIVATE), "key_gap", 2);
@@ -2253,27 +2400,57 @@ public final class KeyboardView extends LinearLayout {
             final String kaomoji = values[i];
             TextView button = new TextView(getContext());
             button.setText(kaomoji);
-            button.setTextSize(18);
+            button.setTextSize(WeChatEmojiCatalog.contains(kaomoji) ? 17 : 18);
             button.setGravity(Gravity.CENTER);
             button.setSingleLine(false);
             button.setMaxLines(2);
             button.setContentDescription(kaomoji);
             button.setTextColor(theme == null ? 0xff202124 : theme.text);
-            button.setBackgroundColor(Color.TRANSPARENT);
+            button.setBackground(roundRect(theme.key, 12));
             button.setOnClickListener(v -> callback.onKey("表情:" + kaomoji));
-            button.setOnLongClickListener(v -> { callback.onKey("收藏表情:" + kaomoji); return true; });
+            button.setOnLongClickListener(v -> {
+                if (!renderSettings.getBoolean("privacy_mode", false)) callback.onKey("收藏表情:" + kaomoji);
+                return true;
+            });
             LayoutParams lp = new LayoutParams(0, -1, 1f);
             lp.setMargins(dp(gap), dp(gap), dp(gap), dp(gap));
             row.addView(button, lp);
         }
-        if (to - from < 2) row.addView(new View(getContext()), new LayoutParams(0, -1, 1f));
+        for (int i = to - from; i < columns; i++)
+            row.addView(new View(getContext()), new LayoutParams(0, -1, 1f));
         grid.addView(row, new LayoutParams(-1, dp(56)));
+    }
+
+    private void addPanelSwitches(String active) {
+        LinearLayout row = new KeyTouchRow(getContext());
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        String[] actions = {"😊", "符号", "剪贴板"};
+        String[] labels = {"表情", "符号", "剪贴板"};
+        for (int i = 0; i < actions.length; i++) {
+            String action = actions[i];
+            boolean selected = action.equals(active);
+            addCompactPanelCell(row, labels[i],
+                    labels[i] + (selected ? "，已打开，点击收起" : "，点击打开"),
+                    selected, 14, () -> callback.onKey(action));
+        }
+        addView(row, new LayoutParams(-1, dp(48)));
+    }
+
+    boolean dismissActiveMenu() {
+        if (activeMenu == null) return false;
+        activeMenu.dismiss();
+        return true;
     }
 
     private void removeRows() {
         keyboardOverflowSpace = null;
+        editorBody = null;
+        editorSelect = editorCopy = editorCut = null;
+        editorSelectBackground = null;
+        editorStyleRevision = -1;
         if (emojiStyleAssets != null) emojiStyleAssets.cancelPending();
-        if (emojiStylePreviewAssets != null) emojiStylePreviewAssets.cancelPending();
+        if (symbolPanelShown && symbolContent != null) savedSymbolScroll = symbolContent.getScrollY();
+        if (emojiPanelShown && emojiContent != null) savedEmojiScroll = emojiContent.getScrollY();
         symbolPanelShown = false;
         symbolContent = null;
         symbolGrid = null;
@@ -2281,8 +2458,6 @@ public final class KeyboardView extends LinearLayout {
         emojiPanelShown = false;
         emojiContent = null;
         emojiGrid = null;
-        emojiSearchBar = null;
-        renderedEmojiSearchQuery = null;
         emojiStyleTabs.clear();
         emojiCategoryTabs.clear();
         letterButtons.clear();
@@ -2385,7 +2560,8 @@ public final class KeyboardView extends LinearLayout {
         if ("回车".equals(action)) key = ((OfflineImeService) getContext()).editorActionLabel();
         KeyboardTheme current = theme == null ? KeyboardTheme.from(getContext(), dark) : theme;
         boolean space = "空格".equals(key) || "Space".equals(key);
-        KeyButton button = new KeyButton(getContext(), key, (!space && isFunctionKey(key)), current);
+        boolean digit = action.length() == 1 && action.charAt(0) >= '0' && action.charAt(0) <= '9';
+        KeyButton button = new KeyButton(getContext(), key, (!space && !digit && isFunctionKey(key)), current);
         if ("回车".equals(action)) {
             button.setActionIcon(R.drawable.ic_key_enter, key);
             button.setEmphasized(current);
@@ -2471,7 +2647,6 @@ public final class KeyboardView extends LinearLayout {
 
     @Override protected void onDetachedFromWindow() {
         if (emojiStyleAssets != null) { emojiStyleAssets.close(); emojiStyleAssets = null; }
-        if (emojiStylePreviewAssets != null) { emojiStylePreviewAssets.close(); emojiStylePreviewAssets = null; }
         ((OfflineImeService) getContext()).onKeyboardViewDetached(this);
         if (activeMenu != null) activeMenu.dismiss();
         pathTouches = 0;
@@ -2537,14 +2712,13 @@ public final class KeyboardView extends LinearLayout {
 
     private void applyLayoutPreferences() {
         android.content.res.Configuration current = getResources().getConfiguration();
+        int height = KeyboardPlacement.height(getContext(), renderSettings);
         String surfaceKey = styleRevision + ":" + dark + ':' + floatingLandscape + ':' + current.orientation
                 + ':' + current.screenWidthDp + ':' + current.screenHeightDp + ':' + current.fontScale
-                + ':' + current.densityDpi + ':' + current.uiMode;
+                + ':' + current.densityDpi + ':' + current.uiMode + ':' + height;
         if (surfaceKey.equals(renderedSurfaceKey)) return;
         renderedSurfaceKey = surfaceKey;
         theme = KeyboardTheme.from(getContext(), dark);
-        android.content.SharedPreferences p = renderSettings;
-        int height = KeyboardPlacement.height(getContext(), p);
         preferredMinHeight = dp(height);
         applyCandidateHeaderSizing();
         setMinimumHeight(preferredMinHeight);
@@ -2605,7 +2779,7 @@ public final class KeyboardView extends LinearLayout {
             if (child == keyboardOverflowSpace || child.getVisibility() == GONE) continue;
             fixed += Math.max(0, ((LayoutParams) child.getLayoutParams()).height);
         }
-        int rowHeight = dp(72);
+        int rowHeight = dp(nine ? 96 : 100);
         int cappedTotal = rowHeight * (nine ? 3 : rowCount);
         boolean overflow = target - fixed > cappedTotal;
         keyboardOverflowSpace.setVisibility(overflow ? VISIBLE : GONE);

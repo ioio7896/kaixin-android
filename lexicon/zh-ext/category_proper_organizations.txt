@@ -1,16 +1,28 @@
 # 开心离线输入法分类补充：语料机构名称补充
 # 项目词表与匹配模板：项目整理，生成式 AI 辅助；不使用私人消息或用户输入。
-# 语料补充：jieba 0.42.1 本地 dict.txt；MIT 许可全文见 category-LICENSE.jieba.md。
-# 拼音：pypinyin 0.55.0，优先沿用已有词语读音及项目多音词校正。
+# 语料：jieba 0.42.1 本地词典及项目分类词条；完整来源与许可见项目词库说明。
+# 拼音：实际无声调拼音，保留项目校正读音。
 # 格式：词语<TAB>实际无声调拼音<TAB>基础排序分数；不扩散错拼别名。
 人民代表大会常务委员会	ren min dai biao da hui chang wu wei yuan hui	5500
 湖北省人民政府	hu bei sheng ren min zheng fu	5500
 苏维埃政府	su wei ai zheng fu	5484
 国防委员会	guo fang wei yuan hui	5470
 中央军事委员会	zhong yang jun shi wei yuan hui	5409
+大陆军队	da lu jun dui	5385
+德国国会	de guo guo hui	5385
+日本大学	ri ben da xue	5385
+现代集团	xian dai ji tuan	5385
+英国大学	ying guo da xue	5385
+韩国公司	han guo gong si	5385
+韩国国会	han guo guo hui	5385
 中华人民共和国国务院	zhong hua ren min gong he guo guo wu yuan	5358
+亚洲协会	ya zhou xie hui	5347
 华中师范大学	hua zhong shi fan da xue	5276
+河北大学	he bei da xue	5231
+自由王国	zi you wang guo	5193
 中国人民政治协商会议	zhong guo ren min zheng zhi xie shang hui yi	5148
+东方集团	dong fang ji tuan	5116
+中国教会	zhong guo jiao hui	5116
 财政经济委员会	cai zheng jing ji wei yuan hui	5096
 中国历史博物馆	zhong guo li shi bo wu guan	5086
 中国地质大学	zhong guo di zhi da xue	5081
@@ -23,15 +35,33 @@
 教育科学文化卫生委员会	jiao yu ke xue wen hua wei sheng wei yuan hui	5053
 农业部渔业局	nong ye bu yu ye ju	5052
 长江水产研究所	chang jiang shui chan yan jiu suo	5052
+巴西政府	ba xi zheng fu	5039
+西藏大学	xi zang da xue	5039
+云南大学	yun nan da xue	5000
+大众公司	da zhong gong si	5000
+列车运行	lie che yun xing	4962
+上海通用	shang hai tong yong	4924
+荷兰政府	he lan zheng fu	4924
 上海证券交易所	shang hai zheng quan jiao yi suo	4912
 中国革命博物馆	zhong guo ge ming bo wu guan	4911
 外交部新闻司	wai jiao bu xin wen si	4894
 国民党中央	guo min dang zhong yang	4887
+天津市委	tian jin shi wei	4885
+红军大学	hong jun da xue	4885
+全国工会	quan guo gong hui	4847
 英国议会	ying guo yi hui	4836
+东方通信	dong fang tong xin	4808
+舞蹈学院	wu dao xue yuan	4808
+通信情报	tong xin qing bao	4808
 日本自卫队	ri ben zi wei dui	4785
 国家旅游局	guo jia lv you ju	4779
+印尼政府	yin ni zheng fu	4770
+国际电信	guo ji dian xin	4770
 中国共产党中央委员会	zhong guo gong chan dang zhong yang wei yuan hui	4769
 陆军大学	lu jun da xue	4740
+中国书店	zhong guo shu dian	4731
+广州市委	guang zhou shi wei	4731
+蒙古政府	meng gu zheng fu	4731
 外事委员会	wai shi wei yuan hui	4729
 法律委员会	fa lv wei yuan hui	4727
 湖北省委	hu bei sheng wei	4723
@@ -52,6 +82,7 @@
 基督教协会	ji du jiao xie hui	4696
 湖北省财政厅	hu bei sheng cai zheng ting	4696
 天主教爱国会	tian zhu jiao ai guo hui	4694
+瑞典政府	rui dian zheng fu	4693
 东湖新技术开发区	dong hu xin ji shu kai fa qu	4692
 东湖高新技术开发区	dong hu gao xin ji shu kai fa qu	4692
 农业与农村委员会	nong ye yu nong cun wei yuan hui	4692
@@ -63,18 +94,35 @@
 环境与资源保护委员会	huan jing yu zi yuan bao hu wei yuan hui	4692
 邮科院	you ke yuan	4692
 人力资源部	ren li zi yuan bu	4663
+中国剧院	zhong guo ju yuan	4654
+北大医院	bei da yi yuan	4654
+江西省委	jiang xi sheng wei	4654
+辽宁大学	liao ning da xue	4654
 中央政治局常委	zhong yang zheng zhi ju chang wei	4639
+江苏省委	jiang su sheng wei	4616
+青海大学	qing hai da xue	4616
 中央纪律检查委员会	zhong yang ji lv jian cha wei yuan hui	4613
 英格兰银行	ying ge lan yin hang	4589
+南海发展	nan hai fa zhan	4577
+安福国会	an fu guo hui	4577
+延安大学	yan an da xue	4577
+朝阳医院	chao yang yi yuan	4577
+瑞士银行	rui shi yin hang	4577
+瑞金医院	rui jin yi yuan	4577
+红塔集团	hong ta ji tuan	4577
 晋察冀军区	jin cha ji jun qu	4535
 中央红军	zhong yang hong jun	4518
 中央研究院	zhong yang yan jiu yuan	4515
 中国女队	zhong guo nv dui	4501
+大连市委	da lian shi wei	4500
 华东野战军	hua dong ye zhan jun	4470
+中医医院	zhong yi yi yuan	4462
+苏丹政府	su dan zheng fu	4462
 红四方面军	hong si fang mian jun	4451
 中国空军	zhong guo kong jun	4442
 药品监督管理局	yao pin jian du guan li ju	4442
 八路军总部	ba lu jun zong bu	4425
+国网公司	guo wang gong si	4424
 大中学校	da zhong xue xiao	4422
 华北军区	hua bei jun qu	4418
 中央顾问委员会	zhong yang gu wen wei yuan hui	4415
@@ -82,6 +130,13 @@
 北京市政府	bei jing shi zheng fu	4408
 德意志银行	de yi zhi yin hang	4401
 英国皇家学会	ying guo huang jia xue hui	4394
+儿童剧院	er tong ju yuan	4385
+挪威政府	nuo wei zheng fu	4385
+挪威议会	nuo wei yi hui	4385
+捷克政府	jie ke zheng fu	4385
+秘鲁政府	bi lu zheng fu	4385
+长城公司	chang cheng gong si	4385
+长城电脑	chang cheng dian nao	4385
 新民学会	xin min xue hui	4379
 深圳证券交易所	shen zhen zheng quan jiao yi suo	4379
 国际羽联	guo ji yu lian	4372
@@ -100,22 +155,35 @@
 红一方面军	hong yi fang mian jun	4333
 欧洲共同体	ou zhou gong tong ti	4329
 深圳市中级人民法院	shen zhen shi zhong ji ren min fa yuan	4320
+中原油田	zhong yuan you tian	4308
+智利政府	zhi li zheng fu	4308
+河南省委	he nan sheng wei	4308
+浙江省委	zhe jiang sheng wei	4308
 西安交通大学	xi an jiao tong da xue	4304
+北京北站	bei jing bei zhan	4270
 北京师范大学	bei jing shi fan da xue	4264
 民航总局	min hang zong ju	4254
 朝鲜人民军	chao xian ren min jun	4240
+上海公报	shang hai gong bao	4231
+中原油气	zhong yuan you qi	4231
+苏中军区	su zhong jun qu	4231
 北洋水师	bei yang shui shi	4230
 人民公社化	ren min gong she hua	4225
 联想集团	lian xiang ji tuan	4195
+东方队	dong fang dui	4193
+税务总局	shui wu zong ju	4193
 国家体委	guo jia ti wei	4179
 美国防部	mei guo fang bu	4179
 中国民主同盟	zhong guo min zhu tong meng	4162
 巴黎公社	ba li gong she	4162
+沙特政府	sha te zheng fu	4154
 中国证券监督管理委员会	zhong guo zheng quan jian du guan li wei yuan hui	4139
 莫斯科大学	mo si ke da xue	4139
 索尼公司	suo ni gong si	4133
 国防科工委	guo fang ke gong wei	4127
 国际奥委会	guo ji ao wei hui	4127
+汉城大学	han cheng da xue	4116
+福特公司	fu te gong si	4116
 北海舰队	bei hai jian dui	4115
 南京临时政府	nan jing lin shi zheng fu	4109
 中国作家协会	zhong guo zuo jia xie hui	4097
@@ -125,6 +193,8 @@
 哈医大二院	ha yi da er yuan	4084
 红六军团	hong liu jun tuan	4084
 上海人民出版社	shang hai ren min chu ban she	4077
+中华会馆	zhong hua hui guan	4077
+北京分行	bei jing fen hang	4077
 美国科学院	mei guo ke xue yuan	4077
 军事科学	jun shi ke xue	4071
 北大西洋公约组织	bei da xi yang gong yue zu zhi	4071
@@ -134,6 +204,8 @@
 高通公司	gao tong gong si	4057
 中央人民广播电台	zhong yang ren min guang bo dian tai	4050
 美国哈佛大学	mei guo ha fu da xue	4043
+全国台联	quan guo tai lian	4039
+华中科大	hua zhong ke da	4039
 中华全国总工会	zhong hua quan guo zong gong hui	4036
 国家药监局	guo jia yao jian ju	4036
 中国共产主义青年团	zhong guo gong chan zhu yi qing nian tuan	4029
@@ -148,6 +220,8 @@
 国家经贸委	guo jia jing mao wei	4014
 中央处理器	zhong yang chu li qi	4007
 长春亚泰队	chang chun ya tai dui	4007
+国际商会	guo ji shang hui	4000
+大操大办	da cao da ban	4000
 人民日报社	ren min ri bao she	3999
 安理会常任理事国	an li hui chang ren li shi guo	3999
 中信证券	zhong xin zheng quan	3991
@@ -164,6 +238,7 @@
 中央办公厅	zhong yang ban gong ting	3967
 北京大学出版社	bei jing da xue chu ban she	3967
 朝鲜民主主义人民共和国	chao xian min zhu zhu yi ren min gong he guo	3967
+新华制药	xin hua zhi yao	3962
 中国政法大学	zhong guo zheng fa da xue	3959
 国家教育部	guo jia jiao yu bu	3959
 国旗护卫队	guo qi hu wei dui	3959
@@ -184,6 +259,9 @@
 中国棋院	zhong guo qi yuan	3925
 国家文物局	guo jia wen wu ju	3925
 英国剑桥大学	ying guo jian qiao da xue	3925
+丰田公司	feng tian gong si	3924
+全科医师	quan ke yi shi	3924
+联通公司	lian tong gong si	3924
 三联书店	san lian shu dian	3916
 中国人民外交学会	zhong guo ren min wai jiao xue hui	3916
 东非大裂谷	dong fei da lie gu	3907
@@ -196,6 +274,7 @@
 国家体育总局	guo jia ti yu zong ju	3888
 石化集团	shi hua ji tuan	3888
 空军指挥学院	kong jun zhi hui xue yuan	3888
+以国防部	yi guo fang bu	3885
 上海古籍出版社	shang hai gu ji chu ban she	3869
 中原军区	zhong yuan jun qu	3869
 京师大学堂	jing shi da xue tang	3869
@@ -205,6 +284,16 @@
 日本外务省	ri ben wai wu sheng	3859
 日本航空自卫队	ri ben hang kong zi wei dui	3859
 长春队	chang chun dui	3859
+亚非会议	ya fei hui yi	3847
+全公社	quan gong she	3847
+卫京师	wei jing shi	3847
+国家女篮	guo jia nv lan	3847
+国际乒联	guo ji ping lian	3847
+外汇券	wai hui quan	3847
+津滨发展	jin bin fa zhan	3847
+辉瑞公司	hui rui gong si	3847
+青旗军	qing qi jun	3847
+非农产业	fei nong chan ye	3847
 上海市政府	shang hai shi zheng fu	3839
 中央人民政府政务院	zhong yang ren min zheng fu zheng wu yuan	3839
 华南理工大学	hua nan li gong da xue	3839
@@ -212,6 +301,26 @@
 苏联最高苏维埃	su lian zui gao su wei ai	3828
 国务院学位委员会	guo wu yuan xue wei wei yuan hui	3817
 湖南大学	hu nan da xue	3817
+中信公司	zhong xin gong si	3808
+中共七大	zhong gong qi da	3808
+中央美院	zhong yang mei yuan	3808
+中直工委	zhong zhi gong wei	3808
+伦会盟	lun hui meng	3808
+全国文联	quan guo wen lian	3808
+华山医院	hua shan yi yuan	3808
+国家语委	guo jia yu wei	3808
+岳麓书社	yue lu shu she	3808
+招军买马	zhao jun mai ma	3808
+招飞局	zhao fei ju	3808
+施乐公司	shi le gong si	3808
+日立公司	ri li gong si	3808
+民进中央	min jin zhong yang	3808
+民革中央	min ge zhong yang	3808
+清议堂	qing yi tang	3808
+美大司	mei da si	3808
+英国下院	ying guo xia yuan	3808
+非统组织	fei tong zu zhi	3808
+黎湛铁路	li zhan tie lu	3808
 上海铁路局	shang hai tie lu ju	3807
 中共中央党校	zhong gong zhong yang dang xiao	3807
 中国农工民主党	zhong guo nong gong min zhu dang	3807
@@ -238,6 +347,7 @@
 红二方面军	hong er fang mian jun	3772
 诺基亚公司	nuo ji ya gong si	3772
 通用汽车公司	tong yong qi che gong si	3772
+四通集团	si tong ji tuan	3770
 中国民主政团同盟	zhong guo min zhu zheng tuan tong meng	3760
 云南红塔集团	yun nan hong ta ji tuan	3760
 人民大学	ren min da xue	3760
@@ -259,6 +369,28 @@
 中国音乐家协会	zhong guo yin yue jia xie hui	3735
 北京科技大学	bei jing ke ji da xue	3735
 高级人民法院	gao ji ren min fa yuan	3735
+三和银行	san he yin hang	3731
+丹书铁券	dan shu tie quan	3731
+俄外交部	e wai jiao bu	3731
+华润集团	hua run ji tuan	3731
+华西大学	hua xi da xue	3731
+印海军	yin hai jun	3731
+印空军	yin kong jun	3731
+国家建委	guo jia jian wei	3731
+国家经委	guo jia jing wei	3731
+国际电联	guo ji dian lian	3731
+国际网联	guo ji wang lian	3731
+天坛医院	tian tan yi yuan	3731
+康佳集团	kang jia ji tuan	3731
+拜耳公司	bai er gong si	3731
+新西兰队	xin xi lan dui	3731
+法联军	fa lian jun	3731
+石药集团	shi yao ji tuan	3731
+社会学所	she hui xue suo	3731
+联航队	lian hang dui	3731
+舞剧院	wu ju yuan	3731
+通政院	tong zheng yuan	3731
+金陵中学	jin ling zhong xue	3731
 东吴大学	dong wu da xue	3722
 中国农业大学	zhong guo nong ye da xue	3722
 中央戏剧学院	zhong yang xi ju xue yuan	3722
@@ -286,6 +418,26 @@
 西点军校	xi dian jun xiao	3696
 解放军总政治部	jie fang jun zong zheng zhi bu	3696
 远东国际军事法庭	yuan dong guo ji jun shi fa ting	3696
+中国画系	zhong guo hua xi	3693
+中电集团	zhong dian ji tuan	3693
+中级工	zhong ji gong	3693
+冀东水泥	ji dong shui ni	3693
+南钢队	nan gang dui	3693
+司务厅	si wu ting	3693
+商交所	shang jiao suo	3693
+复员兵	fu yuan bing	3693
+富士银行	fu shi yin hang	3693
+招飞站	zhao fei zhan	3693
+文法学	wen fa xue	3693
+民建中央	min jian zhong yang	3693
+洪堡大学	hong bao da xue	3693
+深圳华强	shen zhen hua qiang	3693
+筑波大学	zhu bo da xue	3693
+西道行	xi dao heng	3693
+辉银矿	hui yin kuang	3693
+里约集团	li yue ji tuan	3693
+阿通社	a tong she	3693
+非军事区	fei jun shi qu	3693
 中国乒乓球队	zhong guo ping pang qiu dui	3682
 九届全国人大	jiu jie quan guo ren da	3682
 光学玻璃	guang xue bo li	3682
@@ -323,6 +475,38 @@
 经济委员会	jing ji wei yuan hui	3622
 美国中央情报局	mei guo zhong yang qing bao ju	3622
 美国耶鲁大学	mei guo ye lu da xue	3622
+中国篮协	zhong guo lan xie	3616
+中金公司	zhong jin gong si	3616
+中集集团	zhong ji ji tuan	3616
+中青队	zhong qing dui	3616
+京剧学	jing ju xue	3616
+信用联社	xin yong lian she	3616
+八国集团	ba guo ji tuan	3616
+军医大	jun yi da	3616
+农展馆	nong zhan guan	3616
+华联商厦	hua lian shang sha	3616
+南货店	nan huo dian	3616
+厦门信达	xia men xin da	3616
+双星集团	shuang xing ji tuan	3616
+国防科委	guo fang ke wei	3616
+复兴报	fu xing bao	3616
+山东女排	shan dong nv pai	3616
+招标会	zhao biao hui	3616
+文教部	wen jiao bu	3616
+新加坡队	xin jia po dui	3616
+武学大师	wu xue da shi	3616
+民友联	min you lian	3616
+民和委	min he wei	3616
+汉堡队	han bao dui	3616
+深国商	shen guo shang	3616
+深圳康佳	shen zhen kang jia	3616
+燕京啤酒	yan jing pi jiu	3616
+秦川发展	qin chuan fa zhan	3616
+红豆集团	hong dou ji tuan	3616
+维维集团	wei wei ji tuan	3616
+西班牙队	xi ban ya dui	3616
+越共中央	yue gong zhong yang	3616
+铁十八局	tie shi ba ju	3616
 中国建设银行	zhong guo jian she yin hang	3606
 中国残疾人联合会	zhong guo can ji ren lian he hui	3606
 中国清政府	zhong guo qing zheng fu	3606

@@ -25,7 +25,7 @@ import java.util.Arrays;
 /** 纯本地词库。词库文件来自本工程 lexicon 目录，加载和查询均不联网。 */
 public final class PinyinDictionary {
     private static final String TAG = "OfflineImeLexicon";
-    private static final int LEXICON_VERSION = 2026102701;
+    private static final int LEXICON_VERSION = 2026110101;
     private final ThreadLocal<Boolean> shuangpinLookup = new ThreadLocal<>();
     List<Entry> suggestShuangpin(String expanded) {
         shuangpinLookup.set(true);
@@ -41,7 +41,7 @@ public final class PinyinDictionary {
     static final int TIER_COMPOSED = 50;
     private static final int RANK_EXACT_MIXED = 15;
     private static final int RANK_EXACT_SHORT_AFTER_FULL = 25;
-    private static final int MAX_PERSONAL_BOOST = 1_200;
+    private static final int MAX_PERSONAL_BOOST = 2_100;
     private static final int MAX_SKIP_PENALTY = 320;
     private static final int FIRST_SCREEN_TARGET = 15;
     private static final int COMPOSITION_TARGET = 8;
@@ -60,6 +60,7 @@ public final class PinyinDictionary {
         // without turning personal/context bonuses into fake corpus frequency.
         int personalBonus;
         int contextBonus;
+        int correctionPenalty;
         public int consumedLength;
         public String pronunciation = "";
         public String queryText = "";
@@ -72,11 +73,13 @@ public final class PinyinDictionary {
             copy.wordSegments = wordSegments;
             copy.inputVersion = inputVersion;
             copy.personalBonus = personalBonus; copy.contextBonus = contextBonus;
+            copy.correctionPenalty = correctionPenalty;
             return copy;
         }
         Entry withScore(int value) {
             Entry copy = new Entry(word, value, matchTier, pinned, corpusScore, rankingTier).withInput(consumedLength, pronunciation);
             copy.personalBonus = personalBonus; copy.contextBonus = contextBonus;
+            copy.correctionPenalty = correctionPenalty;
             copy.queryText = queryText; copy.wordSegments = wordSegments; copy.inputVersion = inputVersion; return copy;
         }
 
@@ -286,7 +289,18 @@ public final class PinyinDictionary {
             mergeAll(result, shortWords.get(query), TIER_EXACT_SHORT);
             addPrefix(result, shortWords, query, TIER_PREFIX);
         }
-        List<Entry> ranked = CandidateRanker.rankTop(result.values(), numeric && query.length() == 1, 24, query);
+        ArrayList<Entry> eligible = new ArrayList<>();
+        for (Entry entry : result.values()) {
+            if (entry.codePointLength >= 3 && entry.codePointLength <= 8
+                    && entry.matchTier != TIER_EXACT_FULL) {
+                if (entry.matchTier != TIER_EXACT_SHORT) continue;
+                if (numeric && (!preference("nine_short_words", false)
+                        || entry.codePointLength > 5 || query.length() != entry.codePointLength
+                        || !CandidateRanker.hasStrongWordSupport(entry))) continue;
+            }
+            eligible.add(entry);
+        }
+        List<Entry> ranked = CandidateRanker.rankTop(eligible, numeric && query.length() == 1, 24, query);
         ArrayList<Entry> ready = new ArrayList<>(ranked.size());
         for (Entry entry : ranked) ready.add(entry.withInput(raw.length(), ""));
         return ready;
@@ -319,6 +333,7 @@ public final class PinyinDictionary {
             loadHotFileSafely("zh/life_short_hot_2char.txt", 600);
             loadHotFileSafely("zh/life_hot_3char_curated.txt", 400);
             loadHotFileSafely("zh/life_hot_4char_curated.txt", 400);
+            loadHotFileSafely("zh/life_hot_3_4char_recalibrated.txt", 96);
             publishHotPhrases();
 
             if (importRequired) {
@@ -420,7 +435,9 @@ public final class PinyinDictionary {
         settingsValues = settings.getAll();
         StringBuilder key = new StringBuilder();
         for (String name : new String[]{"full_pinyin", "short_pinyin", "mixed_pinyin", "double_initials",
-                "fuzzy_pinyin", "spelling_correction", "sentence_prediction"})
+                "fuzzy_pinyin", "spelling_correction", "touch_correction", "sentence_prediction",
+                "nine_sentence_prediction", "nine_short_words", "basic_context", "fuzzy_zh_z", "fuzzy_ch_c", "fuzzy_sh_s",
+                "fuzzy_n_l", "fuzzy_h_f", "fuzzy_an_ang", "fuzzy_en_eng", "fuzzy_in_ing", "fuzzy_ian_iang"})
             key.append(name).append('=').append(settingsValues.get(name)).append(';');
         settingsKey = key.toString();
     }
@@ -552,6 +569,8 @@ public final class PinyinDictionary {
         List<Entry> cached = corpusQueryCache.get(key);
         if (cached != null) return cached;
         LinkedHashMap<String, Entry> combined = new LinkedHashMap<>();
+        // The bounded in-memory common-word pool survives a slow broad database scan.
+        mergeShortHotMatches(combined, input, input.matches("[2-9']+"), null);
         List<Entry> characters = singleCharacters.lookup(input, input.matches("[2-9']+"), null, fullEnabled(), shortEnabled(),
                 preference("double_initials", true), prefix, QueryWork.firstScreen() ? 32 : 128);
         for (Entry entry : characters) merge(combined, entry);
@@ -559,7 +578,6 @@ public final class PinyinDictionary {
         // Recall the corpus for both full spelling and initials on the first screen.
         List<Entry> found = corpusCandidates(input, input.matches("[2-9']+"), null, prefix);
         for (Entry entry : found) merge(combined, withShortHotBoost(entry));
-        mergeShortHotMatches(combined, input, input.matches("[2-9']+"), null);
         List<Entry> ranked = CandidateRanker.rankTop(combined.values(), false, 128, input);
         if (!QueryWork.wasLimited()) corpusQueryCache.put(key, ranked);
         return ranked;
@@ -608,6 +626,12 @@ public final class PinyinDictionary {
             return Collections.emptyList();
         return database.queryContextWords(input, words, fullEnabled(), shortEnabled(),
                 preference("mixed_pinyin", true), preference("double_initials", true));
+    }
+
+    Map<String, Integer> basicContextScores(String previous) {
+        if (database == null || !databaseReady || !preference("basic_context", true))
+            return Collections.emptyMap();
+        return database.transitionScores(previous, !QueryWork.firstScreen());
     }
 
     /** Cached corpus edges only; context and personal scores are applied during
@@ -671,41 +695,56 @@ public final class PinyinDictionary {
         return count;
     }
 
-    /** Full spelling has its own fallback budget: unrelated abbreviations must
-     * not suppress sentence decoding, and letter/digit length is not word length. */
+    /** Only complete phonetic paths may enter the bounded sentence decoder. */
     private void composeInput(Map<String, Entry> result, String input, boolean numeric) {
-        if (QueryWork.firstScreen() || !sentenceEnabled() || input.replace("'", "").length() < 8) return;
+        composeInput(result, input, numeric, null);
+    }
+
+    private void composeInput(Map<String, Entry> result, String input, boolean numeric,
+                              PinyinPathEditor.Query constraint) {
+        if (QueryWork.firstScreen() || database == null || !databaseReady || !fullEnabled()
+                || !preference(numeric ? "nine_sentence_prediction" : "sentence_prediction", !numeric)
+                || Boolean.TRUE.equals(shuangpinLookup.get())) return;
         for (Entry entry : result.values())
-            if (entry.matchTier == TIER_EXACT_FULL && entry.codePointLength > 1
-                    && entry.consumedLength == input.length()) return;
-        boolean full = fullEnabled(), shortInput = shortEnabled();
-        boolean doubles = preference("double_initials", true);
-        List<PinyinInput.Path> selected = new ArrayList<>();
-        int limit = 6;
-        if (full && fullCandidateCount(result.values()) < COMPOSITION_TARGET) {
-            List<PinyinInput.Path> complete = new ArrayList<>();
-            List<PinyinInput.Path> parsed = numeric ? PinyinInput.numericPaths(input, true, false, false)
-                    : PinyinInput.paths(input, true, false, false);
-            for (PinyinInput.Path path : parsed) if (path.cost == 0) complete.add(path);
-            selected.addAll(PinyinInput.compositionPaths(complete, limit));
+            if (entry.matchTier == TIER_EXACT_FULL && entry.rankingTier < 35 && entry.corpusScore >= 4000
+                    && entry.consumedLength == input.length() && entry.codePointLength >= 5) return;
+        String decodeInput = input;
+        boolean decodeNumeric = numeric;
+        // Locked readings can resolve a nine-key abbreviation without guessing
+        // the remaining initials. Otherwise require a full numeric spelling.
+        if (constraint != null) {
+            boolean allLocked = !constraint.parts.isEmpty();
+            List<String> readings = new ArrayList<>();
+            for (PinyinPathEditor.Part part : constraint.parts) {
+                allLocked &= part.locked && !part.prefix && PinyinPathEditor.isCompleteReading(part.text);
+                readings.add(part.text);
+            }
+            if (allLocked) { decodeInput = String.join("'", readings); decodeNumeric = false; }
         }
-        if (selected.isEmpty() && primaryCandidateCount(result.values()) < COMPOSITION_TARGET) {
-            List<PinyinInput.Path> parsed = numeric ? PinyinInput.numericPaths(input, full, shortInput, doubles)
-                    : PinyinInput.paths(input, full, shortInput, doubles);
-            selected.addAll(PinyinInput.compositionPaths(parsed, 2));
-        }
+        List<PinyinInput.Path> complete = new ArrayList<>();
+        List<PinyinInput.Path> parsed = decodeNumeric ? PinyinInput.numericPaths(decodeInput, true, false, false)
+                : PinyinInput.paths(decodeInput, true, false, false);
+        for (PinyinInput.Path path : parsed)
+            if (path.cost == 0 && path.tokens.size() >= 5 && path.tokens.size() <= 24) complete.add(path);
+        List<PinyinInput.Path> selected = PinyinInput.compositionPaths(complete, numeric ? 3 : 6);
         Map<String, List<Entry>> words = new HashMap<>();
         Map<String, Integer> transitions = new HashMap<>();
+        final boolean lookupNumeric = decodeNumeric;
         for (PinyinInput.Path path : selected) {
-            boolean complete = full && path.cost == 0;
             List<Entry> composed = SentenceComposer.composeWords(path.tokens,
-                    code -> words.computeIfAbsent((complete ? "full:" : "mixed:") + code,
-                            key -> compositionWords(code, numeric, complete, false)), input.length(),
+                    code -> words.computeIfAbsent(code,
+                            key -> compositionWords(code, lookupNumeric, true, false)), input.length(),
                     (previous, next) -> transitions.computeIfAbsent(previous + ':' + next,
                             key -> database.transitionBonus(previous, next)
                                     + (sentenceContext == null ? 0 : sentenceContext.transitionBonus(previous, next))),
-                    sentenceDecoder, decoderKey(complete ? "full" : "mixed", numeric));
-            for (Entry entry : composed) merge(result, rankComposed(entry, input));
+                    sentenceDecoder, decoderKey("full:" + (constraint == null ? "" : constraint.key), lookupNumeric));
+            for (Entry entry : composed) {
+                PinyinInput.Match aligned = constraint == null
+                        ? PinyinInput.match(input, entry.pronunciation, true, false, false, false, false)
+                        : constraint.match(entry.pronunciation, true, false, false, false, false);
+                if (aligned != null && entry.codePointLength >= 5 && entry.wordSegments.size() >= 2
+                        && !result.containsKey(entry.word)) merge(result, rankComposed(entry, input));
+            }
         }
     }
 
@@ -848,11 +887,11 @@ public final class PinyinDictionary {
         boolean full = fullEnabled(), shortInput = shortEnabled();
         boolean mixed = preference("mixed_pinyin", true), doubles = preference("double_initials", true);
         boolean abbreviation = !query.numeric && isAbbreviationQuery(query.raw);
+        mergeShortHotMatches(result, query.databaseInput, query.numeric, query);
         List<Entry> characters = singleCharacters.lookup(query.raw, query.numeric, query, full, shortInput, doubles, true, QueryWork.firstScreen() ? 32 : 128);
         mergeAll(result, characters);
         for (Entry entry : corpusCandidates(query.raw, query.numeric, query, true))
             merge(result, withShortHotBoost(entry));
-        mergeShortHotMatches(result, query.databaseInput, query.numeric, query);
         for (UserWordRecord record : matchingUserRecords(query.raw, query.numeric)) {
             String reading = recordReading(record);
             PinyinInput.Match match = query.match(reading, full, shortInput, mixed, doubles, true);
@@ -861,6 +900,7 @@ public final class PinyinDictionary {
                     .withInput(query.raw.length(), reading));
         }
         mergeCustomWords(result, query.raw, query.numeric, query);
+        composeInput(result, query.raw, query.numeric, query);
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
             mergeCreationPrefixes(result, query.raw, query.numeric, query);
         List<Entry> ranked = rankForRecall(result, query.raw, query.numeric, false,
@@ -1041,6 +1081,7 @@ public final class PinyinDictionary {
         boolean full = fullEnabled();
         boolean shortPinyin = shortEnabled();
         mergeT9Users(result, query);
+        mergeShortHotMatches(result, query, true, null);
         if (full) addHotPrefix(result, query, true);
         if (full) {
             mergeAll(result, t9Index.get(query), TIER_EXACT_FULL);
@@ -1061,7 +1102,6 @@ public final class PinyinDictionary {
             for (Entry entry : corpusCandidates(query, true, null, true))
                 merge(result, withShortHotBoost(entry));
         }
-        mergeShortHotMatches(result, query, true, null);
         mergeCustomWords(result, query, true, null);
         composeInput(result, query, true);
         if (!QueryWork.firstScreen() && fullCandidateCount(result.values()) < COMPOSITION_TARGET)
@@ -1295,15 +1335,9 @@ public final class PinyinDictionary {
     }
 
     static int rankingTier(int matchTier, boolean abbreviation) {
-        if (abbreviation) {
-            if (matchTier == TIER_EXACT_SHORT) return TIER_EXACT_FULL;
-            if (matchTier == TIER_MIXED) return RANK_EXACT_MIXED;
-            if (matchTier == TIER_EXACT_FULL) return TIER_EXACT_SHORT;
-        } else {
-            if (matchTier == TIER_EXACT_FULL) return TIER_EXACT_FULL;
-            if (matchTier == TIER_MIXED) return TIER_EXACT_SHORT;
-            if (matchTier == TIER_EXACT_SHORT) return RANK_EXACT_SHORT_AFTER_FULL;
-        }
+        // Spelling quality is independent of how the raw letters were segmented.
+        if (matchTier == TIER_MIXED) return RANK_EXACT_MIXED;
+        if (matchTier == TIER_EXACT_SHORT) return RANK_EXACT_SHORT_AFTER_FULL;
         return matchTier;
     }
 
@@ -1314,6 +1348,20 @@ public final class PinyinDictionary {
     private void merge(Map<String, Entry> out, Entry candidate) {
         QueryWork.check();
         Entry previous = out.get(candidate.word);
+        if (previous != null && previous.rankingTier == candidate.rankingTier
+                && previous.matchTier == candidate.matchTier) {
+            if (previous.pronunciation.isEmpty() && !candidate.pronunciation.isEmpty()) {
+                // Fast entries may have a higher score but no reading. Preserve
+                // that score and the database's verified pronunciation.
+                out.put(candidate.word, candidate.withScore(Math.max(previous.score, candidate.score)));
+                return;
+            }
+            if (!previous.pronunciation.isEmpty() && candidate.pronunciation.isEmpty()) {
+                if (candidate.score > previous.score)
+                    out.put(candidate.word, previous.withScore(candidate.score));
+                return;
+            }
+        }
         if (previous == null || candidate.rankingTier < previous.rankingTier
                 || (candidate.rankingTier == previous.rankingTier
                 && (candidate.matchTier < previous.matchTier
@@ -1461,6 +1509,7 @@ public final class PinyinDictionary {
                     entry.matchTier, true, entry.corpusScore, TIER_USER)
                     .withInput(entry.consumedLength, entry.pronunciation) : entry;
             copy = copy.withPersonalization(personal, contextual);
+            copy.correctionPenalty = entry.correctionPenalty;
             copy.queryText = entry.queryText; copy.wordSegments = entry.wordSegments; result.add(copy);
         }
         return result;
@@ -1475,11 +1524,14 @@ public final class PinyinDictionary {
         }
         if (record == null) { record = userWordRecords.get(userRecordKey("@word", word, "*")); legacyScale = 0.4; }
         if (record == null || record.pinned) return 0;
+        // Exact Chinese reading + layout history learns faster than shared or English history.
+        boolean sameReading = legacyScale == 1.0 && !"en".equals(usageKey);
         double countStrength = Math.min(1.0,
-                Math.log1p(record.count) / Math.log1p(30.0));
+                Math.log1p(record.count) / Math.log1p(sameReading ? 18.0 : 30.0));
         double age = Math.max(0L, now - record.lastUsed);
         double recency = Math.pow(0.5, age / (double) PERSONAL_HALF_LIFE_MS);
-        int positive = (int) Math.round(MAX_PERSONAL_BOOST * countStrength * recency * legacyScale);
+        int ceiling = sameReading ? MAX_PERSONAL_BOOST : 1_200;
+        int positive = (int) Math.round(ceiling * countStrength * recency * legacyScale);
 
         double skipStrength = Math.min(1.0,
                 Math.log1p(record.skipped) / Math.log1p(8.0));
@@ -1841,6 +1893,93 @@ public final class PinyinDictionary {
         }
     }
 
+    /** Independent one-edit branches; never feed a correction back into decoding. */
+    List<Entry> supplementCorrections(String raw, List<Entry> source, List<TouchCorrectionModel.Variant> touches) {
+        if (database == null || !databaseReady || QueryWork.firstScreen() || !fullEnabled()
+                || Boolean.TRUE.equals(shuangpinLookup.get()) || raw == null || raw.length() < 4 || raw.length() > 32
+                || !raw.matches("[a-z']+")) return source;
+        boolean strongExact = false;
+        for (Entry entry : source) {
+            if (entry.matchTier == TIER_EXACT_FULL && entry.rankingTier < 35
+                    && entry.consumedLength == raw.length() && entry.corpusScore >= 4000) strongExact = true;
+        }
+        LinkedHashMap<String, Integer> variants = new LinkedHashMap<>();
+        if (!strongExact && preference("touch_correction", true) && touches != null)
+            for (TouchCorrectionModel.Variant touch : touches)
+                if (touch.penalty <= 310) addCorrection(variants, touch.input, touch.penalty, 3);
+        if (fuzzyEnabled()) for (String variant : fuzzyVariants(raw))
+            addCorrection(variants, variant, 220, 11);
+        if (!strongExact && preference("spelling_correction", false) && raw.indexOf('\'') < 0) {
+            // Reserve a small quota per edit type so swaps cannot starve omissions.
+            LinkedHashMap<String, Integer> swaps = new LinkedHashMap<>(), deletions = new LinkedHashMap<>();
+            LinkedHashMap<String, Integer> replacements = new LinkedHashMap<>(), insertions = new LinkedHashMap<>();
+            String[] rows = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
+            for (int i = raw.length() - 1; i >= 0; i--) {
+                QueryWork.check();
+                if (i > 0 && raw.charAt(i) != raw.charAt(i - 1)) {
+                    char[] letters = raw.toCharArray();
+                    char swap = letters[i]; letters[i] = letters[i - 1]; letters[i - 1] = swap;
+                    addCorrection(swaps, new String(letters), 280, 4);
+                }
+                addCorrection(deletions, raw.substring(0, i) + raw.substring(i + 1), 340, 4);
+                for (String row : rows) {
+                    int position = row.indexOf(raw.charAt(i));
+                    if (position < 0) continue;
+                    for (int neighbor : new int[]{position - 1, position + 1})
+                        if (neighbor >= 0 && neighbor < row.length()) addCorrection(replacements,
+                                raw.substring(0, i) + row.charAt(neighbor) + raw.substring(i + 1), 380, 4);
+                }
+            }
+            for (int i = raw.length(); i >= 0 && insertions.size() < 4; i--)
+                for (char letter : "aeiouvnghrszc".toCharArray()) addCorrection(insertions,
+                        raw.substring(0, i) + letter + raw.substring(i), 420, 4);
+            for (Map<String, Integer> branch : Arrays.asList(swaps, deletions, replacements, insertions))
+                for (Map.Entry<String, Integer> variant : branch.entrySet())
+                    variants.merge(variant.getKey(), variant.getValue(), Math::min);
+        }
+        variants.remove(raw);
+        if (variants.isEmpty()) return source;
+        Map<String, Entry> corrected = new LinkedHashMap<>();
+        Set<String> existing = new java.util.HashSet<>();
+        for (Entry entry : source)
+            if (entry.rankingTier < 35 && entry.matchTier != TIER_PREFIX && entry.matchTier != TIER_COMPOSED
+                    && entry.consumedLength == raw.length()) existing.add(entry.word);
+        int queries = 0;
+        for (Map.Entry<String, Integer> variant : variants.entrySet()) {
+            QueryWork.check();
+            if (++queries > 27) break;
+            for (Entry entry : database.queryFullSyllables(variant.getKey(), 4)) {
+                if (entry.codePointLength < 2 || entry.corpusScore < 1000 || existing.contains(entry.word)) continue;
+                Entry candidate = new Entry(entry.word, entry.score, TIER_FUZZY, false, entry.corpusScore)
+                        .withInput(raw.length(), entry.pronunciation);
+                candidate.correctionPenalty = variant.getValue();
+                candidate.queryText = raw;
+                Entry old = corrected.get(candidate.word);
+                if (old == null || old.correctionPenalty > candidate.correctionPenalty) corrected.put(candidate.word, candidate);
+            }
+        }
+        if (corrected.isEmpty()) return source;
+        List<Entry> replacements = CandidateRanker.rankTop(corrected.values(), false, 6);
+        Set<String> replaced = new java.util.HashSet<>();
+        for (Entry entry : replacements) replaced.add(entry.word);
+        List<Entry> result = new ArrayList<>();
+        for (Entry entry : source) if (!replaced.contains(entry.word)) result.add(entry);
+        result.addAll(replacements);
+        return result;
+    }
+
+    private void addCorrection(Map<String, Integer> variants, String code, int penalty, int limit) {
+        if (variants.containsKey(code)) { variants.merge(code, penalty, Math::min); return; }
+        if (variants.size() >= limit) return;
+        QueryWork.check();
+        for (PinyinInput.Path path : PinyinInput.paths(code, true, false, false)) {
+            if (path.cost == 0 && path.tokens.size() >= 2) {
+                variants.put(code, penalty);
+                return;
+            }
+        }
+    }
+
     private List<String> fuzzyVariants(String raw) {
         LinkedHashSet<String> variants = new LinkedHashSet<>();
         List<List<String>> paths = canonicalLexer.splitAll(raw, 2);
@@ -1853,29 +1992,8 @@ public final class PinyinDictionary {
             }
         }
         String q = normalize(raw);
-        if (preference("spelling_correction", true) && fullEnabled() && q.length() >= 4 && raw.indexOf('\'') < 0) {
-            for (int i = 0; i + 1 < q.length(); i++) {
-                char[] letters = q.toCharArray(); char swap = letters[i]; letters[i] = letters[i + 1]; letters[i + 1] = swap;
-                addCorrection(variants, new String(letters));
-            }
-            for (int i = 0; i < q.length(); i++) addCorrection(variants, q.substring(0, i) + q.substring(i + 1));
-            String[] rows = {"qwertyuiop", "asdfghjkl", "zxcvbnm"};
-            for (int i = 0; i < q.length() && variants.size() < 12; i++) for (String row : rows) {
-                int position = row.indexOf(q.charAt(i));
-                if (position < 0) continue;
-                for (int next : new int[]{position - 1, position + 1}) if (next >= 0 && next < row.length())
-                    addCorrection(variants, q.substring(0, i) + row.charAt(next) + q.substring(i + 1));
-            }
-            for (int i = 0; i <= q.length() && variants.size() < 12; i++)
-                for (char letter : "aeiouvnghrszc".toCharArray())
-                    addCorrection(variants, q.substring(0, i) + letter + q.substring(i));
-        }
         variants.remove(raw); variants.remove(q);
         return new ArrayList<>(variants).subList(0, Math.min(12, variants.size()));
-    }
-
-    private void addCorrection(java.util.Set<String> variants, String code) {
-        if (variants.size() < 12 && !canonicalLexer.splitAll(code, 1).isEmpty()) variants.add(code);
     }
 
     private List<String> fuzzySyllables(String syllable) {
@@ -2202,7 +2320,6 @@ public final class PinyinDictionary {
     }
     private boolean fullEnabled() { return Boolean.TRUE.equals(shuangpinLookup.get()) || preference("full_pinyin", true); }
     private boolean fuzzyEnabled() { return preference("fuzzy_pinyin", false); }
-    private boolean sentenceEnabled() { return preference("sentence_prediction", true); }
     private boolean preference(String key, boolean fallback) {
         Object value = settingsValues.get(key);
         return context == null || (value instanceof Boolean ? (Boolean) value : fallback);

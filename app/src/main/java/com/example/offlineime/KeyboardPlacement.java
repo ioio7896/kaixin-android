@@ -40,8 +40,11 @@ final class KeyboardPlacement {
     static int height(Context c, SharedPreferences p) {
         int screen = c.getResources().getConfiguration().screenHeightDp;
         int value = landscape(c) ? p.getInt("key_height_landscape", 240) : KeyboardSizing.height(p);
+        // All keyboard modes and panels share this height. Never branch on the
+        // input mode here: switching 9-key/26-key/numbers must not move the host.
         if (floating(c, p)) value = p.getInt("floating_height_" + axis(c), p.getInt("floating_height", value));
-        return Math.min(Math.max(180, value), Math.max(180, Math.round(screen * (landscape(c) ? 0.65f : 0.72f))));
+        int limit = Math.max(1, Math.round(screen * (landscape(c) ? 0.60f : 0.72f)));
+        return Math.min(Math.max(landscape(c) ? 120 : 180, value), limit);
     }
     static int width(Context c, SharedPreferences p) {
         int screen = Math.max(1, c.getResources().getConfiguration().screenWidthDp);

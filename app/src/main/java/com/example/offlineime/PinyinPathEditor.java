@@ -352,9 +352,15 @@ final class PinyinPathEditor {
         return new Query(raw, nine, parts);
     }
     private static void addRawPart(List<Part> parts, String raw, int start, int end) {
-        while (start < end && raw.charAt(start) == '\'') start++;
-        while (end > start && raw.charAt(end - 1) == '\'') end--;
-        if (end > start) parts.add(new Part(start, end, raw.substring(start, end), false));
+        // Explicit separators are boundaries, not T9 digits to be stripped.
+        // Keep offsets in the original input so selection/deletion consumes them correctly.
+        while (start < end) {
+            if (raw.charAt(start) == '\'') { start++; continue; }
+            int separator = raw.indexOf('\'', start);
+            int stop = separator < 0 ? end : Math.min(end, separator);
+            parts.add(new Part(start, stop, raw.substring(start, stop), false));
+            start = stop + 1;
+        }
     }
     List<Segment> segments(String raw, boolean nine, Paths provider) {
         Query query = query(raw, nine);
