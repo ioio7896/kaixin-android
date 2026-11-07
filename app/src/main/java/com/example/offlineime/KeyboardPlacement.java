@@ -37,9 +37,15 @@ final class KeyboardPlacement {
         return c.getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
     }
     static String axis(Context c) { return landscape(c) ? "landscape" : "portrait"; }
+    static int defaultHeight(Context c) {
+        Configuration config = c.getResources().getConfiguration();
+        boolean tablet = config.smallestScreenWidthDp >= 600;
+        return tablet ? (landscape(c) ? 300 : 320) : (landscape(c) ? 220 : KeyboardSizing.DEFAULT_HEIGHT);
+    }
     static int height(Context c, SharedPreferences p) {
         int screen = c.getResources().getConfiguration().screenHeightDp;
-        int value = landscape(c) ? p.getInt("key_height_landscape", 240) : KeyboardSizing.height(p);
+        int value = landscape(c) ? p.getInt("key_height_landscape", defaultHeight(c))
+                : (p.contains("key_height") ? KeyboardSizing.height(p) : defaultHeight(c));
         // All keyboard modes and panels share this height. Never branch on the
         // input mode here: switching 9-key/26-key/numbers must not move the host.
         if (floating(c, p)) value = p.getInt("floating_height_" + axis(c), p.getInt("floating_height", value));
@@ -59,7 +65,7 @@ final class KeyboardPlacement {
         if (compactNine(c)) return Math.min(420, screen);
         if ("split".equals(preset) && screen >= 600) return screen;
         if (screen >= 600) return Math.min(780, screen);
-        return landscape(c) ? Math.min(780, screen) : screen;
+        return landscape(c) ? Math.min(680, screen) : screen;
     }
     static boolean split(Context c, SharedPreferences p) {
         String preset = preset(c, p);

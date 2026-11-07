@@ -467,7 +467,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private void updateInputViewLayout() {
         if (keyboardView == null) return;
         boolean landscape = KeyboardPlacement.landscape(this);
-        keyboardView.setFloatingLandscape(landscape);
+        android.content.SharedPreferences layoutSettings = getSharedPreferences("settings", MODE_PRIVATE);
+        keyboardView.setFloatingLandscape(KeyboardPlacement.floating(this, layoutSettings)
+                || KeyboardPlacement.width(this, layoutSettings) < getResources().getConfiguration().screenWidthDp);
         android.app.Dialog dialog = getWindow();
         android.view.Window window = dialog == null ? null : dialog.getWindow();
         if (window == null) return;
@@ -1003,9 +1005,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (key.startsWith("长按数字:")) { if (clearComposing(true)) commit(key.substring(5)); return; }
         if (key.startsWith("固定:")) { toggleClipboardPin(key.substring(3)); return; }
         if (key.startsWith("删除剪贴板:")) { removeClipboard(key.substring(6)); return; }
-        if (key.startsWith("保存为快捷短语:")) {
-            showQuickPhraseEditor(null, key.substring("保存为快捷短语:".length())); return;
-        }
         if (key.startsWith("编辑快捷短语:")) {
             QuickPhraseStore.Entry phrase = quickPhrases.find(key.substring("编辑快捷短语:".length()));
             if (phrase != null) showQuickPhraseEditor(phrase.id, phrase.text);
@@ -1048,7 +1047,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             clipboardMultiSelect = false;
             clipboardSelection.clear();
             clipboardEnablePromptShown = !getSharedPreferences("settings", MODE_PRIVATE)
-                    .getBoolean("clipboard_enabled", false);
+                    .getBoolean("clipboard_enabled", true);
             if (!clipboardEnablePromptShown) captureClipboardOnDemand();
             refresh();
             return;
@@ -1161,7 +1160,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             case "取消清空剪贴板": clipboardClearConfirmShown = false; refresh(); return;
             case "撤销清空剪贴板": undoClipboardClear(); return;
             case "搜索剪贴板": showClipboardSearchDialog(); return;
-            case "添加快捷短语": showQuickPhraseEditor(null, ""); return;
             case "启用剪贴板历史":
                 getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("clipboard_enabled", true).apply();
                 clipboardEnablePromptShown = false;
@@ -1393,6 +1391,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         List<PinyinDictionary.Entry> values = candidates();
         int pages = CandidateRanker.pageCount(values.size(), size);
         candidatePage = Math.max(0, Math.min(pages - 1, candidatePage + delta));
+        refresh();
+    }
+
+    @Override public void onDismissNextWordPrediction() {
+        if (composing.length() != 0 || !shouldShowNextWordPredictions(mode)) return;
+        lastChineseCommitAt = 0;
+        if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
+        nextWordPredictionExpiry = null;
+        candidatePage = 0;
+        invalidateCandidates();
         refresh();
     }
 
@@ -1674,7 +1682,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 if (!raw.isEmpty() && !isChoosingWordParts()
                         && (queryMode == Mode.PINYIN || queryMode == Mode.NINE)) {
                     boolean preferSingle = preferSingleCandidate(queryMode, raw, pathQuery(), lockedPinyinPath);
-                    published = CandidateRanker.stabilizeTop(candidateResults, entries, preferSingle);
+                    published = CandidateRanker.stabilizeTop(candidateResults, entries, preferSingle, raw);
                 }
                 boolean changed = !candidateResults.get(0).word.equals(published.get(0).word);
                 long age = android.os.SystemClock.uptimeMillis() - candidateFirstFrameAt;
@@ -1806,16 +1814,31 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         PinyinInput.Match selected = constraint == null
                 ? PinyinInput.match(rawInput, entry.pronunciation, true, true, true, true, false)
                 : constraint.match(entry.pronunciation, true, true, true, true, false);
-        if (selected == null || selected.tier == PinyinDictionary.TIER_PREFIX) return false;
-        if (fullNumeric) return true;
-        // Opt-in: one initial per syllable, three to five characters, with
-        // corpus, personal or context support. A short prefix cannot add words.
-        if (entry.codePointLength <= 5 && settingsPreferences.getBoolean("nine_short_words", false)
+        if (fullNumeric && selected != null) return true;
+        // Complete abbreviation/mixed input accounts for every syllable. Do not
+        // require literal one-key initials: full+initial combinations are valid.
+        if (selected != null && selected.tier != PinyinDictionary.TIER_PREFIX
+                && entry.codePointLength <= 5
+                && settingsPreferences.getBoolean("nine_short_words", true)
                 && settingsPreferences.getBoolean("short_pinyin", true)
-                && CandidateRanker.hasStrongWordSupport(entry)) {
-            StringBuilder initials = new StringBuilder();
-            for (String syllable : syllables) initials.append(syllable.charAt(0));
-            if (PinyinDictionary.toT9(initials.toString()).equals(rawInput.replace("'", ""))) return true;
+                && (entry.codePointLength <= 4 || CandidateRanker.hasStrongWordSupport(entry))) {
+            boolean mixedEnabled = settingsPreferences.getBoolean("mixed_pinyin", true);
+            PinyinInput.Match allowed = constraint == null
+                    ? PinyinInput.match(rawInput, entry.pronunciation,
+                        settingsPreferences.getBoolean("full_pinyin", true), true, mixedEnabled,
+                        settingsPreferences.getBoolean("double_initials", true), false)
+                    : constraint.match(entry.pronunciation,
+                        settingsPreferences.getBoolean("full_pinyin", true), true, mixedEnabled,
+                        settingsPreferences.getBoolean("double_initials", true), false);
+            if (allowed != null) return true;
+        }
+        if (settingsPreferences.getBoolean("nine_word_completion", true)
+                && settingsPreferences.getBoolean("full_pinyin", true)
+                && NineWordCandidates.isCompletion(entry, rawInput)) {
+            PinyinInput.Match completion = constraint == null
+                    ? PinyinInput.match(rawInput, entry.pronunciation, true, false, false, false, true)
+                    : constraint.match(entry.pronunciation, true, false, false, false, true);
+            if (completion != null && completion.tier == PinyinDictionary.TIER_PREFIX) return true;
         }
         if (constraint == null) return false;
         if (constraint.parts.size() != syllables.length) return false;
@@ -1957,9 +1980,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             PinyinPathEditor.Query constraint, boolean shuangpinInput) {
         long contextStarted = ImePerformanceMonitor.start();
         java.util.Map<String, Integer> bonuses = new java.util.HashMap<>();
-        if (!secureEditor && contextModel != null)
+        if (!QueryWork.shouldYield(source.size()) && !secureEditor && contextModel != null)
             bonuses.putAll(contextModel.rankingScores(previousPrevious, previous, source));
-        if (!secureEditor && (queryMode == Mode.PINYIN || queryMode == Mode.NINE) && !previous.isEmpty()) {
+        if (!QueryWork.shouldYield(source.size()) && !secureEditor
+                && (queryMode == Mode.PINYIN || queryMode == Mode.NINE) && !previous.isEmpty()) {
             java.util.Map<String, Integer> basic = dictionary.basicContextScores(previous);
             for (PinyinDictionary.Entry entry : source) {
                 String first = entry.wordSegments.isEmpty() ? entry.word : entry.wordSegments.get(0);
@@ -1974,7 +1998,24 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         // Eligibility sees the same personal/context evidence used by ranking,
         // and is applied before the final display limit.
         List<PinyinDictionary.Entry> eligible = filterForInputMode(scored, queryMode, rawInput, constraint, shuangpinInput);
-        return CandidateRanker.rankTop(eligible, preferSingleCharacter, QueryWork.firstScreen() ? 24 : 128, lookupCode);
+        int limit = QueryWork.firstScreen() ? 24 : 128;
+        if (queryMode == Mode.NINE)
+            return NineWordCandidates.rank(eligible, preferSingleCharacter, limit, rawInput);
+        List<PinyinDictionary.Entry> ranked = CandidateRanker.rankTop(
+                eligible, preferSingleCharacter, limit, lookupCode);
+        if (queryMode == Mode.PINYIN) {
+            List<PinyinDictionary.Entry> exactTwo = new ArrayList<>();
+            for (PinyinDictionary.Entry entry : eligible)
+                if (CandidateRanker.isExactTwoSyllableWord(entry, rawInput)) exactTwo.add(entry);
+            if (!exactTwo.isEmpty()) {
+                PinyinDictionary.Entry preferred = CandidateRanker.rankTop(
+                        exactTwo, false, 1, rawInput).get(0);
+                ranked.remove(preferred);
+                ranked.add(0, preferred);
+                if (ranked.size() > limit) ranked.remove(ranked.size() - 1);
+            }
+        }
+        return ranked;
     }
 
     private String learningCode() {
@@ -2353,7 +2394,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             return;
         }
         if ("phrases".equals(clipboardFilter)) clipboardFilter = "all";
-        if (!settings.getBoolean("clipboard_enabled", false)) {
+        if (!settings.getBoolean("clipboard_enabled", true)) {
             hidePanels();
             clipboardShown = true;
             clipboardEnablePromptShown = true;
@@ -2447,7 +2488,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private void startClipboardListenerIfNeeded() {
         if (!isInputViewShown() || clipboardSearchDialogOpen || clipboardSearchResumePending) return;
         android.content.SharedPreferences settings = getSharedPreferences("settings", Context.MODE_PRIVATE);
-        boolean enabled = settings.getBoolean("clipboard_enabled", false)
+        boolean enabled = settings.getBoolean("clipboard_enabled", true)
                 && settings.getBoolean("clipboard_capture_while_typing", false)
                 && !settings.getBoolean("privacy_mode", false) && !secureEditor;
         if (!enabled || clipboardListenerRegistered) return;
@@ -2563,7 +2604,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void showQuickPhraseEditor(String id, String initialText) {
-        if (!clipboardShown || secureEditor
+        if (id == null || !clipboardShown || secureEditor
                 || getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false)) return;
         clipboardSearchDialogOpen = true;
         clipboardSearchRestorePanel = true;
@@ -2581,12 +2622,14 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(1000)});
         input.setSelection(input.length());
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
-                .setTitle(id == null ? "添加快捷短语" : "编辑快捷短语")
+                .setTitle("编辑快捷短语")
                 .setView(input)
                 .setPositiveButton("保存", null)
                 .setNegativeButton("取消", null)
                 .create();
         attachPanelDialog(dialog);
+        if (dialog.getWindow() != null)
+            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
         dialog.setOnDismissListener(ignored -> restorePanelAfterDialog());
         try {
             dialog.show();
@@ -2610,10 +2653,23 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 input.setError(invalid.getMessage());
             }
         });
-        if (dialog.getWindow() != null) {
-            dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
-            input.requestFocus();
-        }
+        input.requestFocus();
+        // An attached IME dialog can gain window focus after show() returns.
+        // Request the keyboard when both the dialog and its editor are focused.
+        input.getViewTreeObserver().addOnWindowFocusChangeListener(hasFocus -> {
+            if (hasFocus && dialog.isShowing()) showPhraseEditorKeyboard(input);
+        });
+        showPhraseEditorKeyboard(input);
+    }
+
+    private void showPhraseEditorKeyboard(EditText input) {
+        input.post(() -> {
+            if (!input.hasWindowFocus() || !input.hasFocus()) return;
+            android.view.inputmethod.InputMethodManager manager =
+                    (android.view.inputmethod.InputMethodManager) getSystemService(INPUT_METHOD_SERVICE);
+            if (manager != null) manager.showSoftInput(input,
+                    android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+        });
     }
 
     private void attachPanelDialog(android.app.AlertDialog dialog) {
@@ -3127,7 +3183,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("learn_words", true)
                 && !getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false);
     }
-    private boolean canUseClipboard() { return !secureEditor && !clipboardSearchDialogOpen && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("clipboard_enabled", false) && !getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false); }
+    private boolean canUseClipboard() { return !secureEditor && !clipboardSearchDialogOpen && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("clipboard_enabled", true) && !getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false); }
 
     static String classifyEditorLayout(EditorInfo info) {
         return classifyEditorLayout(info == null ? InputType.TYPE_CLASS_TEXT : info.inputType);

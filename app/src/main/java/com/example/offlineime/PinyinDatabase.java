@@ -21,7 +21,7 @@ import android.util.Log;
 
 /** Versioned persistent index built exclusively from the bundled lexicon assets. */
 final class PinyinDatabase extends SQLiteOpenHelper {
-    private static final int SCHEMA_VERSION = 8;
+    private static final int SCHEMA_VERSION = 9;
     private final Context applicationContext;
     private SQLiteDatabase importDatabase;
     private final Map<String, Integer> transitionCache = Collections.synchronizedMap(
@@ -41,6 +41,28 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                           String groupBy, String having, String orderBy, String limit) {
         QueryWork.check();
         long started = ImePerformanceMonitor.start();
+        if (QueryWork.firstScreen() && "pronunciations".equals(table)
+                && groupBy == null && having == null && "score DESC, word".equals(orderBy)
+                && java.util.Arrays.equals(columns, new String[]{"word", "score", "syllables"})
+                && args != null && args.length == 2 && args[0].length() >= 1 && args[0].length() <= 2
+                && prefixUpperBound(args[0]).equals(args[1]) && limit != null && limit.matches("[0-9]+")
+                && Integer.parseInt(limit) <= 64) {
+            for (String column : new String[]{"code", "digits"}) {
+                String range = column + ">? AND " + column + "<?";
+                boolean phrases = ("length(word)>1 AND " + range).equals(selection);
+                if (!phrases && !range.equals(selection)) continue;
+                Cursor cached = getReadableDatabase().query(false, "short_prefix_candidates", columns,
+                        "kind=? AND prefix=? AND phrases=?",
+                        new String[]{column, args[0], phrases ? "1" : "0"}, null, null,
+                        "position", limit, QueryWork.signal());
+                // Empty fallback/import tables must still use the complete corpus.
+                try {
+                    if (cached.getCount() > 0) return QueryWork.timedCursor(cached, started);
+                } catch (RuntimeException error) { cached.close(); throw error; }
+                cached.close();
+                break;
+            }
+        }
         if ("pronunciations".equals(table) && groupBy == null && having == null && limit != null && limit.matches("[0-9]+")) {
             int count = Integer.parseInt(limit);
             String key = java.util.Arrays.deepToString(new Object[]{table, columns, selection, args, orderBy});
@@ -139,6 +161,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         db.execSQL("CREATE INDEX idx_pron_initials ON pronunciations(initials,score DESC,word,syllables)");
         db.execSQL("CREATE INDEX idx_pron_code ON pronunciations(code,score DESC,word,syllables)");
         db.execSQL("CREATE INDEX idx_pron_word ON pronunciations(word,score DESC)");
+        db.execSQL("CREATE TABLE short_prefix_candidates(kind TEXT NOT NULL, prefix TEXT NOT NULL, phrases INTEGER NOT NULL, position INTEGER NOT NULL, word TEXT NOT NULL, score INTEGER NOT NULL, syllables TEXT NOT NULL, PRIMARY KEY(kind,prefix,phrases,position)) WITHOUT ROWID");
         db.execSQL("CREATE TABLE metadata(name TEXT PRIMARY KEY, value TEXT NOT NULL)");
         db.execSQL("CREATE TABLE word_transitions(previous TEXT NOT NULL, next TEXT NOT NULL, weight INTEGER NOT NULL, PRIMARY KEY(previous,next))");
         db.execSQL("CREATE INDEX idx_transition_rank ON word_transitions(previous,weight DESC,next)");
@@ -150,6 +173,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
     @Override public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         transitionCache.clear();
         successorCache.clear();
+        db.execSQL("DROP TABLE IF EXISTS short_prefix_candidates");
         db.execSQL("DROP TABLE IF EXISTS word_transitions");
         db.execSQL("DROP TABLE IF EXISTS pronunciations");
         db.execSQL("DROP TABLE IF EXISTS characters");
@@ -170,6 +194,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         successorCache.clear();
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
+        db.delete("short_prefix_candidates", null, null);
         db.delete("words", null, null);
         db.delete("pronunciations", null, null);
         db.delete("characters", null, null);
@@ -264,6 +289,10 @@ final class PinyinDatabase extends SQLiteOpenHelper {
             for (PinyinInput.Path path : paths) keys.add(path.initials);
             if (numeric) keys.addAll(PinyinInput.numericKeys(input, full, shortInput, doubles));
         }
+        // Literal three/four/five-key abbreviations must survive path-beam pruning.
+        String literalDigits = input.replace("'", "");
+        if (numeric && shortInput && literalDigits.length() >= 3 && literalDigits.length() <= 5)
+            keys.add(literalDigits);
         StringBuilder where = new StringBuilder();
         List<String> args = new ArrayList<>();
         for (String key : keys) {
@@ -317,7 +346,7 @@ final class PinyinDatabase extends SQLiteOpenHelper {
         // initials scan can exhaust the first-screen time budget.
         boolean earlyFullPrefix = QueryWork.firstScreen() && prefix && full
                 && !numeric && !abbreviation && plain.length() >= 2;
-        if (earlyFullPrefix) {
+        if (earlyFullPrefix && !QueryWork.shouldYield(out.size())) {
             List<String> prefixArgs = new ArrayList<>();
             prefixArgs.add(plain); prefixArgs.add(prefixUpperBound(plain));
             if (!leadingReading.isEmpty()) {
@@ -365,9 +394,9 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 }
             }
         }
-        // Reserve bounded recall for four/five syllable words before the broad
+        // Reserve bounded recall for three/four/five syllable words before the broad
         // scan limit. Only complete pronunciation matches enter these pools.
-        if (shortInput) for (int length = 4; length <= 5; length++) {
+        if (shortInput) for (int length = numeric ? 3 : 4; length <= 5; length++) {
             StringBuilder protectedWhere = new StringBuilder();
             List<String> protectedArgs = new ArrayList<>();
             for (String key : keys) {
@@ -437,13 +466,40 @@ final class PinyinDatabase extends SQLiteOpenHelper {
                 }
             }
         }
+        // Reserve completions before the complete-word early return. The final
+        // service filter enforces frequency, two full syllables and locked readings.
+        if (numeric && full && prefix && plain.length() >= 4 && !QueryWork.shouldYield(out.size())) {
+            for (int length = 3; length <= 4; length++) {
+                if (QueryWork.shouldYield(out.size())) break;
+                List<String> completionArgs = new ArrayList<>();
+                completionArgs.add(plain); completionArgs.add(prefixUpperBound(plain));
+                if (!leadingReading.isEmpty()) {
+                    completionArgs.add(leadingReading); completionArgs.add(leadingPattern);
+                }
+                try (Cursor cursor = select("pronunciations", new String[]{"word", "score", "syllables"},
+                        "digits>? AND digits<? AND length(word)=" + length + lockedFilter,
+                        completionArgs.toArray(new String[0]), null, null, "score DESC, word", "32")) {
+                    while (cursor.moveToNext()) {
+                        QueryWork.check();
+                        String reading = cursor.getString(2);
+                        PinyinInput.Match match = constraint == null
+                                ? PinyinInput.match(input, reading, full, shortInput, mixed, doubles, true)
+                                : constraint.match(reading, full, shortInput, mixed, doubles, true);
+                        if (match == null || match.tier != PinyinDictionary.TIER_PREFIX) continue;
+                        out.add(new PinyinDictionary.Entry(cursor.getString(0), cursor.getInt(1), match.tier)
+                                .withInput(constraint == null ? input.length() : constraint.raw.length(), reading));
+                    }
+                }
+            }
+        }
         // Single-character matches alone must not suppress phrase completion.
         // Stop the prefix scans only after complete words fill the strip.
         if (primaryWords.size() >= firstScreenTarget)
             return rankFlexible(out, abbreviation, resultLimit, input);
         if (primaryWords.size() >= 4 && QueryWork.shouldYield(out.size()))
             return rankFlexible(out, abbreviation, resultLimit, input);
-        if (prefix && (full || constraint != null) && !earlyFullPrefix) {
+        if (prefix && (full || constraint != null) && !earlyFullPrefix
+                && !QueryWork.shouldYield(out.size())) {
             List<String> prefixArgs = new ArrayList<>();
             prefixArgs.add(plain); prefixArgs.add(prefixUpperBound(plain));
             if (!leadingReading.isEmpty()) {

@@ -294,9 +294,9 @@ public final class PinyinDictionary {
             if (entry.codePointLength >= 3 && entry.codePointLength <= 8
                     && entry.matchTier != TIER_EXACT_FULL) {
                 if (entry.matchTier != TIER_EXACT_SHORT) continue;
-                if (numeric && (!preference("nine_short_words", false)
+                if (numeric && (!preference("nine_short_words", true)
                         || entry.codePointLength > 5 || query.length() != entry.codePointLength
-                        || !CandidateRanker.hasStrongWordSupport(entry))) continue;
+                        || entry.codePointLength > 4 && !CandidateRanker.hasStrongWordSupport(entry))) continue;
             }
             eligible.add(entry);
         }
@@ -436,7 +436,7 @@ public final class PinyinDictionary {
         StringBuilder key = new StringBuilder();
         for (String name : new String[]{"full_pinyin", "short_pinyin", "mixed_pinyin", "double_initials",
                 "fuzzy_pinyin", "spelling_correction", "touch_correction", "sentence_prediction",
-                "nine_sentence_prediction", "nine_short_words", "basic_context", "fuzzy_zh_z", "fuzzy_ch_c", "fuzzy_sh_s",
+                "nine_sentence_prediction", "nine_short_words", "nine_word_completion", "basic_context", "fuzzy_zh_z", "fuzzy_ch_c", "fuzzy_sh_s",
                 "fuzzy_n_l", "fuzzy_h_f", "fuzzy_an_ang", "fuzzy_en_eng", "fuzzy_in_ing", "fuzzy_ian_iang"})
             key.append(name).append('=').append(settingsValues.get(name)).append(';');
         settingsKey = key.toString();
@@ -726,6 +726,11 @@ public final class PinyinDictionary {
                 : PinyinInput.paths(decodeInput, true, false, false);
         for (PinyinInput.Path path : parsed)
             if (path.cost == 0 && path.tokens.size() >= 5 && path.tokens.size() <= 24) complete.add(path);
+        Map<String, Double> pathEvidence = new HashMap<>();
+        Map<PinyinInput.Path, Double> pathScores = new HashMap<>();
+        for (PinyinInput.Path path : complete)
+            pathScores.put(path, segmentationScore(path.tokens, pathEvidence));
+        complete.sort(Comparator.comparingDouble((PinyinInput.Path path) -> -pathScores.get(path)));
         List<PinyinInput.Path> selected = PinyinInput.compositionPaths(complete, numeric ? 3 : 6);
         Map<String, List<Entry>> words = new HashMap<>();
         Map<String, Integer> transitions = new HashMap<>();
@@ -796,14 +801,47 @@ public final class PinyinDictionary {
         if (cached != null) return cached;
         PinyinLexer current = canonicalLexer;
         if (current == null) return Collections.emptyList();
-        List<List<String>> values = current.splitAll(query, 8);
+        List<List<String>> values = new ArrayList<>(current.splitAll(query, 16));
         if (values.isEmpty()) {
             values = new ArrayList<>();
             for (PinyinInput.Path path : PinyinInput.paths(query, fullEnabled(), shortEnabled(), preference("double_initials", true))) {
                 values.add(path.tokens); if (values.size() >= 8) break;
             }
         }
-        return cachePinyinPaths(cacheKey, values);
+        if (database != null && databaseReady && values.size() > 1) {
+            Map<String, Double> evidence = new HashMap<>();
+            Map<List<String>, Double> scores = new HashMap<>();
+            for (List<String> path : values) scores.put(path, segmentationScore(path, evidence));
+            values.sort(Comparator.comparingDouble((List<String> path) -> -scores.get(path))
+                    .thenComparingInt(List::size));
+        }
+        return cachePinyinPaths(cacheKey, values.subList(0, Math.min(8, values.size())));
+    }
+
+    /** Best covering by frequent corpus words, normalized by syllable count.
+     * Unsupported syllables remain possible and contribute no evidence. */
+    private double segmentationScore(List<String> path, Map<String, Double> evidence) {
+        if (path.isEmpty() || path.size() > 12) return 0;
+        double[] best = new double[path.size() + 1];
+        for (int end = 1; end <= path.size(); end++) {
+            QueryWork.check();
+            best[end] = best[end - 1];
+            for (int start = Math.max(0, end - 4); start < end; start++) {
+                String key = String.join("'", path.subList(start, end));
+                Double weight = evidence.get(key);
+                if (weight == null) {
+                    weight = 0.0;
+                    if (evidence.size() < 192) {
+                        for (Entry word : compositionWords(key, key.matches("[2-9']+"), true, false))
+                            weight = Math.max(weight, Math.log1p(Math.max(0, word.corpusScore)));
+                    }
+                    evidence.put(key, weight);
+                }
+                int length = end - start;
+                best[end] = Math.max(best[end], best[start] + weight * length);
+            }
+        }
+        return best[path.size()] / path.size();
     }
 
     /** Most likely legal pinyin paths represented by a T9 digit prefix. */
@@ -835,9 +873,13 @@ public final class PinyinDictionary {
         // order among equally segmented alternatives.
         android.content.SharedPreferences usage = context == null ? null
                 : context.getSharedPreferences("pinyin_path_usage", Context.MODE_PRIVATE);
+        Map<String, Double> evidence = new HashMap<>();
+        Map<List<String>, Double> scores = new HashMap<>();
+        for (List<String> path : result) scores.put(path, segmentationScore(path, evidence));
         result.sort(Comparator
                 .comparingDouble((List<String> path) -> usage == null ? 0
                         : -decayedPathUsage(usage, String.join("·", path)))
+                .thenComparingDouble(path -> -scores.get(path))
                 .thenComparingInt(List::size));
         // Keep independent grammar splits alongside the strongest corpus paths. A busy
         // corpus prefix or shorter segmentation must not hide all alternate boundaries.

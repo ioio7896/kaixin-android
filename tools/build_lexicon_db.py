@@ -171,7 +171,7 @@ CREATE INDEX idx_pron_digits ON pronunciations(digits,score DESC,word,syllables)
 CREATE INDEX idx_pron_initial_digits ON pronunciations(initial_digits,score DESC,word,syllables);
 CREATE INDEX idx_pron_code ON pronunciations(code,score DESC,word,syllables);
 CREATE INDEX idx_pron_word ON pronunciations(word,score DESC);
-PRAGMA user_version=8;
+PRAGMA user_version=9;
 ANALYZE;
 """)
 entries = db.execute("SELECT count(*) FROM words").fetchone()[0]
@@ -246,6 +246,33 @@ db.executemany("INSERT INTO metadata(name,value) VALUES(?,?)",
                (("lexicon_version", lexicon_version), ("entry_count", str(entries)),
                  ("transition_scoring", "conditional-support-v2"),
                 ("transition_count", str(len(transition_rows)))))
+# Materialize the exact first 64 rows of the hot strict-prefix queries. Build
+# separate phrase-only buckets so single characters cannot exhaust their limit.
+# Supplementary/constrained/long-prefix queries continue using the full corpus.
+db.execute("""CREATE TABLE short_prefix_candidates(
+    kind TEXT NOT NULL, prefix TEXT NOT NULL, phrases INTEGER NOT NULL,
+    position INTEGER NOT NULL, word TEXT NOT NULL, score INTEGER NOT NULL,
+    syllables TEXT NOT NULL, PRIMARY KEY(kind,prefix,phrases,position)) WITHOUT ROWID""")
+prefix_rows = []
+for column in ("code", "digits"):
+    buckets = defaultdict(list)
+    # Matches the covering index's tie order within score/word.
+    for code, word, score, syllables in db.execute(
+            f"SELECT {column},word,score,syllables FROM pronunciations "
+            f"ORDER BY score DESC,word,{column},syllables"):
+        for length in (1, 2):
+            if len(code) <= length:
+                continue
+            prefix = code[:length]
+            for phrases in ((0, 1) if len(word) > 1 else (0,)):
+                bucket = buckets[(prefix, phrases)]
+                if len(bucket) < 64:
+                    bucket.append((word, score, syllables))
+    for (prefix, phrases), rows in sorted(buckets.items()):
+        prefix_rows.extend((column, prefix, phrases, position, *row)
+                           for position, row in enumerate(rows))
+db.executemany("INSERT INTO short_prefix_candidates VALUES(?,?,?,?,?,?,?)", prefix_rows)
+
 db.execute("ANALYZE")
 db.commit()
 db.execute("VACUUM")

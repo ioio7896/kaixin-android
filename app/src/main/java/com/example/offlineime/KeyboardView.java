@@ -46,6 +46,7 @@ public final class KeyboardView extends LinearLayout {
         void onCandidateEntry(PinyinDictionary.Entry entry);
         void onCandidatePage(int delta);
         void onCandidateExpand();
+        void onDismissNextWordPrediction();
         void onMode(OfflineImeService.Mode mode);
     }
 
@@ -251,7 +252,13 @@ public final class KeyboardView extends LinearLayout {
         expandBackground.setColor(Color.TRANSPARENT);
         expandBackground.setCornerRadius(dp(UiTokens.RADIUS_CONTROL));
         expandCandidates.setBackground(expandBackground);
-        expandCandidates.setOnClickListener(view -> callback.onCandidateExpand());
+        expandCandidates.setOnClickListener(view -> {
+            if (renderedCandidateInput.isEmpty() && !renderedCandidateWords.isEmpty()
+                    && (renderedCandidateMode == OfflineImeService.Mode.PINYIN
+                    || renderedCandidateMode == OfflineImeService.Mode.NINE))
+                callback.onDismissNextWordPrediction();
+            else callback.onCandidateExpand();
+        });
         candidateBar.addView(expandCandidates, new LayoutParams(dp(48), -1));
         int candidateHeight = candidateHeightDp();
         header.addView(candidateBar, new FrameLayout.LayoutParams(-1, dp(candidateHeight), Gravity.TOP));
@@ -372,7 +379,10 @@ public final class KeyboardView extends LinearLayout {
         // fewer candidates than the horizontal strip can hold.
         expandCandidates.setVisibility(typing ? VISIBLE : GONE);
         expandCandidates.setEnabled(candidateSurfaceReady);
-        expandCandidates.setContentDescription("展开候选词");
+        boolean showingNextWordPrediction = input.isEmpty() && !displayWords.isEmpty()
+                && (mode == OfflineImeService.Mode.PINYIN || mode == OfflineImeService.Mode.NINE);
+        expandCandidates.setText(showingNextWordPrediction ? "×" : "⌄");
+        expandCandidates.setContentDescription(showingNextWordPrediction ? "关闭下一词联想" : "展开候选词");
         candidateBar.setVisibility(typing ? VISIBLE : GONE);
         if ((candidateInputChanged || candidatePage != renderedCandidatePage) && candidateScroll.getScrollX() != 0)
             candidateScroll.scrollTo(0, 0);
@@ -661,10 +671,8 @@ public final class KeyboardView extends LinearLayout {
         LinearLayout symbols = new LinearLayout(getContext()); symbols.setOrientation(VERTICAL);
         String[] sideSymbols = {"+", "-", "%", "/"};
         if (phone) sideSymbols = new String[]{"+", "-", "*", "#"};
-        else if (number) sideSymbols = new String[]{signed ? "-" : "", "",
-                kind.contains("decimal") ? "." : "", "符号"};
         else if ("date".equals(kind)) sideSymbols = new String[]{"/", "-", ".", "符号"};
-        else if ("time".equals(kind)) sideSymbols = new String[]{":", "", "", "符号"};
+        else if ("time".equals(kind)) sideSymbols = new String[]{":", ".", "/", "符号"};
         else if ("datetime".equals(kind)) sideSymbols = new String[]{"/", "-", ":", "符号"};
         for (String symbol : sideSymbols) addVerticalKey(symbols, symbol, 1f);
         int symbolWidth = Math.max(44, Math.min(56, Math.round(KeyboardPlacement.width(getContext(), renderSettings) * 0.14f)));
@@ -1074,9 +1082,8 @@ public final class KeyboardView extends LinearLayout {
                     : "英文字母模式，点击切换为单词模式");
         }
         addKey(bottom, english ? "Space" : "空格", "空格", english ? 44f : equalLetterRows ? 48f : 46f, horizontalGap, verticalGap);
-        if (english && ("email".equals(editorKind) || "uri".equals(editorKind)))
-            addKey(bottom, "email".equals(editorKind) ? "." : ".com",
-                    "email".equals(editorKind) ? "." : ".com", 11f, horizontalGap, verticalGap);
+        if (english && "email".equals(editorKind))
+            addKey(bottom, ".", ".", 11f, horizontalGap, verticalGap);
         else addKey(bottom, "中/英", "中英", english ? 11f : 12f, horizontalGap, verticalGap);
         String action = ((OfflineImeService) getContext()).editorActionLabel();
         addKey(bottom, action, "回车", english ? 15f : 16f, horizontalGap, verticalGap);
