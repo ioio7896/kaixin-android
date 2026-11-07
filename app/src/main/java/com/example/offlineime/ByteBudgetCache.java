@@ -9,7 +9,7 @@ import java.util.function.BiPredicate;
 /** Access-ordered cache bounded by retained bytes as well as entry count. */
 final class ByteBudgetCache<V> {
     interface Weight<V> { int bytes(V value); }
-    // One lock orders all cache accounting; values never call into other caches under it.
+    // Lock order: global accounting, then one cache. Reads never take accounting.
     private static final Object LOCK = new Object();
     private static final ArrayList<WeakReference<ByteBudgetCache<?>>> caches = new ArrayList<>();
     private static int totalBudget = 24 * 1024 * 1024;
@@ -21,7 +21,8 @@ final class ByteBudgetCache<V> {
     private final LinkedHashMap<String, Item<V>> values = new LinkedHashMap<>(64, .75f, true);
     private final Weight<V> weight;
     private final int budget, maxEntries;
-    private int bytes;
+    private final Object cacheLock = new Object();
+    private volatile int bytes;
     private final int retention;
     private long revision;
     ByteBudgetCache(int budget, int maxEntries, Weight<V> weight) {
@@ -45,24 +46,26 @@ final class ByteBudgetCache<V> {
         synchronized (LOCK) { trimAllLocked(severe ? 0 : totalBudget / 2); }
     }
     V get(String key) {
-        synchronized (LOCK) { Item<V> item = values.get(key); return item == null ? null : item.value; }
+        synchronized (cacheLock) { Item<V> item = values.get(key); return item == null ? null : item.value; }
     }
-    long revision() { synchronized (LOCK) { return revision; } }
+    long revision() { synchronized (cacheLock) { return revision; } }
     void put(String key, V value) { putIfUnchanged(key, value, -1); }
     void putIfUnchanged(String key, V value, long expectedRevision) {
         int cost = cost(key, value);
         synchronized (LOCK) {
-            if (expectedRevision >= 0 && expectedRevision != revision) return;
-            Item<V> old = values.remove(key);
-            if (old != null) bytes -= old.cost;
-            if (cost > budget || cost > totalBudget) return;
-            values.put(key, new Item<>(value, cost)); bytes += cost;
-            while (bytes > budget || values.size() > maxEntries) evictOldest();
+            synchronized (cacheLock) {
+                if (expectedRevision >= 0 && expectedRevision != revision) return;
+                Item<V> old = values.remove(key);
+                if (old != null) bytes -= old.cost;
+                if (cost > budget || cost > totalBudget) return;
+                values.put(key, new Item<>(value, cost)); bytes += cost;
+                while (bytes > budget || values.size() > maxEntries) evictOldest();
+            }
             trimAllLocked(totalBudget);
         }
     }
     void removeIf(BiPredicate<String, V> predicate) {
-        synchronized (LOCK) {
+        synchronized (cacheLock) {
             revision++;
             java.util.Iterator<Map.Entry<String, Item<V>>> iterator = values.entrySet().iterator();
             while (iterator.hasNext()) {
@@ -73,7 +76,7 @@ final class ByteBudgetCache<V> {
             }
         }
     }
-    void clear() { synchronized (LOCK) { values.clear(); bytes = 0; revision++; } }
+    void clear() { synchronized (cacheLock) { values.clear(); bytes = 0; revision++; } }
     void evictAll() { clear(); }
     private void evictOldest() {
         java.util.Iterator<Item<V>> iterator = values.values().iterator();
@@ -89,12 +92,19 @@ final class ByteBudgetCache<V> {
             ByteBudgetCache<?> victim = null;
             for (WeakReference<ByteBudgetCache<?>> reference : caches) {
                 ByteBudgetCache<?> cache = reference.get();
-                if (cache != null && !cache.values.isEmpty() && (victim == null
+                if (cache != null && cache.bytes > 0 && (victim == null
                         || cache.retention < victim.retention
                         || cache.retention == victim.retention && cache.bytes > victim.bytes)) victim = cache;
             }
             if (victim == null) break;
-            int before = victim.bytes; victim.evictOldest(); total -= before - victim.bytes;
+            synchronized (victim.cacheLock) { victim.evictOldest(); }
+            // Clears can run concurrently without accounting; recompute rather than
+            // decrementing a stale snapshot (including the zero-budget trim case).
+            total = 0;
+            for (WeakReference<ByteBudgetCache<?>> reference : caches) {
+                ByteBudgetCache<?> cache = reference.get();
+                if (cache != null) total += cache.bytes;
+            }
         }
     }
     private int cost(String key, V value) { return 80 + key.length() * 2 + weight.bytes(value); }

@@ -38,6 +38,7 @@ public final class SettingsActivity extends Activity {
     private LinearLayout detailsContent;
     private LinearLayout pageHost;
     private LinearLayout activeSectionPage;
+    private LinearLayout quickPhraseList;
     private TextView toolbarTitle;
     private UiTokens.Palette palette;
     private RoundedCardPopup choicePopup;
@@ -91,6 +92,7 @@ public final class SettingsActivity extends Activity {
         addCategoryRow(dataGroup, "词库管理", "自定义词与学习记录", true, false);
         addCategoryRow(dataGroup, "隐私安全", "本地数据与隐私模式", false, false);
         addCategoryRow(dataGroup, "剪贴板", "历史记录与隐私选项", false, false);
+        addCategoryRow(dataGroup, "快捷短语", "添加与管理常用文字", false, false);
         addCategoryRow(dataGroup, "关于", "版本与词库来源", false, true);
         TextView setup = text("启用与切换输入法  ›", 13, palette.textSecondary);
         setup.setPadding(dp(4), 0, dp(4), 0);
@@ -152,9 +154,10 @@ public final class SettingsActivity extends Activity {
                 new String[]{"letters_numbers", "letters"}, "letters_numbers");
         addExpandableHelp(content, "上滑输入数字；点击仍输入拼音或标点。",
                 "开启后，在九键按键上向上滑动可输入对应数字 1–9；点击仍输入拼音或打开标点。关闭后仍可长按输入数字。仅显示字母时隐藏数字提示，标点键保留，也可通过底部数字、符号键输入。");
-        addSwitch(content, "九键简拼长词", "nine_short_words", false);
-        addExpandableHelp(content, "逐字输入首字母数字，查找三至五字词。",
-                "开启后，逐字输入首字母对应的数字，可查找三至五字常用词或常用的个人词。需要同时开启简拼；必须匹配全部读音，已选定读音仍有效。不会用两三个数字补出五字词。");
+        addSwitch(content, "九键简拼与混拼长词", "nine_short_words", true);
+        addSwitch(content, "九键三四字词提前补全", "nine_word_completion", true);
+        addExpandableHelp(content, "支持简拼、混拼，并提前补全三四字词。",
+                "简拼与混拼长词默认开启。逐字输入首字母数字，或组合完整拼音与首字母，可查找三四字词；五字词需有词频或使用记录支持。混拼需要同时开启简拼和全拼简拼混合输入。提前补全默认开启：输入至少两个完整音节后，可补出高可信三四字词，每次最多显示两个。已选定读音始终有效。");
         addSubheading(content, "拼音输入");
         addSwitch(content, "全拼输入", "full_pinyin", true); addSwitch(content, "简拼输入", "short_pinyin", true);
         addSwitch(content, "全拼简拼混合输入", "mixed_pinyin", true);
@@ -235,7 +238,7 @@ public final class SettingsActivity extends Activity {
 
         addSection(content, "剪贴板");
         addSubheading(content, "历史记录");
-        addSwitch(content, "剪贴板历史", "clipboard_enabled", false);
+        addSwitch(content, "剪贴板历史", "clipboard_enabled", true);
         addSwitch(content, "键盘显示期间自动记录新复制文本", "clipboard_capture_while_typing", false);
         addChoice(content, "普通历史数量", "clipboard_limit",
                 new String[]{"10 条", "20 条", "50 条", "100 条"},
@@ -248,6 +251,18 @@ public final class SettingsActivity extends Activity {
                 "默认只在你打开剪贴板面板时读取系统当前文本。开启自动记录后，仅当本输入法正在显示、剪贴板历史已启用且不在隐私/密码输入时，才监听新复制的文本；离开键盘后立即停止。带有系统敏感标记、密码类标签或验证码特征的内容会跳过。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。");
         TextView privacy = text("隐私说明\n\n本应用只在当前输入框中完成本地组合和候选。密码、支付和验证码输入不会写入用户词库。本版本没有网络权限、语音权限、联系人权限、存储权限和无障碍服务。", 14, palette.textSecondary);
         privacy.setPadding(0, dp(18), 0, 0);
+        addSection(content, "快捷短语");
+        addSubheading(content, "快捷短语");
+        Button addPhrase = new Button(this);
+        addPhrase.setText("添加快捷短语");
+        addPhrase.setOnClickListener(v -> showQuickPhraseEditor(null));
+        content.addView(addPhrase, new LinearLayout.LayoutParams(-1, dp(48)));
+        addExpandableHelp(content, "在这里添加和管理快捷短语。",
+                "点击短语可查看完整内容；也可在键盘的快捷短语面板中输入、编辑或删除。");
+        quickPhraseList = new LinearLayout(this);
+        quickPhraseList.setOrientation(LinearLayout.VERTICAL);
+        content.addView(quickPhraseList, new LinearLayout.LayoutParams(-1, -2));
+        refreshQuickPhraseList();
         addSection(content, "关于");
         addSubheading(content, "版本信息");
         TextView about = text(getString(R.string.about_version_text, BuildConfig.VERSION_NAME), 14, palette.textSecondary); content.addView(about, new LinearLayout.LayoutParams(-1, -2));
@@ -541,6 +556,7 @@ public final class SettingsActivity extends Activity {
     @Override protected void onResume() {
         super.onResume();
         refreshInputMethodSetup();
+        refreshQuickPhraseList();
     }
 
     @Override public void onWindowFocusChanged(boolean hasFocus) {
@@ -647,10 +663,102 @@ public final class SettingsActivity extends Activity {
         showChoicePopup(skinChoice, menu);
     }
 
+    private void refreshQuickPhraseList() {
+        if (quickPhraseList == null) return;
+        quickPhraseList.removeAllViews();
+        java.util.List<QuickPhraseStore.Entry> phrases = new QuickPhraseStore(this).list();
+        if (phrases.isEmpty()) {
+            TextView empty = text("暂无快捷短语", 14, palette.textSecondary);
+            empty.setPadding(dp(12), dp(12), dp(12), dp(16));
+            quickPhraseList.addView(empty, new LinearLayout.LayoutParams(-1, -2));
+            return;
+        }
+        for (QuickPhraseStore.Entry phrase : phrases) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.VERTICAL);
+            row.setPadding(dp(12), dp(8), dp(12), dp(8));
+            TextView preview = text(phrase.text, 15, palette.textPrimary);
+            preview.setMaxLines(3);
+            preview.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            preview.setPadding(0, dp(8), 0, dp(8));
+            preview.setContentDescription("查看完整快捷短语：" + phrase.text);
+            preview.setOnClickListener(v -> showQuickPhraseDetails(phrase));
+            row.addView(preview, new LinearLayout.LayoutParams(-1, -2));
+            LinearLayout actions = new LinearLayout(this);
+            actions.setGravity(Gravity.END);
+            Button edit = new Button(this);
+            edit.setText("编辑");
+            edit.setContentDescription("编辑快捷短语：" + phrase.text);
+            edit.setOnClickListener(v -> showQuickPhraseEditor(phrase));
+            actions.addView(edit, new LinearLayout.LayoutParams(-2, dp(48)));
+            Button delete = new Button(this);
+            delete.setText("删除");
+            delete.setContentDescription("删除快捷短语：" + phrase.text);
+            delete.setOnClickListener(v -> confirmDeleteQuickPhrase(phrase));
+            actions.addView(delete, new LinearLayout.LayoutParams(-2, dp(48)));
+            row.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+            if (quickPhraseList.getChildCount() > 0) addDivider(quickPhraseList, 12);
+            quickPhraseList.addView(row, new LinearLayout.LayoutParams(-1, -2));
+        }
+    }
+
+    private void showQuickPhraseDetails(QuickPhraseStore.Entry phrase) {
+        ScrollView scroll = new ScrollView(this);
+        TextView full = text(phrase.text, 16, palette.textPrimary);
+        full.setTextIsSelectable(true);
+        full.setPadding(dp(20), dp(12), dp(20), dp(12));
+        scroll.addView(full);
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("快捷短语")
+                .setView(scroll).setPositiveButton("关闭", null).create();
+        RoundedCardPopup.showDialog(dialog);
+    }
+
+    private void confirmDeleteQuickPhrase(QuickPhraseStore.Entry phrase) {
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle("删除快捷短语？")
+                .setMessage(phrase.text).setNegativeButton("取消", null)
+                .setPositiveButton("删除", (d, w) -> {
+                    boolean removed = new QuickPhraseStore(this).remove(phrase.id);
+                    Toast.makeText(this, removed ? "快捷短语已删除" : "删除失败，短语可能已被删除", Toast.LENGTH_SHORT).show();
+                    refreshQuickPhraseList();
+                }).create();
+        RoundedCardPopup.showDialog(dialog);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setTextColor(palette.danger);
+    }
+
+    private void showQuickPhraseEditor(QuickPhraseStore.Entry phrase) {
+        EditText input = new EditText(this);
+        input.setHint("输入常用文字");
+        input.setMinLines(3);
+        input.setMaxLines(6);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(1000)});
+        if (phrase != null) {
+            input.setText(phrase.text);
+            input.setSelection(input.length());
+        }
+        AlertDialog dialog = new AlertDialog.Builder(this).setTitle(phrase == null ? "添加快捷短语" : "编辑快捷短语")
+                .setView(input).setNegativeButton("取消", null).setPositiveButton("保存", null).create();
+        RoundedCardPopup.showDialog(dialog);
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
+            try {
+                if (!new QuickPhraseStore(this).save(phrase == null ? null : phrase.id, input.getText().toString())) {
+                    input.setError("保存失败，请重试");
+                    return;
+                }
+                dialog.dismiss();
+                refreshQuickPhraseList();
+                Toast.makeText(this, phrase == null ? "快捷短语已添加" : "快捷短语已更新", Toast.LENGTH_SHORT).show();
+            } catch (IllegalArgumentException invalid) {
+                input.setError(invalid.getMessage());
+            }
+        });
+    }
+
     private void addAppearanceControls(LinearLayout parent) {
-        addSettingNumber(parent, "横屏统一高度", "key_height_landscape", 180, 360, 240, 10, " dp");
+        addSettingNumber(parent, "横屏统一高度", "key_height_landscape", 180, 360, getResources().getConfiguration().smallestScreenWidthDp >= 600 ? 300 : 220, 10, " dp");
         addSettingNumber(parent, "竖屏统一高度", "key_height", KeyboardSizing.MIN_HEIGHT,
-                KeyboardSizing.MAX_HEIGHT, KeyboardSizing.DEFAULT_HEIGHT, 10, " dp");
+                KeyboardSizing.MAX_HEIGHT, getResources().getConfiguration().smallestScreenWidthDp >= 600 ? 320 : KeyboardSizing.DEFAULT_HEIGHT, 10, " dp");
         addExpandableHelp(parent, "所有键盘共用高度，切换时保持稳定。",
                 "9键、26键、数字键盘、手写和各面板使用同一高度，切换时保持稳定。横竖屏分别设置；浮动模式下，所有键盘共同使用浮动高度。");
         addSettingNumber(parent, "按键字号", "key_font", 14, 24, 20, 2, " sp");
@@ -931,6 +1039,7 @@ public final class SettingsActivity extends Activity {
     private void openSection(String category, String summary) {
         if (detailsContent == null || activeSectionPage != null) return;
         activeSectionSummary = summary;
+        if ("快捷短语".equals(category)) refreshQuickPhraseList();
         if (choicePopup != null) choicePopup.dismiss();
         mainScrollY = settingsScroll == null ? 0 : settingsScroll.getScrollY();
         activeSectionChildren.clear();
@@ -1064,6 +1173,7 @@ public final class SettingsActivity extends Activity {
             case "词库管理": return R.drawable.ic_settings_dictionary;
             case "隐私安全": return R.drawable.ic_settings_shield;
             case "剪贴板": return R.drawable.ic_toolbar_clipboard;
+            case "快捷短语": return R.drawable.ic_toolbar_phrases;
             default: return R.drawable.ic_settings_info;
         }
     }

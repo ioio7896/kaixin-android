@@ -94,7 +94,6 @@ final class ClipboardPanel extends LinearLayout {
     public void showQuickPhrases(List<QuickPhraseStore.Entry> phrases) {
         removeAllViews();
         LinearLayout header = clipboardHeader("快捷短语");
-        addPanelTextAction(header, "添加", "添加快捷短语");
         addView(header, new LayoutParams(-1, dp(48)));
 
         ScrollView scroll = new ScrollView(getContext());
@@ -105,7 +104,7 @@ final class ClipboardPanel extends LinearLayout {
         list.setPadding(dp(10), dp(2), dp(10), dp(2));
         if (phrases == null || phrases.isEmpty()) {
             list.setGravity(Gravity.CENTER);
-            addClipboardEmptyState(list, "暂无快捷短语", "点击右上角添加；点按短语输入，长按可编辑或删除",
+            addClipboardEmptyState(list, "暂无快捷短语", "请在设置首页的“快捷短语”中添加；点按短语输入，长按可编辑或删除",
                     R.drawable.ic_toolbar_phrases);
         } else for (QuickPhraseStore.Entry phrase : phrases) addQuickPhraseRow(list, phrase);
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
@@ -318,7 +317,7 @@ final class ClipboardPanel extends LinearLayout {
             android.widget.ImageButton more = addClipboardIcon(card, R.drawable.ic_panel_more,
                     "剪贴板内容操作：" + entry.text, "", true);
             more.setOnClickListener(v -> showClipboardItemMenu(more, entry));
-            more.setTooltipText("固定、存为短语或删除");
+            more.setTooltipText("固定或删除");
         }
         LayoutParams params = new LayoutParams(-1, -2);
         params.setMargins(0, dp(3), 0, dp(3));
@@ -329,8 +328,6 @@ final class ClipboardPanel extends LinearLayout {
         RoundedCardPopup menu = RoundedCardPopup.keyboard(getContext(), "剪贴板操作", theme);
         menu.item(entry.pinned ? "取消固定" : "固定", entry.pinned ? null : "保留这条剪贴板内容", null,
                 false, false, () -> callback.onKey("固定:" + entry.text));
-        menu.item("存为快捷短语", null, null, false, false,
-                () -> callback.onKey("保存为快捷短语:" + entry.text));
         menu.item("查看完整内容", "长文本可滚动查看", null, false, false, () -> {
             RoundedCardPopup preview = RoundedCardPopup.keyboard(getContext(), "剪贴板内容", theme);
             ScrollView scroll = new ScrollView(getContext()); TextView text = new TextView(getContext());
