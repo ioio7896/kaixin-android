@@ -239,7 +239,7 @@ public final class SettingsActivity extends Activity {
         addSection(content, "剪贴板");
         addSubheading(content, "历史记录");
         addSwitch(content, "剪贴板历史", "clipboard_enabled", true);
-        addSwitch(content, "键盘显示期间自动记录新复制文本", "clipboard_capture_while_typing", false);
+        addSwitch(content, "后台自动记录新复制文本", "clipboard_capture_while_typing", true);
         addChoice(content, "普通历史数量", "clipboard_limit",
                 new String[]{"10 条", "20 条", "50 条", "100 条"},
                 new String[]{"10", "20", "50", "100"});
@@ -247,8 +247,8 @@ public final class SettingsActivity extends Activity {
                 new String[]{"1 天", "7 天", "30 天", "永久"},
                 new String[]{"1", "7", "30", "0"}, "7");
         addSubheading(content, "记录说明");
-        addExpandableHelp(content, "默认只在打开剪贴板面板时读取文本。",
-                "默认只在你打开剪贴板面板时读取系统当前文本。开启自动记录后，仅当本输入法正在显示、剪贴板历史已启用且不在隐私/密码输入时，才监听新复制的文本；离开键盘后立即停止。带有系统敏感标记、密码类标签或验证码特征的内容会跳过。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。");
+        addExpandableHelp(content, "默认在输入法服务运行时记录新复制的纯文本。",
+                "本输入法作为默认输入法且服务正在运行时，默认监听新复制的纯文本；即使键盘隐藏也可记录。关闭上方开关后，只在打开剪贴板面板时补录尚未保存的当前文本。隐私模式、密码输入和系统敏感标记会阻止保存。单条最多 8192 字、16 KB；固定内容最多 30 条，全部历史最多 256 KB。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。");
         TextView privacy = text("隐私说明\n\n本应用只在当前输入框中完成本地组合和候选。密码、支付和验证码输入不会写入用户词库。本版本没有网络权限、语音权限、联系人权限、存储权限和无障碍服务。", 14, palette.textSecondary);
         privacy.setPadding(0, dp(18), 0, 0);
         addSection(content, "快捷短语");
@@ -1191,10 +1191,12 @@ public final class SettingsActivity extends Activity {
     }
 
     private boolean clearLocalPersonalData() {
+        ClipboardHistoryStore.flushBeforeGlobalClear();
         boolean cleared = PinyinDictionary.clearStoredUserWords(this);
         cleared &= CustomWordStore.clear(this);
         cleared &= SecureLocalStore.clear(this, "context_model", "offline_ime_context");
         cleared &= SecureLocalStore.clear(this, "clipboard_history", "offline_ime_clipboard");
+        cleared &= getSharedPreferences("clipboard_capture_state", MODE_PRIVATE).edit().clear().commit();
         cleared &= SecureLocalStore.clear(this, "quick_phrases", "offline_ime_quick_phrases");
         for (String preferencesName : new String[]{"blocked_words", "pinyin_path_usage", "emoji", "symbol_recent", "gesture_tips"}) {
             cleared &= getSharedPreferences(preferencesName, MODE_PRIVATE).edit().clear().commit();
@@ -1217,7 +1219,7 @@ public final class SettingsActivity extends Activity {
                 + "\n\n单字读音数据许可\n" + readBundledText("lexicon-notices/LICENSE.pinyin-data.md")
                 + "\n中文词库各数据源的再分发条件须以对应来源和许可为准。公开发布前请核实全部词库的授权，并随应用提供适用的完整许可文本。"
                 + "\n\nEmoji 面板样式\n" + readBundledText("emoji_styles/NOTICE.txt")
-                + "\n微信小黄脸素材说明\n" + readBundledText("emoji/wechat/NOTICE.txt")
+                + "\n黄脸素材说明\n" + readBundledText("emoji/wechat/NOTICE.txt")
                 + "\nTwemoji 图形许可\n" + readBundledText("emoji_styles/licenses/twemoji.txt")
                 + "\nOpenMoji 图形许可\n" + readBundledText("emoji_styles/licenses/openmoji.txt")
                 + "\nFluent Emoji 图形许可\n" + readBundledText("emoji_styles/licenses/fluent.txt")

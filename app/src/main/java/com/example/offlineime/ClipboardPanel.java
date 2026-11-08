@@ -279,10 +279,11 @@ final class ClipboardPanel extends LinearLayout {
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dp(12), dp(9), dp(4), dp(9));
         int rowColor = (index & 1) == 0 ? theme.key
-                : blendColor(theme.key, theme.function, dark ? 0.42f : 0.55f);
+                : blendColor(theme.function, theme.accent, dark ? 0.12f : 0.08f);
         GradientDrawable cardBackground = roundRect(selected
                 ? blendColor(rowColor, theme.accent, dark ? 0.30f : 0.16f) : rowColor, 12);
-        if (selected) cardBackground.setStroke(dp(2), theme.accent);
+        cardBackground.setStroke(dp(selected ? 2 : 1), selected ? theme.accent
+                : blendColor(rowColor, theme.text, dark ? 0.18f : 0.10f));
         card.setBackground(cardBackground);
         LinearLayout preview = new LinearLayout(getContext());
         preview.setOrientation(VERTICAL);

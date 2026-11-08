@@ -197,6 +197,7 @@ public final class PinyinDictionary {
         return settingsSignature() + ':' + managedRevision + ':' + (model == null ? 0 : model.scoringRevision());
     }
     private final Map<String, List<Entry>> englishIndex = new ConcurrentHashMap<>();
+    private final MixedEnglishLexicon mixedEnglishLexicon;
     private final Map<String, Integer> lexiconScoreCaps = new HashMap<>();
     private final Map<String, Integer> lexiconPrefixCaps = new HashMap<>();
     private final Map<String, Integer> lexiconSourceScales = new HashMap<>();
@@ -244,6 +245,7 @@ public final class PinyinDictionary {
 
     public PinyinDictionary(AssetManager assets, Context context) {
         this.assets = assets;
+        mixedEnglishLexicon = new MixedEnglishLexicon(assets);
         this.context = context == null ? null : context.getApplicationContext();
         this.database = this.context == null ? null : new PinyinDatabase(this.context);
         if (this.context != null) {
@@ -278,6 +280,7 @@ public final class PinyinDictionary {
     List<Entry> suggestBootstrap(String raw, boolean numeric) {
         String query = raw == null ? "" : raw.toLowerCase(Locale.ROOT);
         if (!query.matches(numeric ? "[2-9]{1,8}" : "[a-z]{1,8}")) return Collections.emptyList();
+        boolean twoSyllableFull = !numeric && fullEnabled() && PinyinInput.hasTwoSyllableFullPath(query);
         Map<String, List<Entry>> full = numeric ? bootstrapT9Index : bootstrapPinyinIndex;
         Map<String, List<Entry>> shortWords = numeric ? bootstrapT9ShortIndex : bootstrapShortIndex;
         LinkedHashMap<String, Entry> result = new LinkedHashMap<>();
@@ -291,6 +294,8 @@ public final class PinyinDictionary {
         }
         ArrayList<Entry> eligible = new ArrayList<>();
         for (Entry entry : result.values()) {
+            if (twoSyllableFull && entry.codePointLength > 2
+                    && entry.matchTier == TIER_EXACT_SHORT) continue;
             if (entry.codePointLength >= 3 && entry.codePointLength <= 8
                     && entry.matchTier != TIER_EXACT_FULL) {
                 if (entry.matchTier != TIER_EXACT_SHORT) continue;
@@ -1158,6 +1163,13 @@ public final class PinyinDictionary {
     /** Small indexed lookup used when space is pressed before the background result arrives. */
     List<Entry> suggestForCommit(String raw, boolean nineDigits) {
         return nineDigits ? suggestT9(raw) : suggest(raw);
+    }
+
+    /** Exact mixed-script candidates for the Chinese keyboard. */
+    List<Entry> suggestMixedEnglish(String raw) { return mixedEnglishLexicon.suggest(raw); }
+
+    boolean isMixedEnglishCandidate(String raw, String word) {
+        return mixedEnglishLexicon.contains(raw, word);
     }
 
     /** English completion candidates sourced from lexicon/en. */

@@ -2,18 +2,22 @@ package com.example.offlineime;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.view.HapticFeedbackConstants;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.view.View;
 import android.media.AudioManager;
 
 /** One application-scoped settings listener; no preference reads on touch DOWN. */
 final class KeyFeedback {
+    private static final long KEY_PULSE_MS = 3;
+    private static final int[] HAPTIC_AMPLITUDES = {0, 48, 80, 120};
     private static KeyFeedback instance;
     private volatile int hapticLevel;
     private volatile float soundVolume;
     private volatile long lastPressAt;
     private final SharedPreferences preferences;
     private final AudioManager audioManager;
+    private final Vibrator vibrator;
     private final SharedPreferences.OnSharedPreferenceChangeListener listener = (prefs, key) -> {
         if (key == null || "haptic".equals(key) || "sound".equals(key)
                 || "haptic_strength".equals(key) || "sound_volume".equals(key)) reload();
@@ -27,6 +31,7 @@ final class KeyFeedback {
     private KeyFeedback(Context context) {
         preferences = context.getSharedPreferences("settings", Context.MODE_PRIVATE);
         audioManager = (AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        vibrator = (Vibrator) context.getSystemService(Context.VIBRATOR_SERVICE);
         reload();
         preferences.registerOnSharedPreferenceChangeListener(listener);
     }
@@ -44,14 +49,9 @@ final class KeyFeedback {
 
     void press(View view) {
         lastPressAt = android.os.SystemClock.uptimeMillis();
-        if (hapticLevel > 0) {
-            // Keep every key pulse short so successive presses stay distinct.
-            // LONG_PRESS lingers and feels smeared during rapid typing.
-            int feedback = hapticLevel == 1 ? HapticFeedbackConstants.CLOCK_TICK
-                    : hapticLevel == 3 ? HapticFeedbackConstants.VIRTUAL_KEY
-                    : HapticFeedbackConstants.KEYBOARD_TAP;
-            view.performHapticFeedback(feedback);
-        }
+        if (hapticLevel > 0 && vibrator != null && vibrator.hasVibrator())
+            vibrator.vibrate(VibrationEffect.createOneShot(KEY_PULSE_MS,
+                    HAPTIC_AMPLITUDES[hapticLevel]));
         view.setSoundEffectsEnabled(false);
         if (soundVolume > 0 && audioManager != null)
             audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, soundVolume);

@@ -12,6 +12,10 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /** Encrypted clipboard history with pinned items kept separately from recent items. */
 final class ClipboardHistoryStore {
@@ -20,10 +24,41 @@ final class ClipboardHistoryStore {
     private static final String KEY_ALIAS = "offline_ime_clipboard";
     private static final int DEFAULT_RECENT_LIMIT = 10;
     private static final int DEFAULT_MAX_AGE_DAYS = 7;
+    static final int MAX_TEXT_CHARS = 8192;
+    private static final int MAX_TEXT_BYTES = 16 * 1024;
+    private static final int MAX_TOTAL_BYTES = 256 * 1024;
+    private static final int MAX_PINNED = 30;
+    private static volatile ClipboardHistoryStore active;
     private final Context context;
-    private String cachedBlob;
     private List<Item> cachedItems;
-    synchronized void releaseMemory() { cachedBlob = null; cachedItems = null; }
+    private final ScheduledExecutorService writer = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "offline-clipboard-writer");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private ScheduledFuture<?> pendingWrite;
+    private boolean suspended;
+    synchronized void releaseMemory() {
+        if (pendingWrite == null || pendingWrite.isDone()) cachedItems = null;
+    }
+    static void flushBeforeGlobalClear() {
+        ClipboardHistoryStore store = active;
+        if (store != null) {
+            synchronized (store) {
+                store.suspended = true;
+                store.flushPendingWrites();
+            }
+        }
+    }
+    synchronized void resumeAfterGlobalClear() {
+        cachedItems = null;
+        suspended = false;
+    }
+    synchronized void close() {
+        flushPendingWrites();
+        writer.shutdown();
+        if (active == this) active = null;
+    }
     private static ArrayList<Item> copyItems(List<Item> values) {
         ArrayList<Item> result = new ArrayList<>();
         for (Item item : values) result.add(new Item(item.text, item.timestamp, item.pinned));
@@ -56,6 +91,7 @@ final class ClipboardHistoryStore {
 
     ClipboardHistoryStore(Context context) {
         this.context = context.getApplicationContext();
+        active = this;
     }
 
     private void migratePlaintextHistory() {
@@ -70,15 +106,29 @@ final class ClipboardHistoryStore {
         }
         preferences.edit().clear().commit();
         writeItems(old);
+        flushPendingWrites();
     }
 
     synchronized void add(String text) {
-        if (text == null || text.trim().isEmpty()) return;
+        if (suspended || !canStore(text)) return;
         List<Item> items = readItems();
         Item existing = find(items, text);
         if (existing != null) items.remove(existing);
         items.add(new Item(text, System.currentTimeMillis(), existing != null && existing.pinned));
         writeItems(items);
+    }
+
+    synchronized void addIfAbsent(String text) {
+        if (suspended || !canStore(text)) return;
+        List<Item> items = readItems();
+        if (find(items, text) != null) return;
+        items.add(new Item(text, System.currentTimeMillis(), false));
+        writeItems(items);
+    }
+
+    static boolean canStore(String text) {
+        return text != null && !text.trim().isEmpty() && text.length() <= MAX_TEXT_CHARS
+                && text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= MAX_TEXT_BYTES;
     }
 
     synchronized List<Entry> listEntries() {
@@ -134,18 +184,17 @@ final class ClipboardHistoryStore {
     }
 
     synchronized void clear() {
-        releaseMemory();
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().commit();
+        writeItems(Collections.emptyList());
+        flushPendingWrites();
     }
 
     private List<Item> readItems() {
         // Legacy migration is needed only when clipboard history is used.
         migratePlaintextHistory();
-        String blob = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("blob", "");
-        if (cachedItems != null && blob.equals(cachedBlob)) return copyItems(cachedItems);
+        if (cachedItems != null) return copyItems(cachedItems);
         ArrayList<Item> result = new ArrayList<>();
         String raw = SecureLocalStore.read(context, PREFS, KEY_ALIAS);
-        if (raw.isEmpty()) { cachedBlob = blob; cachedItems = new ArrayList<>(); return result; }
+        if (raw.isEmpty()) { cachedItems = new ArrayList<>(); return result; }
         try {
             JSONArray array = new JSONArray(raw);
             for (int i = 0; i < array.length(); i++) {
@@ -155,7 +204,7 @@ final class ClipboardHistoryStore {
         } catch (Exception error) {
             Log.e(TAG, "history parse failed: " + error.getClass().getSimpleName());
         }
-        cachedBlob = blob; cachedItems = copyItems(result);
+        cachedItems = copyItems(result);
         return result;
     }
 
@@ -176,16 +225,26 @@ final class ClipboardHistoryStore {
         ArrayList<Entry> pinned = new ArrayList<>();
         ArrayList<Entry> recent = new ArrayList<>();
         if (entries != null) for (Entry entry : entries) {
-            if (entry == null || entry.text == null) continue;
+            if (entry == null || !canStore(entry.text)) continue;
             if (entry.pinned) pinned.add(entry);
             else if (entry.timestamp >= cutoff) recent.add(entry);
         }
         Comparator<Entry> newestFirst = (left, right) -> Long.compare(right.timestamp, left.timestamp);
         Collections.sort(pinned, newestFirst);
         Collections.sort(recent, newestFirst);
+        if (pinned.size() > MAX_PINNED) pinned.subList(MAX_PINNED, pinned.size()).clear();
         if (recent.size() > limit) recent.subList(limit, recent.size()).clear();
-        pinned.addAll(recent);
-        return pinned;
+        ArrayList<Entry> kept = new ArrayList<>();
+        int bytes = 0;
+        for (Entry entry : pinned) {
+            int size = entry.text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            if (bytes + size <= MAX_TOTAL_BYTES) { kept.add(entry); bytes += size; }
+        }
+        for (Entry entry : recent) {
+            int size = entry.text.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+            if (bytes + size <= MAX_TOTAL_BYTES) { kept.add(entry); bytes += size; }
+        }
+        return kept;
     }
 
     private int recentLimit() {
@@ -202,10 +261,17 @@ final class ClipboardHistoryStore {
         catch (NumberFormatException ignored) { return DEFAULT_MAX_AGE_DAYS; }
     }
 
-    private void writeItems(List<Item> items) {
+    private synchronized void writeItems(List<Item> items) {
         ArrayList<Item> normalized = normalize(items);
+        cachedItems = copyItems(normalized);
+        if (pendingWrite != null) pendingWrite.cancel(false);
+        List<Item> snapshot = copyItems(normalized);
+        pendingWrite = writer.schedule(() -> persist(snapshot), 150, TimeUnit.MILLISECONDS);
+    }
+
+    private void persist(List<Item> items) {
         JSONArray array = new JSONArray();
-        for (Item item : normalized) {
+        for (Item item : items) {
             JSONObject value = new JSONObject();
             try {
                 value.put("id", id(item.text));
@@ -217,10 +283,16 @@ final class ClipboardHistoryStore {
                 Log.e(TAG, "history encode failed: " + error.getClass().getSimpleName());
             }
         }
-        if (SecureLocalStore.write(context, PREFS, KEY_ALIAS, array.toString())) {
-            cachedBlob = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString("blob", "");
-            cachedItems = copyItems(normalized);
-        }
+        SecureLocalStore.write(context, PREFS, KEY_ALIAS, array.toString());
+    }
+
+    private synchronized void flushPendingWrites() {
+        if (pendingWrite == null) return;
+        pendingWrite.cancel(false);
+        List<Item> snapshot = copyItems(cachedItems);
+        try { writer.submit(() -> persist(snapshot)).get(3, TimeUnit.SECONDS); }
+        catch (Exception error) { Log.e(TAG, "history flush failed: " + error.getClass().getSimpleName()); }
+        pendingWrite = null;
     }
 
     private static Item find(List<Item> items, String text) {

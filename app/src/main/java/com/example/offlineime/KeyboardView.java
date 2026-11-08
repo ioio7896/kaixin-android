@@ -628,7 +628,7 @@ public final class KeyboardView extends LinearLayout {
                 || theme.function != slot.styledFunction
                 || Math.round(theme.radius) != slot.styledRadius
                 || candidateFontSp() != slot.styledFont || candidateHeightDp() != slot.styledHeight) {
-            styleCandidate(slot.view, word, first, foreground, 0, false);
+            styleCandidate(slot.view, word, first, foreground, 0, false, false);
             slot.styledWord = word;
             slot.styledFirst = first;
             slot.styledForeground = foreground;
@@ -644,7 +644,7 @@ public final class KeyboardView extends LinearLayout {
         if (slot.view.getVisibility() != VISIBLE) slot.view.setVisibility(VISIBLE);
         if (slot.gap != gap) {
             LayoutParams params = new LayoutParams(-2, -1);
-            params.setMargins(dp(gap), dp(gap), dp(gap), dp(gap));
+            params.setMargins(0, 0, 0, 0);
             slot.view.setLayoutParams(params);
             slot.gap = gap;
         }
@@ -1688,26 +1688,27 @@ public final class KeyboardView extends LinearLayout {
     }
 
     private void styleCandidate(TextView item, String word, boolean first, int foreground,
-                                int number, boolean showNumber) {
+                                int number, boolean showNumber, boolean expanded) {
         String marker = showNumber && number > 0 ? number + " " : "";
         SpannableString label = new SpannableString(marker + word);
         if (!marker.isEmpty()) {
             label.setSpan(new RelativeSizeSpan(0.62f), 0, marker.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         item.setText(label); item.setTextSize(candidateFontSp());
+        item.setTypeface(android.graphics.Typeface.create(
+                first ? "sans-serif-medium" : "sans-serif", android.graphics.Typeface.NORMAL));
+        item.setIncludeFontPadding(false);
         item.setTextColor(new android.content.res.ColorStateList(
                 new int[][]{new int[]{android.R.attr.state_pressed}, new int[]{}},
                 new int[]{theme.candidateForeground(first, true), theme.candidateForeground(first, false)}));
-        item.setGravity(Gravity.CENTER); item.setPadding(dp(9), 0, dp(9), 0);
+        item.setGravity(Gravity.CENTER); item.setPadding(dp(12), 0, dp(12), 0);
         item.setSingleLine(true); item.setEllipsize(android.text.TextUtils.TruncateAt.END);
         item.setMinWidth(dp(30));
         item.setMinHeight(dp(candidateHeightDp()));
-        android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
-        states.addState(new int[]{android.R.attr.state_pressed}, new android.graphics.drawable.ColorDrawable(theme.function));
-        GradientDrawable normal = roundRect(first ? theme.candidateBackground(true)
-                : Color.TRANSPARENT, first ? 10 : 0);
-                states.addState(new int[]{}, normal);
-        item.setBackground(states);
+        int divider = blendColor(theme.background, theme.text, theme.isDark ? 0.25f : 0.13f);
+        int pressed = blendColor(theme.background, theme.accent, theme.isDark ? 0.22f : 0.09f);
+        item.setBackground(new CandidateCellDrawable(divider, pressed, expanded,
+                getResources().getDisplayMetrics().density));
     }
 
     private static int blendColor(int base, int overlay, float amount) {
@@ -1780,7 +1781,7 @@ public final class KeyboardView extends LinearLayout {
         CandidatePanel panel = new CandidatePanel(getContext(), expandedCandidateWords, order,
                 candidateFontSp(), renderSettings.getString("expanded_candidate_density", "standard"), new CandidatePanel.Host() {
             public void style(TextView view, String word, boolean first) {
-                styleCandidate(view, word, first, theme.text, 0, false);
+                styleCandidate(view, word, first, theme.text, 0, false, true);
             }
             public void select(PinyinDictionary.Entry entry) { callback.onCandidateEntry(entry); }
             public void touching(boolean active) {
@@ -2146,8 +2147,8 @@ public final class KeyboardView extends LinearLayout {
         String savedStyle = getContext().getSharedPreferences("emoji", Context.MODE_PRIVATE)
                 .getString("style", EmojiStyleAssets.SYSTEM);
         selectedEmojiStyle = EmojiStyleAssets.known(savedStyle) ? savedStyle : EmojiStyleAssets.SYSTEM;
-        if (EmojiStyleAssets.WECHAT.equals(selectedEmojiStyle)) selectedEmojiCategory = "微信";
-        else if ("微信".equals(selectedEmojiCategory)) selectedEmojiCategory = "最近";
+        if (EmojiStyleAssets.WECHAT.equals(selectedEmojiStyle)) selectedEmojiCategory = "黄脸";
+        else if ("黄脸".equals(selectedEmojiCategory)) selectedEmojiCategory = "最近";
         showEmoji(selectedEmojiCategory);
     }
     public void showEmoji(String category) {
@@ -2188,7 +2189,7 @@ public final class KeyboardView extends LinearLayout {
                     + (active ? "，已选中" : ""));
         }
         if (emojiPanelShown) {
-            selectedEmojiCategory = EmojiStyleAssets.WECHAT.equals(style) ? "微信" : "最近";
+            selectedEmojiCategory = EmojiStyleAssets.WECHAT.equals(style) ? "黄脸" : "最近";
             if (emojiCategories != null) emojiCategories.setVisibility(
                     EmojiStyleAssets.WECHAT.equals(style) ? GONE : VISIBLE);
             updateEmojiCategory(selectedEmojiCategory);
@@ -2258,7 +2259,7 @@ public final class KeyboardView extends LinearLayout {
         for (String style : EmojiStyleAssets.STYLES) {
             boolean active = style.equals(selectedEmojiStyle);
             View tab = addCompactPanelCell(row,
-                    EmojiStyleAssets.WECHAT.equals(style) ? "微信" : "Emoji",
+                    EmojiStyleAssets.WECHAT.equals(style) ? "黄脸" : "Emoji",
                     EmojiStyleAssets.label(style) + "表情样式" + (active ? "，已选中" : ""),
                     active, 13, () -> callback.onKey("表情样式:" + style));
             emojiStyleTabs.put(style, tab);

@@ -219,6 +219,18 @@ final class PinyinInput {
         return true;
     }
 
+    /** A completed first syllable followed by a second full spelling in progress. */
+    static boolean hasTwoSyllableFullPath(String input) {
+        String query = normalize(input);
+        if (query.isEmpty() || query.indexOf('\'') < 0 && SYLLABLES.contains(query)) return false;
+        for (Path path : paths(query, true, false, false)) {
+            if (path.tokens.size() != 2 || path.tokens.get(0).length() < 2) continue;
+            if (path.cost == 0 || path.tokens.get(1).length() >= 2 || query.indexOf('\'') >= 0)
+                return true;
+        }
+        return false;
+    }
+
     /** Match against an actual pronunciation, preserving every explicit boundary. */
     static Match match(String input, String pronunciation, boolean full, boolean shortInput,
                        boolean mixed, boolean doubles, boolean prefix) {

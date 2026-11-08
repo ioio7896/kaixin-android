@@ -118,7 +118,7 @@ public final class KeyButton extends Button {
         secondaryLabelColor = blend(theme.text, theme.key, 0.45f);
         setText("回车".equals(this.label) ? "确认" : this.label); setAllCaps(false); setMinHeight(0); setMinWidth(0); setGravity(Gravity.CENTER); setPadding(0,0,0,0);
         setIncludeFontPadding(false);
-        setTypeface(Typeface.create("sans-serif", Typeface.NORMAL));
+        setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         boolean hasSecondaryLabel = this.label.indexOf(' ') >= 0 || this.label.indexOf('\n') >= 0;
         setTextSize(("空格".equals(this.label) || "Space".equals(this.label)) ? 13
                 : this.label.indexOf('\n') >= 0 ? theme.font

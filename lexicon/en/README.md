@@ -23,3 +23,5 @@ python scripts/generate_common_english.py
 - 许可证摘要见本目录 `LICENSE.wordfreq.md`
 
 开心输入法对词条进行筛选、加入常用技术词、统一格式和生成权重。该转换不表示 wordfreq 作者认可或赞助开心输入法。
+
+`kaixin_mixed_100.txt` 是单独维护的 100 个常用英文及中英混输词条，供中文键盘使用。每行包含显示词、完整输入码和相对权重；多个输入码用英文逗号隔开。它只在输入码完全匹配时加入候选，例如 `wifi` → `WiFi`、`upan` → `U盘`、`wife` → `wife`。这份词表为人工整理，不属于上面的 wordfreq 生成结果。

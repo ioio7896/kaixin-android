@@ -29,8 +29,8 @@ public final class UiTokens {
 
     public static final class Palette {
         public static final Palette LIGHT = new Palette(
-                0xfff2f2f7, 0xffffffff, 0xfff7f7fa, 0xff1c1c1e, 0xff636366,
-                0xffd1d1d6, 0xff0066cc, 0xffe8f2ff, 0xffd92d20, 0xffffebe9);
+                0xffe7ecf3, 0xffffffff, 0xffe8eef6, 0xff1b2430, 0xff4b5563,
+                0xffc9d2dd, 0xff2468e8, 0xffdbe9ff, 0xffd92d20, 0xffffebe9);
         public static final Palette DARK = new Palette(
                 0xff000000, 0xff1c1c1e, 0xff2c2c2e, 0xfff5f5f7, 0xffaeaeb2,
                 0xff38383a, 0xff0a84ff, 0xff173a5e, 0xffff453a, 0xff4a211e);

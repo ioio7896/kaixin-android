@@ -4,6 +4,7 @@
         android:name="com.example.offlineime.permission.INTERNAL"
         android:protectionLevel="signature" />
     <uses-permission android:name="com.example.offlineime.permission.INTERNAL" />
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 离线输入法不声明 INTERNET、录音、联系人、存储或无障碍权限。 -->
     <application
         android:allowBackup="false"

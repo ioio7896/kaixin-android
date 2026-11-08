@@ -53,7 +53,7 @@ final class EmojiStyleAssets {
 
     static String label(String style) {
         switch (style) {
-            case WECHAT: return "微信小黄脸";
+            case WECHAT: return "黄脸";
             case TWEMOJI: return "Twemoji";
             case FLUENT: return "Fluent";
             case OPENMOJI: return "OpenMoji";

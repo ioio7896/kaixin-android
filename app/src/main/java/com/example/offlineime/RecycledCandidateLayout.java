@@ -48,7 +48,7 @@ final class RecycledCandidateLayout extends ViewGroup {
         this.minimumWidth = minimumWidth;
         this.cellHeight = cellHeight;
         this.horizontalPadding = padding;
-        gap = Math.round(2 * getResources().getDisplayMetrics().density);
+        gap = 0;
         paint.setTextSize(textSp * getResources().getDisplayMetrics().scaledDensity);
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         setClipChildren(false);

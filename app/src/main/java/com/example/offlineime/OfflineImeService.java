@@ -77,6 +77,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private Runnable clipboardUndoExpiry;
     private ClipboardManager clipboardManager;
     private boolean clipboardListenerRegistered;
+    private long lastClipboardTimestamp;
     private final ClipboardManager.OnPrimaryClipChangedListener clipboardChangedListener =
             this::captureClipboardWhileActive;
     private static final Pattern LABELED_ONE_TIME_CODE = Pattern.compile(
@@ -93,6 +94,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             wordCreation.clear(); lastCustomWordChange = null; lastCustomWordNotice = "";
             if (dictionary != null) dictionary.clearUserWords();
             if (contextModel != null) contextModel.clear();
+            if (clipboardHistory != null) clipboardHistory.resumeAfterGlobalClear();
+            ClipboardManager manager = getClipboardManager();
+            ClipDescription currentClip = manager == null ? null : manager.getPrimaryClipDescription();
+            if (currentClip != null) rememberClipboardTimestamp(currentClip.getTimestamp());
             composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
             lockedPinyinPath = "";
             previousCommittedWord = "";
@@ -365,6 +370,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         settingsPreferences.registerOnSharedPreferenceChangeListener(settingsListener);
         dictionary = new PinyinDictionary(getAssets(), this);
         clipboardHistory = new ClipboardHistoryStore(this);
+        lastClipboardTimestamp = getSharedPreferences("clipboard_capture_state", MODE_PRIVATE)
+                .getLong("last_timestamp", 0);
+        startClipboardListenerIfNeeded();
         quickPhrases = new QuickPhraseStore(this);
         loaderExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(() -> {
@@ -446,13 +454,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onWindowShown() {
         super.onWindowShown();
+        startClipboardListenerIfNeeded();
         logImeLifecycle("window_shown");
     }
 
     @Override public void onWindowHidden() {
         keyInputOrder.cancelAll();
         if (keyboardView != null) keyboardView.cancelKeyTouches();
-        stopClipboardListener();
         super.onWindowHidden();
         logImeLifecycle("window_hidden");
     }
@@ -628,6 +636,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         capsLock = false;
         lastShiftTapUptime = 0;
         candidatePage = 0;
+        startClipboardListenerIfNeeded();
     }
 
     String editorLayoutKind() { return editorLayoutKind; }
@@ -658,7 +667,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onFinishInputView(boolean finishingInput) {
         cancelRenderRefresh();
-        stopClipboardListener();
         super.onFinishInputView(finishingInput);
         logImeLifecycle("finish_input_view finishing=" + finishingInput);
     }
@@ -684,9 +692,11 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         nextWordPredictionExpiry = null;
         editorInfo = null;
+        secureEditor = false;
         lastEditorSelectionStart = -1;
         lastEditorSelectionEnd = -1;
         super.onFinishInput();
+        startClipboardListenerIfNeeded();
     }
 
     @Override public void onDestroy() {
@@ -697,6 +707,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         cancelCandidateWork();
         if (settingsPreferences != null) settingsPreferences.unregisterOnSharedPreferenceChangeListener(settingsListener);
         stopClipboardListener();
+        if (clipboardHistory != null) clipboardHistory.close();
         if (clipboardUndoExpiry != null) mainHandler.removeCallbacks(clipboardUndoExpiry);
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         clipboardClearBackup = null;
@@ -950,7 +961,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             p.edit().putBoolean("favorite_" + emoji, !p.getBoolean("favorite_" + emoji, false)).apply();
             if (keyboardView != null && emojiShown) keyboardView.showEmoji(
                     EmojiStyleAssets.WECHAT.equals(getSharedPreferences("emoji", MODE_PRIVATE)
-                            .getString("style", EmojiStyleAssets.SYSTEM)) ? "微信" : "收藏");
+                            .getString("style", EmojiStyleAssets.SYSTEM)) ? "黄脸" : "收藏");
             return;
         }
         if (key.startsWith("表情:")) { String emoji = key.substring(3); if (clearComposing(true) && commit(emoji)) rememberEmoji(emoji); return; }
@@ -1547,8 +1558,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 candidateQueries.submit(ticket, () -> {
                     QueryWork.begin(ticket.cancellation, ticket.stages);
                     try {
-                        List<PinyinDictionary.Entry> common = dictionary.suggestBootstrap(
-                                rawInput, queryMode == Mode.NINE);
+                        List<PinyinDictionary.Entry> common = withMixedEnglishCandidates(
+                                dictionary.suggestBootstrap(rawInput, queryMode == Mode.NINE),
+                                queryMode, rawInput, null, false);
                         QueryWork.check();
                         if (!common.isEmpty()) {
                             List<PinyinDictionary.Entry> ready = bindCandidateVersion(
@@ -1755,7 +1767,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             List<PinyinDictionary.Entry> source, Mode queryMode, String rawInput,
             PinyinPathEditor.Query constraint, boolean shuangpinInput) {
         ArrayList<PinyinDictionary.Entry> eligible = new ArrayList<>();
+        boolean twoSyllableFull = queryMode == Mode.PINYIN && !shuangpinInput
+                && constraint == null && settingsPreferences.getBoolean("full_pinyin", true)
+                && PinyinInput.hasTwoSyllableFullPath(rawInput);
         if (source != null) for (PinyinDictionary.Entry entry : source) {
+            if (twoSyllableFull && entry.codePointLength > 2
+                    && (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
+                        || entry.matchTier == PinyinDictionary.TIER_MIXED)) continue;
             if (entry.matchTier == PinyinDictionary.TIER_FUZZY) {
                 if (queryMode == Mode.PINYIN && !shuangpinInput && constraint == null
                         && rawInput.length() >= 4 && entry.consumedLength == rawInput.length()
@@ -1778,6 +1796,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (queryMode != Mode.PINYIN && queryMode != Mode.NINE
                     || rawInput.isEmpty() || entry.codePointLength < 3 || entry.codePointLength > 8
                     || !containsHan(entry.word) || shuangpinInput && queryMode == Mode.PINYIN
+                    || queryMode == Mode.PINYIN && dictionary.isMixedEnglishCandidate(rawInput, entry.word)
                     || matchesCompleteLongWord(entry, queryMode, rawInput, constraint, shuangpinInput))
                 eligible.add(entry);
         }
@@ -1858,21 +1877,25 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         else if (queryMode == Mode.NINE && !locked) values = dictionary.suggestT9(query);
         else if (queryMode == Mode.ENGLISH) values = dictionary.suggestEnglish(query);
         else values = forCommit ? dictionary.suggestForCommit(query, false) : dictionary.suggest(query);
+        return withMixedEnglishCandidates(values, queryMode, query, constraint, locked);
+    }
+
+    private List<PinyinDictionary.Entry> withMixedEnglishCandidates(
+            List<PinyinDictionary.Entry> values, Mode queryMode, String query,
+            PinyinPathEditor.Query constraint, boolean locked) {
         if (queryMode != Mode.PINYIN
                 || !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("mixed_english", true)
                 || constraint != null || locked) return values;
-        // Mixed English is supplemental. A Chinese hit must become selectable
-        // before another dictionary lookup runs on the first-screen worker.
-        if (QueryWork.firstScreen() && !values.isEmpty()) return values;
+        // The small exact-code mixed vocabulary is cheap enough for the first frame.
+        if (query == null || !query.matches("[A-Za-z]{2,24}")) return values;
+        List<PinyinDictionary.Entry> mixed = dictionary.suggestMixedEnglish(query);
+        if (mixed.isEmpty()) return values;
         ArrayList<PinyinDictionary.Entry> combined = new ArrayList<>(values);
         java.util.HashSet<String> seen = new java.util.HashSet<>();
         for (PinyinDictionary.Entry entry : values) seen.add(entry.word.toLowerCase(Locale.ROOT));
-        if (!query.matches("[A-Za-z][A-Za-z'.-]*")) return combined;
-        int added = 0;
-        for (PinyinDictionary.Entry english : dictionary.suggestEnglish(query)) {
+        for (PinyinDictionary.Entry english : mixed) {
             if (seen.add(english.word.toLowerCase(Locale.ROOT))) {
                 combined.add(english);
-                if (++added >= 12) break;
             }
         }
         return combined;
@@ -2366,10 +2389,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         else if ("{".equals(value)) { commit("｛"); commit("｝"); sendKey(KeyEvent.KEYCODE_DPAD_LEFT); }
         else if ("\"".equals(value)) { commit("“"); commit("”"); sendKey(KeyEvent.KEYCODE_DPAD_LEFT); }
         else commit(value);
-        if (mode == Mode.ENGLISH && !capsLock && (".".equals(key) || "!".equals(key) || "?".equals(key))) {
-            shift = true;
-            refresh();
-        }
+        if (mode == Mode.ENGLISH) refresh();
     }
 
     private void pasteFromClipboard() {
@@ -2450,34 +2470,48 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void captureClipboardOnDemand() {
-        captureCurrentClipboard(true);
+        captureCurrentClipboard(true, false);
     }
 
     private void captureClipboardWhileActive() {
         if (!clipboardListenerRegistered || !canUseClipboard()) return;
-        captureCurrentClipboard(false);
+        captureCurrentClipboard(false, true);
     }
 
-    private void captureCurrentClipboard(boolean showSensitiveNotice) {
+    private void captureCurrentClipboard(boolean showSensitiveNotice, boolean newCopy) {
         try {
             ClipboardManager cm = getClipboardManager();
             if (cm == null || !cm.hasPrimaryClip() || secureEditor || !canUseClipboard()) return;
             ClipData clip = cm.getPrimaryClip();
             if (clip == null || clip.getItemCount() == 0) return;
-            CharSequence value = clip.getItemAt(0).coerceToText(this);
-            if (value == null || value.length() == 0) return;
+            ClipDescription description = clip.getDescription();
+            long timestamp = description == null ? 0 : description.getTimestamp();
+            if (timestamp != 0 && timestamp == lastClipboardTimestamp) return;
+            CharSequence value = clip.getItemAt(0).getText();
+            if (value == null || value.length() == 0 || value.length() > ClipboardHistoryStore.MAX_TEXT_CHARS) return;
             String text = value.toString();
+            if (!ClipboardHistoryStore.canStore(text)) return;
             if (isSensitiveClipboard(clip, text)) {
                 if (showSensitiveNotice) android.widget.Toast.makeText(this,
                         "检测到敏感剪贴板内容，已跳过保存", android.widget.Toast.LENGTH_SHORT).show();
+                rememberClipboardTimestamp(timestamp);
                 return;
             }
-            clipboardHistory.add(text);
+            if (newCopy) clipboardHistory.add(text);
+            else clipboardHistory.addIfAbsent(text);
+            rememberClipboardTimestamp(timestamp);
             if (clipboardShown && !clipboardEnablePromptShown) refresh();
         } catch (RuntimeException error) {
             android.util.Log.w("OfflineImeClipboard", "clipboard read failed: " + error.getClass().getSimpleName());
             if (showSensitiveNotice) android.widget.Toast.makeText(this, "暂时无法读取系统剪贴板", android.widget.Toast.LENGTH_SHORT).show();
         }
+    }
+
+    private void rememberClipboardTimestamp(long timestamp) {
+        if (timestamp == 0) return;
+        lastClipboardTimestamp = timestamp;
+        getSharedPreferences("clipboard_capture_state", MODE_PRIVATE).edit()
+                .putLong("last_timestamp", timestamp).apply();
     }
 
     private ClipboardManager getClipboardManager() {
@@ -2486,10 +2520,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void startClipboardListenerIfNeeded() {
-        if (!isInputViewShown() || clipboardSearchDialogOpen || clipboardSearchResumePending) return;
+        if (clipboardSearchDialogOpen || clipboardSearchResumePending) return;
         android.content.SharedPreferences settings = getSharedPreferences("settings", Context.MODE_PRIVATE);
         boolean enabled = settings.getBoolean("clipboard_enabled", true)
-                && settings.getBoolean("clipboard_capture_while_typing", false)
+                && settings.getBoolean("clipboard_capture_while_typing", true)
                 && !settings.getBoolean("privacy_mode", false) && !secureEditor;
         if (!enabled || clipboardListenerRegistered) return;
         ClipboardManager manager = getClipboardManager();
@@ -2497,8 +2531,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         try {
             manager.addPrimaryClipChangedListener(clipboardChangedListener);
             clipboardListenerRegistered = true;
-            // Pick up the most recent copy made while the keyboard was hidden.
-            captureClipboardWhileActive();
         } catch (RuntimeException error) {
             android.util.Log.w("OfflineImeClipboard", "clipboard listener unavailable: " + error.getClass().getSimpleName());
         }
@@ -2692,6 +2724,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         clipboardSearchDialogOpen = false;
         if (!clipboardSearchRestorePanel) {
             clipboardSearchReturnEditorInfo = null;
+            startClipboardListenerIfNeeded();
             return;
         }
         clipboardShown = true; emojiShown = false;
