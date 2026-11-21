@@ -17,9 +17,16 @@ import android.widget.Button;
 
 /** 统一处理按键外观、触摸反馈和可访问性。 */
 public final class KeyButton extends Button {
+    static final long RELEASE_DELAY_MS = 33;
     private final float maxFont;
     private final String label;
-    private final String primaryLabel, secondaryLabel;
+    private final KeyboardTheme theme;
+    private boolean previewEnabled, deleteKey, releasePending;
+    private KeyPreview preview;
+    private final Runnable restorePress = this::restorePress;
+    private String primaryLabel;
+    private final String secondaryLabel;
+    private String letterLabel;
     private final int secondaryLabelColor;
     private final Paint primaryLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint secondaryLabelPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -45,6 +52,10 @@ public final class KeyButton extends Button {
     private java.util.function.IntConsumer trackpadMove;
     private Runnable trackpadSelection;
     private boolean repeatAction;
+    interface DeleteAction { void delete(boolean first); }
+    private java.util.function.Supplier<DeleteAction> deleteAction;
+    private Drawable defaultShiftBackground;
+    private boolean shiftUppercase, shiftLocked;
     private int symbolIconResource;
     private Drawable symbolIcon;
     private String symbolCaption = "";
@@ -53,10 +64,15 @@ public final class KeyButton extends Button {
     private static final class Touch {
         int id;
         float startX, startY;
-        boolean consumed, swipeUpArmed, trackpad;
+        long downAt;
+        boolean consumed, swipeUpArmed, longPressed, trackpad;
         int trackpadSteps, repeats;
         Runnable hold;
         OrderedKeyInput.Press press;
+        DeleteAction deleteAction;
+        boolean repeatStarted;
+
+        boolean isVisuallyPressed() { return !consumed || swipeUpArmed || longPressed; }
     }
     public void setAlternateAction(Runnable action) {
         alternate = action;
@@ -81,8 +97,16 @@ public final class KeyButton extends Button {
         secondaryLabelVisible = visible;
         invalidate();
     }
-    public void setRepeatDelete() { setRepeatAction(); }
+    public void setRepeatDelete() {
+        deleteKey = true;
+        setRepeatAction();
+    }
+    void setRepeatDelete(java.util.function.Supplier<DeleteAction> action) {
+        setRepeatDelete();
+        deleteAction = action;
+    }
     public void setRepeatAction() { repeatAction = true; }
+    void enableKeyPreview() { previewEnabled = true; }
     public void setHorizontalActions(Runnable left, Runnable right) { swipeLeft = left; swipeRight = right; }
     public void setTrackpadActions(java.util.function.IntConsumer move, Runnable selection) {
         trackpadMove = move;
@@ -104,8 +128,14 @@ public final class KeyButton extends Button {
         });
         setContentDescription(symbolDescription(label) + "，左右滑动移动光标，上滑或双指切换选择模式");
     }
+    public KeyButton(Context context) {
+        this(context, "", false, KeyboardTheme.from(context, false));
+    }
+
     public KeyButton(Context c, String label, boolean function, KeyboardTheme theme) {
         super(c); this.label = label == null ? "" : label; this.maxFont = theme.font;
+        this.theme = theme;
+        deleteKey = "⌫".equals(this.label) || "退格".equals(this.label) || "删除".equals(this.label);
         feedback = KeyFeedback.get(c);
         inputOrder = c instanceof OfflineImeService ? ((OfflineImeService) c).keyInputOrder() : new OrderedKeyInput();
         touchSlop = ViewConfiguration.get(c).getScaledTouchSlop();
@@ -150,6 +180,26 @@ public final class KeyButton extends Button {
         symbolIcon = null;
         setText("");
         if (description != null && !description.isEmpty()) setContentDescription(description);
+        invalidate();
+    }
+
+    void setActionCaption(String caption) {
+        if (caption.equals(symbolCaption)) return;
+        symbolCaption = caption;
+        setContentDescription(caption);
+        invalidate();
+    }
+
+    void setLetterUppercase(boolean uppercase) {
+        char lower = label.charAt(label.length() - 1);
+        char glyph = uppercase ? Character.toUpperCase(lower) : lower;
+        if (letterLabel != null && letterLabel.charAt(0) == glyph) return;
+        String display = String.valueOf(glyph);
+        letterLabel = display;
+        if (!primaryLabel.isEmpty()) primaryLabel = display;
+        else if (swipeUpHint.isEmpty()) setText(display);
+        setContentDescription(!primaryLabel.isEmpty() ? secondaryLabel + "\n" + display
+                : swipeUpHint.isEmpty() ? display : display + "，上划或长按输入 " + swipeUpHint);
         invalidate();
     }
 
@@ -236,7 +286,7 @@ public final class KeyButton extends Button {
 
     private void drawKeyLabels(Canvas canvas) {
         boolean stacked = !primaryLabel.isEmpty();
-        String main = stacked ? primaryLabel : label;
+        String main = stacked ? primaryLabel : letterLabel == null ? label : letterLabel;
         String hint = secondaryLabelVisible ? (stacked ? secondaryLabel : swipeUpHint) : "";
         primaryLabelPaint.setTypeface(getTypeface());
         secondaryLabelPaint.setTypeface(getTypeface());
@@ -319,10 +369,19 @@ public final class KeyButton extends Button {
     }
 
     public void setShiftState(boolean uppercase, boolean locked, KeyboardTheme theme) {
+        boolean initialized = defaultShiftBackground != null;
+        if (initialized && shiftUppercase == uppercase && shiftLocked == locked) return;
+        if (!initialized) defaultShiftBackground = getBackground();
+        shiftUppercase = uppercase;
+        shiftLocked = locked;
         setSelected(locked);
         setContentDescription(locked ? "大写锁定，点击解除"
                 : uppercase ? "下一字母大写，双击锁定大写" : "大小写切换，双击锁定大写");
-        if (!uppercase) return;
+        setTextColor(locked ? theme.accent : theme.text);
+        if (!uppercase) {
+            if (initialized) setBackground(defaultShiftBackground);
+            return;
+        }
         float radius = theme.radius * getResources().getDisplayMetrics().density;
         int surface = blend(theme.function, theme.accent, locked ? 0.42f : 0.18f);
         GradientDrawable normal = new GradientDrawable();
@@ -336,7 +395,6 @@ public final class KeyButton extends Button {
         states.addState(new int[]{android.R.attr.state_pressed}, pressed);
         states.addState(new int[]{}, normal);
         setBackground(states);
-        if (locked) setTextColor(theme.accent);
     }
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
@@ -380,7 +438,7 @@ public final class KeyButton extends Button {
         super.setPressed(pressed);
         animate().cancel();
         boolean animations = android.animation.ValueAnimator.areAnimatorsEnabled();
-        if (!animations) { setScaleX(1f); setScaleY(1f); return; }
+        if (!animations || (!pressed && deleteKey)) { setScaleX(1f); setScaleY(1f); return; }
         if (pressed) { setScaleX(0.975f); setScaleY(0.975f); }
         else animate().scaleX(1f).scaleY(1f).setDuration(45)
                 .setInterpolator(RELEASE_INTERPOLATOR).withEndAction(null).start();
@@ -392,37 +450,53 @@ public final class KeyButton extends Button {
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             int index = event.getActionIndex(), id = event.getPointerId(index);
             Touch old = touches.get(id);
-            if (old != null) finishTouch(old, null);
+            if (old != null) finishTouch(old, null, false);
             Touch touch = new Touch();
             touch.id = id; touch.startX = event.getX(index); touch.startY = event.getY(index);
-            touch.press = repeatAction ? null : inputOrder.begin();
-            if (trackpadMove != null && touches.size() > 0) {
-                for (int i = 0; i < touches.size(); i++) beginTrackpad(touches.valueAt(i));
+            touch.downAt = event.getEventTime();
+            boolean twoFingerTrackpad = false;
+            if (trackpadMove != null) {
+                for (int i = 0; i < touches.size(); i++) {
+                    Touch other = touches.valueAt(i);
+                    if (!other.consumed || other.trackpad) {
+                        beginTrackpad(other);
+                        twoFingerTrackpad = true;
+                    }
+                }
+            }
+            if (twoFingerTrackpad) {
                 beginTrackpad(touch);
                 if (trackpadSelection != null) trackpadSelection.run();
             }
+            if (!touch.consumed) {
+                touch.press = inputOrder.begin();
+                if (touch.press.discarded) return true;
+            }
+            removeCallbacks(restorePress);
+            releasePending = false;
             touches.put(id, touch);
-            setPressed(true);
+            updateTouchPressed();
+            if (!touch.consumed) showPreview(touch);
             feedback.press(this);
-            // A second finger can confirm an unmoved plain key. Gesture,
-            // repeat and long-press keys must wait for their own release.
-            if (touch.press != null && inputLetter != 0 && alternate == null && swipeLeft == null
-                    && swipeRight == null && trackpadMove == null && !isLongClickable()) {
+            if (touch.press != null && !repeatAction) {
                 inputOrder.armEarly(touch.press, () -> {
                     if (touches.get(id) != touch || touch.consumed) return;
                     touch.consumed = true;
-                    updateTouchPressed();
-                    if (touchAction == null) performClick();
-                    else {
-                        Runnable commit = touchAction.action(touch.startX, touch.startY);
-                        if (commit != null) commit.run();
-                    }
+                    removeCallbacks(touch.hold);
+                    releaseTouchFeedback(touch, true);
+                    Runnable commit = tapAction(touch);
+                    if (commit != null) commit.run();
                 });
             }
-            // Each finger has its own gesture and hold timer. Taps still resolve
-            // on UP so symbol flicks, long presses and cancellation stay exclusive.
-            if (repeatAction) performClick();
             touch.hold = () -> holdTouch(touch);
+            if (repeatAction) inputOrder.finish(touch.press, () -> {
+                touch.repeatStarted = true;
+                if (deleteAction == null) performClick();
+                else {
+                    touch.deleteAction = deleteAction.get();
+                    touch.deleteAction.delete(true);
+                }
+            });
             if (touches.get(id) == touch && (repeatAction || trackpadMove != null
                     || alternate != null || isLongClickable()))
                 postDelayed(touch.hold, repeatAction ? 360 : alternateHoldTimeout > 0
@@ -433,64 +507,76 @@ public final class KeyButton extends Button {
         if (action == MotionEvent.ACTION_MOVE) {
             for (int i = 0; i < event.getPointerCount(); i++) {
                 Touch touch = touches.get(event.getPointerId(i));
-                if (touch != null) moveTouch(touch, event.getX(i), event.getY(i));
+                if (touch != null) moveTouch(touch, event.getX(i), event.getY(i), event.getEventTime());
             }
         } else if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP) {
             int index = event.getActionIndex();
             Touch touch = touches.get(event.getPointerId(index));
             if (touch != null) {
                 float x = event.getX(index), y = event.getY(index);
-                moveTouch(touch, x, y);
-                int edge = inputLetter == 0 ? 8 : 12;
-                Runnable commit = touch.swipeUpArmed ? alternate : !touch.consumed && !repeatAction
-                        && x >= -dp(edge) && x <= getWidth() + dp(edge)
-                        && y >= -dp(edge) && y <= getHeight() + dp(edge) ? this::performClick : null;
-                if (commit != null && !touch.swipeUpArmed && touchAction != null)
-                    commit = touchAction.action(touch.startX, touch.startY);
-                finishTouch(touch, commit);
+                moveTouch(touch, x, y, event.getEventTime());
+                Runnable commit = touch.swipeUpArmed ? alternate
+                        : !touch.consumed && !repeatAction ? tapAction(touch) : null;
+                finishTouch(touch, commit, true);
             }
         }
         return true;
     }
 
-    private void moveTouch(Touch touch, float x, float y) {
-            float dx = x - touch.startX, dy = y - touch.startY;
-            if (Math.abs(dx) > touchSlop || Math.abs(dy) > touchSlop) {
-                removeCallbacks(touch.hold);
-                inputOrder.disarmEarly(touch.press);
+    private Runnable tapAction(Touch touch) {
+        return touchAction == null ? this::performClick : touchAction.action(touch.startX, touch.startY);
+    }
+
+    private void showPreview(Touch touch) {
+        if (!previewEnabled || deleteKey || symbolIconResource != 0 || trackpadMove != null
+                || !(getContext() instanceof OfflineImeService)) return;
+        String glyph = !primaryLabel.isEmpty() ? primaryLabel : letterLabel != null ? letterLabel : label;
+        if (glyph.isEmpty()) return;
+        preview = ((OfflineImeService) getContext()).keyPreview();
+        if (preview != null) preview.show(this, touch, glyph, theme);
+    }
+
+    private void moveTouch(Touch touch, float x, float y, long eventTime) {
+        if (touch.swipeUpArmed) {
+            if (preview != null && !swipeUpHint.isEmpty()) preview.follow(this, touch, swipeUpHint, x, y);
+            return;
+        }
+        float dx = x - touch.startX, dy = y - touch.startY;
+        if (dx * dx + dy * dy > touchSlop * touchSlop) {
+            removeCallbacks(touch.hold);
+            inputOrder.disarmEarly(touch.press);
+        }
+        if (touch.consumed && !touch.trackpad) return;
+        if (trackpadMove != null && !touch.trackpad && -dy >= dp(24) && -dy > Math.abs(dx)) {
+            beginTrackpad(touch);
+            if (trackpadSelection != null) trackpadSelection.run();
+        } else if (trackpadMove != null && (touch.trackpad || (Math.abs(dx) >= dp(28)
+                && eventTime - touch.downAt >= 60)) && Math.abs(dx) >= Math.abs(dy) * 2f) {
+            beginTrackpad(touch);
+            int steps = (int) (dx / dp(12));
+            int change = steps - touch.trackpadSteps;
+            if (change != 0) {
+                touch.trackpadSteps = steps;
+                trackpadMove.accept(change);
             }
-            if (trackpadMove != null && !touch.trackpad && -dy >= dp(24) && -dy > Math.abs(dx)) {
-                beginTrackpad(touch);
-                if (trackpadSelection != null) trackpadSelection.run();
-            } else if (trackpadMove != null && (touch.trackpad || Math.abs(dx) >= dp(10))
-                    && Math.abs(dx) > Math.abs(dy) * 0.8f) {
-                beginTrackpad(touch);
-                int steps = (int) (dx / dp(12));
-                int change = steps - touch.trackpadSteps;
-                if (change != 0) {
-                    touch.trackpadSteps = steps;
-                    trackpadMove.accept(change);
-                }
-            } else if (!touch.consumed && alternate != null && alternateSwipeEnabled && -dy >= dp(swipeUpHint.isEmpty() ? 28 : 24)
-                    && -dy > Math.abs(dx)) {
-                touch.consumed = true; touch.swipeUpArmed = true; removeCallbacks(touch.hold);
-            } else if (!touch.consumed && swipeLeft != null && Math.abs(dx) > dp(30) && Math.abs(dx) > Math.abs(dy)) {
-                touch.consumed = true;
-                inputOrder.finish(touch.press, dx < 0 ? swipeLeft : swipeRight);
-            } else if (!touch.consumed && (x < -dp(inputLetter == 0 ? 8 : 12)
-                    || x > getWidth() + dp(inputLetter == 0 ? 8 : 12)
-                    || y < -dp(inputLetter == 0 ? 8 : 12)
-                    || y > getHeight() + dp(inputLetter == 0 ? 8 : 12))) {
-                // Keep tracking an upward flick after it leaves the small key.
-                // Horizontal exits and downward drags still cancel normally.
-                boolean trackingUp = alternate != null && alternateSwipeEnabled && dy < 0 && -dy > Math.abs(dx)
-                        && x >= -dp(8) && x <= getWidth() + dp(8);
-                if (!trackingUp) {
-                    touch.consumed = true; removeCallbacks(touch.hold);
-                    inputOrder.finish(touch.press, null);
-                }
-            }
-            updateTouchPressed();
+        } else if (!touch.consumed && alternate != null && alternateSwipeEnabled
+                && -dy >= dp(swipeUpHint.isEmpty() ? 28 : 24) && -dy > Math.abs(dx)) {
+            touch.consumed = true;
+            touch.swipeUpArmed = true;
+            removeCallbacks(touch.hold);
+            if (preview != null && !swipeUpHint.isEmpty()) preview.follow(this, touch, swipeUpHint, x, y);
+        } else if (!touch.consumed && swipeLeft != null && Math.abs(dx) > dp(30) && Math.abs(dx) > Math.abs(dy)) {
+            touch.consumed = true;
+            releaseTouchFeedback(touch, false);
+            inputOrder.finish(touch.press, dx < 0 ? swipeLeft : swipeRight);
+        } else if (!touch.consumed && (Math.abs(dx) > Math.max(dp(32), getWidth())
+                || Math.abs(dy) > Math.max(dp(32), getHeight()))) {
+            touch.consumed = true;
+            removeCallbacks(touch.hold);
+            releaseTouchFeedback(touch, false);
+            inputOrder.finish(touch.press, null);
+        }
+        updateTouchPressed();
     }
 
     private void beginTrackpad(Touch touch) {
@@ -504,7 +590,8 @@ public final class KeyButton extends Button {
             }
         }
         touch.consumed = true;
-        removeCallbacks(touch.hold);
+        if (touch.hold != null) removeCallbacks(touch.hold);
+        releaseTouchFeedback(touch, false);
         inputOrder.finish(touch.press, null);
         touch.press = null;
     }
@@ -512,8 +599,12 @@ public final class KeyButton extends Button {
     private void holdTouch(Touch touch) {
         if (touches.get(touch.id) != touch || touch.consumed || !isAttachedToWindow()) return;
         if (repeatAction) {
-            performClick();
-            if (touches.get(touch.id) == touch) postDelayed(touch.hold, Math.max(42, 95 - (++touch.repeats) * 4));
+            if (touch.repeatStarted) {
+                if (touch.deleteAction == null) performClick();
+                else touch.deleteAction.delete(false);
+            }
+            if (!touch.consumed && touches.get(touch.id) == touch)
+                postDelayed(touch.hold, Math.max(42, 95 - (++touch.repeats) * 4));
         } else if (trackpadMove != null) {
             // Holding Space enters cursor control without committing a space
             // or consuming the gesture as an unrelated long-click action.
@@ -521,23 +612,42 @@ public final class KeyButton extends Button {
             updateTouchPressed();
         } else {
             touch.consumed = true;
-            updateTouchPressed();
+            touch.longPressed = true;
             inputOrder.finish(touch.press, alternate != null ? alternate : () -> performLongClick());
         }
     }
 
-    private void finishTouch(Touch touch, Runnable action) {
+    private void finishTouch(Touch touch, Runnable action, boolean released) {
         touches.remove(touch.id);
         if (touch.hold != null) removeCallbacks(touch.hold);
         inputOrder.disarmEarly(touch.press);
-        updateTouchPressed();
+        if (!released || touch.isVisuallyPressed()) releaseTouchFeedback(touch, released);
+        else updateTouchPressed();
         inputOrder.finish(touch.press, action);
     }
 
+    private void releaseTouchFeedback(Touch touch, boolean released) {
+        boolean delay = released && !deleteKey;
+        if (preview != null) preview.release(this, touch, delay);
+        if (delay && !hasPressedTouch() && isPressed() && !releasePending) {
+            releasePending = true;
+            postDelayed(restorePress, RELEASE_DELAY_MS);
+        }
+        updateTouchPressed();
+    }
+
+    private void restorePress() {
+        releasePending = false;
+        updateTouchPressed();
+    }
+
+    private boolean hasPressedTouch() {
+        for (int i = 0; i < touches.size(); i++) if (touches.valueAt(i).isVisuallyPressed()) return true;
+        return false;
+    }
+
     private void updateTouchPressed() {
-        boolean active = false;
-        for (int i = 0; i < touches.size(); i++) active |= !touches.valueAt(i).consumed;
-        setPressed(active);
+        setPressed(releasePending || hasPressedTouch());
     }
 
     @Override public boolean performClick() {
@@ -546,7 +656,10 @@ public final class KeyButton extends Button {
         boolean result = super.performClick(); setSoundEffectsEnabled(sound); return result;
     }
     public void cancelTouch() {
-        while (touches.size() > 0) finishTouch(touches.valueAt(0), null);
+        removeCallbacks(restorePress);
+        releasePending = false;
+        if (preview != null) preview.cancel(this);
+        while (touches.size() > 0) finishTouch(touches.valueAt(0), null, false);
         setPressed(false);
     }
     @Override protected void onDetachedFromWindow() {

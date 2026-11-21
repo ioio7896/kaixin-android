@@ -73119,7 +73119,7 @@
 近身保镖	jin shen bao biao	2527
 近身接触	jin shen jie chu	2527
 还在纠结	hai zai jiu jie	2527
-还我山河	huan wo he shan	2527
+还我山河	huan wo shan he	2527
 还有一包	hai you yi bao	2527
 还没办完	hai mei ban wan	2527
 还要军训	hai yao jun xun	2527
@@ -95268,7 +95268,7 @@
 镂冰劚雪	lou bing zhu xue	2369
 镂冰炊砾	lou bing chui li	2369
 镂心呕血	lou xin ou xue	2369
-镂心鉥肝	lou xin feng gan	2369
+镂心鉥肝	lou xin shu gan	2369
 镇子梁乡	zhen zi liang xiang	2369
 镌心铭骨	juan xin ming gu	2369
 镌空妄实	juan kong wang shi	2369
@@ -166841,7 +166841,7 @@
 做点饭吃	zuo dian fan chi	1395
 停水了吗	ting shui le ma	1395
 元气亏虚	yuan qi kui xu	1395
-元气囝仔	yue qi jian zai	1395
+元气囝仔	yuan qi jian zai	1395
 充会儿电	chong hui er dian	1395
 先洗个澡	xian xi ge zao	1395
 先致其知	xian zhi qi zhi	1395
@@ -170258,7 +170258,7 @@
 枪炮腰花	qiang pao yao hua	1343
 枫泾古镇	feng jing gu zhen	1343
 查济古镇	zha ji gu zhen	1343
-栎阳公主	yue fang gong zhu	1343
+栎阳公主	yue yang gong zhu	1343
 栽种之法	zai zhong zhi fa	1343
 梦游的人	meng you de ren	1343
 棣花古镇	di hua gu zhen	1343

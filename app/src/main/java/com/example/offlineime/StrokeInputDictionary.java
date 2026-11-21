@@ -1,6 +1,7 @@
 package com.example.offlineime;
 
 import android.content.Context;
+import android.content.res.AssetManager;
 import android.util.Log;
 
 import java.io.BufferedReader;
@@ -16,40 +17,62 @@ import java.util.Map;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 
-/** Bundled five-stroke index covering simplified and traditional Han characters. */
+/**
+ * Bundled five-stroke index covering simplified and traditional Han characters.
+ * Delegates to the memory-mapped Rust dictionary when available (zero Java heap),
+ * with lazy regex-free Java fallback.
+ */
 final class StrokeInputDictionary {
     private static final String TAG = "OfflineImeStroke";
     private static volatile StrokeInputDictionary instance;
 
-    private final NavigableMap<String, String> sequences = new TreeMap<>();
-    private final Map<Integer, Integer> simplifiedRank = new HashMap<>();
-    private final Map<Integer, Integer> traditionalRank = new HashMap<>();
+    private final AssetManager assets;
+    private final boolean useNative;
+    private volatile NavigableMap<String, String> sequences;
+    private volatile Map<Integer, Integer> simplifiedRank;
+    private volatile Map<Integer, Integer> traditionalRank;
 
     static StrokeInputDictionary get(Context context) {
         StrokeInputDictionary ready = instance;
         if (ready != null) return ready;
         synchronized (StrokeInputDictionary.class) {
-            if (instance == null) instance = new StrokeInputDictionary(context.getApplicationContext());
+            if (instance == null) instance = new StrokeInputDictionary(context.getApplicationContext().getAssets());
             return instance;
         }
     }
 
-    private StrokeInputDictionary(Context context) {
-        loadSequences(context);
-        loadRanking(context, "stroke/ranking-simplified.txt", simplifiedRank);
-        loadRanking(context, "stroke/ranking-traditional.txt", traditionalRank);
+    private StrokeInputDictionary(AssetManager assets) {
+        this.assets = assets;
+        this.useNative = true;
     }
 
     StrokeInputDictionary(NavigableMap<String, String> source,
                           Map<Integer, Integer> simplified,
                           Map<Integer, Integer> traditional) {
-        if (source != null) sequences.putAll(source);
-        if (simplified != null) simplifiedRank.putAll(simplified);
-        if (traditional != null) traditionalRank.putAll(traditional);
+        this.assets = null;
+        this.useNative = false;
+        NavigableMap<String, String> seq = new TreeMap<>();
+        if (source != null) seq.putAll(source);
+        Map<Integer, Integer> simp = new HashMap<>();
+        if (simplified != null) simp.putAll(simplified);
+        Map<Integer, Integer> trad = new HashMap<>();
+        if (traditional != null) trad.putAll(traditional);
+        this.sequences = seq;
+        this.simplifiedRank = simp;
+        this.traditionalRank = trad;
+    }
+
+    static boolean isValidStrokeSequence(String value) {
+        if (value == null || value.isEmpty()) return false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < '1' || c > '5') return false;
+        }
+        return true;
     }
 
     List<PinyinDictionary.Entry> suggest(Context context, String strokes, int limit) {
-        if (strokes == null || strokes.isEmpty() || !strokes.matches("[1-5]+"))
+        if (!isValidStrokeSequence(strokes))
             return Collections.emptyList();
         boolean traditional = "traditional".equals(context.getSharedPreferences(
                 "settings", Context.MODE_PRIVATE).getString("output_script", "simplified"));
@@ -57,13 +80,19 @@ final class StrokeInputDictionary {
     }
 
     List<PinyinDictionary.Entry> suggest(String strokes, boolean traditional, int limit) {
-        if (strokes == null || strokes.isEmpty() || !strokes.matches("[1-5]+") || limit <= 0)
+        if (!isValidStrokeSequence(strokes) || limit <= 0)
             return Collections.emptyList();
-        Map<Integer, Integer> rank = traditional ? traditionalRank : simplifiedRank;
+        if (useNative) {
+            List<PinyinDictionary.Entry> nativeResult =
+                    PinyinDictionary.suggestStrokeNative(strokes, traditional, limit);
+            if (nativeResult != null) return nativeResult;
+        }
+        NavigableMap<String, String> seqMap = ensureSequences();
+        Map<Integer, Integer> rank = ensureRanking(traditional);
         LinkedHashSet<Integer> exact = new LinkedHashSet<>();
         LinkedHashSet<Integer> prefix = new LinkedHashSet<>();
-        addCharacters(sequences.get(strokes), exact);
-        NavigableMap<String, String> range = sequences.subMap(strokes, true, strokes + '\uffff', true);
+        addCharacters(seqMap.get(strokes), exact);
+        NavigableMap<String, String> range = seqMap.subMap(strokes, true, strokes + '\uffff', true);
         for (Map.Entry<String, String> row : range.entrySet()) {
             if (!row.getKey().startsWith(strokes)) break;
             if (!row.getKey().equals(strokes)) addCharacters(row.getValue(), prefix);
@@ -88,6 +117,35 @@ final class StrokeInputDictionary {
         return result;
     }
 
+    private NavigableMap<String, String> ensureSequences() {
+        NavigableMap<String, String> ready = sequences;
+        if (ready != null) return ready;
+        synchronized (this) {
+            if (sequences != null) return sequences;
+            NavigableMap<String, String> map = new TreeMap<>();
+            if (assets != null) loadSequences(assets, map);
+            sequences = map;
+            return map;
+        }
+    }
+
+    private Map<Integer, Integer> ensureRanking(boolean traditional) {
+        Map<Integer, Integer> ready = traditional ? traditionalRank : simplifiedRank;
+        if (ready != null) return ready;
+        synchronized (this) {
+            ready = traditional ? traditionalRank : simplifiedRank;
+            if (ready != null) return ready;
+            Map<Integer, Integer> map = new HashMap<>();
+            if (assets != null) {
+                loadRanking(assets, traditional ? "stroke/ranking-traditional.txt"
+                        : "stroke/ranking-simplified.txt", map);
+            }
+            if (traditional) traditionalRank = map;
+            else simplifiedRank = map;
+            return map;
+        }
+    }
+
     private static void addEntries(List<PinyinDictionary.Entry> output, List<Integer> values,
                                    String strokes, boolean exact, Map<Integer, Integer> rank, int limit) {
         for (int cp : values) {
@@ -105,24 +163,26 @@ final class StrokeInputDictionary {
         text.codePoints().forEach(output::add);
     }
 
-    private void loadSequences(Context context) {
+    private static void loadSequences(AssetManager assets, NavigableMap<String, String> output) {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                context.getAssets().open("stroke/sequence-characters.txt"), StandardCharsets.UTF_8))) {
+                assets.open("stroke/sequence-characters.txt"), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isEmpty() || line.charAt(0) == '#') continue;
-                String[] parts = line.split("\\t", 2);
-                if (parts.length == 2 && parts[0].matches("[1-5]+")) sequences.put(parts[0], parts[1]);
+                int tab = line.indexOf('\t');
+                if (tab <= 0 || tab + 1 >= line.length()) continue;
+                String key = line.substring(0, tab);
+                if (isValidStrokeSequence(key)) output.put(key, line.substring(tab + 1));
             }
         } catch (Exception error) {
             Log.e(TAG, "stroke sequence load failed", error);
         }
     }
 
-    private static void loadRanking(Context context, String asset, Map<Integer, Integer> output) {
+    private static void loadRanking(AssetManager assets, String asset, Map<Integer, Integer> output) {
         int position = 0;
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(
-                context.getAssets().open(asset), StandardCharsets.UTF_8))) {
+                assets.open(asset), StandardCharsets.UTF_8))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isEmpty() || line.charAt(0) == '#') continue;

@@ -12,6 +12,9 @@ public final class UiTokens {
     public static final int RADIUS_CONTROL = 12;
     public static final int RADIUS_CARD = 16;
     public static final int MIN_TOUCH = 48;
+    public static final int TITLE_SP = 20;
+    public static final int BODY_SP = 15;
+    public static final int CAPTION_SP = 13;
 
     private UiTokens() {}
 
@@ -29,11 +32,11 @@ public final class UiTokens {
 
     public static final class Palette {
         public static final Palette LIGHT = new Palette(
-                0xffe7ecf3, 0xffffffff, 0xffe8eef6, 0xff1b2430, 0xff4b5563,
-                0xffc9d2dd, 0xff2468e8, 0xffdbe9ff, 0xffd92d20, 0xffffebe9);
+                0xfff4f6fa, 0xffffffff, 0xffeaf0f8, 0xff1b2430, 0xff5b6675,
+                0xffdce3ec, 0xff315fa8, 0xffe0eafb, 0xffb3261e, 0xfffce8e6);
         public static final Palette DARK = new Palette(
-                0xff000000, 0xff1c1c1e, 0xff2c2c2e, 0xfff5f5f7, 0xffaeaeb2,
-                0xff38383a, 0xff0a84ff, 0xff173a5e, 0xffff453a, 0xff4a211e);
+                0xff12151b, 0xff1d222b, 0xff2a313d, 0xfff0f3f9, 0xffb6c0cf,
+                0xff485364, 0xffadc9ff, 0xff263b58, 0xffffb4ab, 0xff4a2926);
 
         public final int background;
         public final int surface;

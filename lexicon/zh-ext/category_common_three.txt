@@ -63100,7 +63100,7 @@
 两用型	liang yong xing	2422
 两重山	liang chong shan	2422
 两重山	liang zhong shan	2422
-两重心	lia zhong xin	2422
+两重心	liang zhong xin	2422
 严千帆	yan qian fan	2422
 严培中	yan pei zhong	2422
 严嵩横	yan song heng	2422
@@ -72499,7 +72499,7 @@
 逆转胜	ni zhuan sheng	2395
 逆青春	ni qing chun	2395
 选出的	xuan chu de	2395
-透明了	tong ming le	2395
+透明了	tou ming le	2395
 透明了	tou ming liao	2395
 透明壳	tou ming ke	2395
 透明层	tou ming ceng	2395
@@ -73983,7 +73983,7 @@
 任泽区	ren ze qu	2369
 任海霞	ren hai xia	2369
 任皇后	ren huang hou	2369
-任长风	reng chang feng	2369
+任长风	ren chang feng	2369
 份儿饭	fen er fan	2369
 仿古砖	fang gu zhuan	2369
 仿真度	fang zhen du	2369
@@ -89841,7 +89841,7 @@
 长春路	chang chun lu	2369
 长春道	chang chun dao	2369
 长板凳	chang ban deng	2369
-长治了	chang zhi shi	2369
+长治了	chang zhi le	2369
 长治了	zhang zhi le	2369
 长治的	chang zhi de	2369
 长治的	zhang zhi de	2369

@@ -113,6 +113,7 @@ final class ByteBudgetCache<V> {
         for (PinyinDictionary.Entry entry : entries) {
             size += 160 + (entry.word.length() + entry.pronunciation.length()
                     + entry.queryText.length() + entry.inputVersion.length()) * 2;
+            if (entry.originalWord != entry.word) size += 40 + entry.originalWord.length() * 2;
             for (String segment : entry.wordSegments) size += 40 + segment.length() * 2;
         }
         return size;

@@ -35,7 +35,7 @@ final class CtcHandwritingDecoder {
         Beam empty = new Beam(new int[0]); empty.blank = 0;
         beams.put("[]", empty);
         float greedyScore = 0;
-        int greedyCount = 0, previous = 0;
+        int greedyCount = 0, lastEmitted = 0, previous = 0;
         for (int time = 0; time < steps; time++) {
             if (Thread.currentThread().isInterrupted()) return new Result(Collections.emptyList(), 0);
             Map<String, Beam> next = new HashMap<>();
@@ -44,7 +44,11 @@ final class CtcHandwritingDecoder {
             for (int j = 1; j < CHOICES; j++)
                 if (probabilities[offset + j] > probabilities[offset + best]) best = j;
             int token = ids[offset + best];
-            if (token != 0 && token != previous) { greedyScore += probabilities[offset + best]; greedyCount++; }
+            if (token != 0 && token != previous) {
+                greedyScore += probabilities[offset + best];
+                greedyCount++;
+                lastEmitted = token;
+            }
             previous = token;
             for (Beam beam : beams.values()) {
                 Beam same = obtain(next, beam.tokens);
@@ -82,7 +86,12 @@ final class CtcHandwritingDecoder {
             texts.add(text);
             if (texts.size() >= 12) break;
         }
-        return new Result(new ArrayList<>(texts), greedyCount == 0 ? 0 : greedyScore / greedyCount);
+        float confidence = greedyCount == 0 ? 0 : greedyScore / greedyCount;
+        // Use the greedy score for the single-character fast path only when
+        // it describes the same character as the beam search's first choice.
+        if (single && (greedyCount != 1 || lastEmitted >= labels.length || lastEmitted < 1
+                || texts.isEmpty() || !texts.iterator().next().equals(labels[lastEmitted]))) confidence = 0;
+        return new Result(new ArrayList<>(texts), confidence);
     }
 
     private static boolean allowed(String label) {

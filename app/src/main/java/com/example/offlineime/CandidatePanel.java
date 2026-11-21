@@ -11,53 +11,63 @@ import java.util.List;
 /** Owns expanded candidate scrolling, recycling and immutable click snapshots. */
 final class CandidatePanel extends ScrollView {
     interface Host {
-        void style(TextView view, String word, boolean first);
+        /** {@code position} 为候选序号（从 0 开始），空状态提示传 -1。 */
+        void style(TextView view, String word, int position);
         void select(PinyinDictionary.Entry entry);
         void touching(boolean active);
     }
-    private final Host host;
+    private Host host;
     private RecycledCandidateLayout grid;
     String focusedWord() { return grid == null ? "" : grid.focusedWord(); }
-    void restoreFocus(String word) {
+    void scrollToWord(String word) {
         if (grid == null || word.isEmpty()) return;
-        int top = grid.focusWord(word);
+        int top = grid.wordTop(word);
+        if (top < 0) return;
         grid.viewport(top, getHeight());
         scrollTo(0, top);
     }
-    CandidatePanel(Context context, List<PinyinDictionary.Entry> entries, List<Integer> order,
-                   float textSp, String density, Host host) {
-        super(context); this.host = host;
+    public CandidatePanel(Context context) {
+        super(context);
         setFillViewport(true); setVerticalScrollBarEnabled(true); setScrollbarFadingEnabled(false);
         setScrollBarStyle(SCROLLBARS_INSIDE_OVERLAY);
         setPadding(dp(2), dp(3), dp(2), dp(3));
-        int minWidth = "comfortable".equals(density) ? 56 : 48;
-        int minHeight = "comfortable".equals(density) ? 56 : 48;
-        int padding = "compact".equals(density) ? 5 : "comfortable".equals(density) ? 10 : 8;
+    }
+
+    CandidatePanel(Context context, List<PinyinDictionary.Entry> entries, List<Integer> order,
+                   CandidateTextStyle style, Host host) {
+        this(context); this.host = host;
         List<PinyinDictionary.Entry> snapshot = new ArrayList<>();
         List<String> labels = new ArrayList<>();
         for (int index : order) { snapshot.add(entries.get(index)); labels.add(entries.get(index).word); }
         if (labels.isEmpty()) {
             TextView empty = new TextView(context); empty.setText("没有候选词"); empty.setGravity(Gravity.CENTER);
-            host.style(empty, "没有候选词", false);
-            addView(empty, new LayoutParams(-1, dp(72)));
+            host.style(empty, "没有候选词", -1);
+            addView(empty, new LayoutParams(-1, Math.max(dp(72), style.pageCellHeightPx(context))));
         } else {
-            float scaled = getResources().getDisplayMetrics().scaledDensity;
-            int height = Math.max(dp(minHeight), (int) Math.ceil(textSp * scaled * 1.4f) + dp(8));
-            grid = new RecycledCandidateLayout(context, labels, textSp, dp(minWidth), height, dp(padding), (view, position) -> {
+            grid = createGrid(context, labels, style, (view, position) -> {
                 PinyinDictionary.Entry entry = snapshot.get(position);
                 view.setSelected(false); view.setPressed(false); view.setActivated(false);
-                host.style(view, entry.word, position == 0);
-                view.setPadding(dp(padding), dp(2), dp(padding), dp(2));
-                view.setMinWidth(0); view.setMinHeight(0); view.setIncludeFontPadding(false);
-                view.setSingleLine(true); view.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                host.style(view, entry.word, position);
                 view.setFocusable(true);
-                view.setContentDescription((position == 0 ? "首选候选词 " : "候选词 ") + entry.word);
+                String description = entry.emojiSuggestion
+                        ? "表情 " + EmojiCatalog.get(context).description(entry.word)
+                        : (position == 0 ? "首选候选词 " : "候选词 ") + entry.word;
+                view.setContentDescription(style.pageNumbers ? (position + 1) + "，" + description : description);
                 view.setOnClickListener(v -> host.select(entry));
                 view.setLongClickable(false);
             });
             addView(grid, new LayoutParams(-1, -2));
         }
     }
+    static RecycledCandidateLayout createGrid(Context context, List<String> labels, CandidateTextStyle style,
+                                                RecycledCandidateLayout.Binder binder) {
+        float density = context.getResources().getDisplayMetrics().density;
+        return new RecycledCandidateLayout(context, labels, style.textPx(context, true),
+                style.typeface(false, true), style.typeface(true, true), style.pageNumbers,
+                Math.round(style.pageMinCellDp * density), style.pageCellHeightPx(context),
+                Math.round(style.pagePaddingDp * density), binder);
+    }
+
     @Override protected void onScrollChanged(int l, int t, int oldL, int oldT) {
         super.onScrollChanged(l, t, oldL, oldT);
         if (grid != null) grid.viewport(t, getHeight());
@@ -68,10 +78,10 @@ final class CandidatePanel extends ScrollView {
     }
     @Override public boolean dispatchTouchEvent(MotionEvent event) {
         int action = event.getActionMasked();
-        if (action == MotionEvent.ACTION_DOWN) host.touching(true);
+        if (host != null && action == MotionEvent.ACTION_DOWN) host.touching(true);
         try { return super.dispatchTouchEvent(event); }
         finally {
-            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL)
+            if (host != null && (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL))
                 post(() -> host.touching(false));
         }
     }

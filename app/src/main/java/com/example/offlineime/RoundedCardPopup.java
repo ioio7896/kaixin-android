@@ -245,7 +245,11 @@ final class RoundedCardPopup {
         // rejects a panel attached to that token. Keep positioning by the button,
         // but attach secondary settings menus to the Activity's main window.
         try {
-            window.showAtLocation(host, Gravity.TOP | Gravity.LEFT, left, top);
+            int direction = host.getLayoutDirection();
+            card.setLayoutDirection(direction);
+            int start = direction == View.LAYOUT_DIRECTION_RTL
+                    ? context.getResources().getDisplayMetrics().widthPixels - left - width : left;
+            window.showAtLocation(host, Gravity.TOP | Gravity.START, start, top);
         } catch (WindowManager.BadTokenException | IllegalStateException unavailableWindow) {
             if (window.isShowing()) window.dismiss();
             notifyDismissed();

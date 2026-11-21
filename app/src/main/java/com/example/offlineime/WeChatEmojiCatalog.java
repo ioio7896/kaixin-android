@@ -3,7 +3,7 @@ package com.example.offlineime;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** WeChat-style faces are shown and committed as bracketed text markers. */
+/** Optional compatibility markers committed as bracketed text. */
 final class WeChatEmojiCatalog {
     private static final Map<String, String> NAMES = new LinkedHashMap<>();
 

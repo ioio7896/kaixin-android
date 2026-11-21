@@ -14,6 +14,8 @@ final class ShuangpinInput {
     private static final Map<String, List<String>> PAIRS = pairs();
     private final Map<Integer, String> locks = new HashMap<>();
     private String raw = "";
+    private long revision;
+    long revision() { return revision; }
     private String cachedPathKey = "";
     private List<Path> cachedPaths = Collections.emptyList();
     static final class Path {
@@ -57,15 +59,18 @@ final class ShuangpinInput {
     }
     private static Map<String, List<String>> pairs() {
         Map<String, List<String>> result = new LinkedHashMap<>();
-        for (String syllable : PinyinLexer.STANDARD_SYLLABLES) {
+        for (String syllable : NativeEngine.standard()) {
             String pair = encode(syllable);
             if (!pair.isEmpty()) result.computeIfAbsent(pair, ignored -> new ArrayList<>()).add(syllable);
         }
         for (List<String> values : result.values()) Collections.sort(values);
         return result;
     }
-    void unlock(int start) { locks.remove(start); cachedPathKey = ""; }
-    void clear() { raw = ""; locks.clear(); }
+    void unlock(int start) { if (locks.remove(start) != null) revision++; cachedPathKey = ""; }
+    void clear() {
+        if (!raw.isEmpty() || !locks.isEmpty()) revision++;
+        raw = ""; locks.clear();
+    }
     void sync(String value) {
         if (raw.equals(value)) return;
         int common = 0;
@@ -74,6 +79,7 @@ final class ShuangpinInput {
         final int stableEnd = common;
         locks.keySet().removeIf(position -> position + 2 > stableEnd);
         raw = value;
+        revision++;
     }
     void consumePrefix(String value, int consumed) {
         sync(value);
@@ -84,6 +90,7 @@ final class ShuangpinInput {
         }
         locks.clear(); locks.putAll(remaining);
         raw = value.substring(end);
+        revision++;
     }
     String signature(String input) {
         sync(input);
@@ -96,7 +103,7 @@ final class ShuangpinInput {
         sync(input);
         if (end - start != 2 || start < 0 || end > input.length()
                 || !encode(reading).equals(input.substring(start, end))) return false;
-        locks.put(start, reading); return true;
+        locks.put(start, reading); revision++; return true;
     }
     boolean selected(int start, String reading) { return reading.equals(locks.get(start)); }
     static List<String> choices(String entered) {
@@ -115,7 +122,6 @@ final class ShuangpinInput {
         if (input.isEmpty() || input.length() > 96) return Collections.emptyList();
         List<Path> result = new ArrayList<>(); result.add(new Path(Collections.emptyList(), Collections.emptyList()));
         for (int at = 0; at < input.length();) {
-            QueryWork.check();
             if (input.charAt(at) == '\'') { at++; continue; }
             int end = Math.min(input.length(), at + 2);
             if (end > at + 1 && input.charAt(at + 1) == '\'') end = at + 1;
@@ -132,6 +138,25 @@ final class ShuangpinInput {
             result = next; at = end;
         }
         return result;
+    }
+    /** Native constraint: each key pair offers its readings; locks and single keys narrow them. */
+    String constraint(String input) {
+        sync(input);
+        StringBuilder out = new StringBuilder();
+        for (int at = 0; at < input.length();) {
+            if (input.charAt(at) == '\'') { at++; continue; }
+            int end = Math.min(input.length(), at + 2);
+            if (end > at + 1 && input.charAt(at + 1) == '\'') end = at + 1;
+            List<String> options = choices(input.substring(at, end));
+            String locked = locks.get(at);
+            if (options.isEmpty() && locked == null) return "";
+            if (out.length() > 0) out.append(NativeEngine.UNIT);
+            if (locked != null) out.append('=').append(at).append(',').append(end).append(',').append(locked);
+            else if (end - at == 1) out.append('^').append(at).append(',').append(end).append(',').append(options.get(0));
+            else out.append('|').append(at).append(',').append(end).append(',').append(String.join(",", options));
+            at = end;
+        }
+        return out.toString();
     }
     List<PinyinPathEditor.Segment> segments(String input, String preferred) {
         sync(input);

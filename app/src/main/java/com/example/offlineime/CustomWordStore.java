@@ -1,6 +1,7 @@
 package com.example.offlineime;
 
 import android.content.Context;
+import android.content.SharedPreferences;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import java.util.ArrayList;
@@ -15,9 +16,7 @@ import java.util.concurrent.Executors;
 
 /** Explicit user words are independent of automatic learning and device input codes. */
 final class CustomWordStore {
-    static final ExecutorService IO = Executors.newSingleThreadExecutor(r -> {
-        Thread thread = new Thread(r, "ime-custom-words"); thread.setPriority(Thread.MIN_PRIORITY); return thread;
-    });
+    static final ExecutorService IO = PersonalDataIO.EXECUTOR;
     private static final String PREFS = "custom_words_v1", KEY = "offline_ime_custom_words";
     private static final Object LOCK = new Object();
     private static long cachedRevision = Long.MIN_VALUE;
@@ -48,47 +47,40 @@ final class CustomWordStore {
         }
         boolean succeeded() { return error.isEmpty(); }
     }
+    static long revision(Context context) {
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("revision", 0);
+    }
     static Map<String, Word> load(Context context) {
         synchronized (LOCK) {
             long revision = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong("revision", 0);
             if (cachedRevision == revision) return cache;
-            String value = SecureLocalStore.read(context, PREFS, KEY);
+            SecureLocalStore.ReadResult stored = SecureLocalStore.readResult(context, PREFS, KEY);
+            if (!stored.succeeded()) throw new IllegalStateException("自定义词库解密失败，原数据已保留");
             Map<String, Word> result = new LinkedHashMap<>();
-            if (!value.isEmpty()) {
+            if (stored.status == SecureLocalStore.ReadStatus.READY) {
                 try {
-                    JSONObject root = new JSONObject(value);
+                    JSONObject root = new JSONObject(stored.value);
                     if (root.getInt("version") != 1) throw new IllegalArgumentException("unsupported version");
                     JSONArray words = root.getJSONArray("words");
                     for (int i = 0; i < words.length(); i++) {
                         Word word = decode(words.getJSONObject(i)); result.put(word.text, word);
                     }
                 } catch (Exception invalid) {
+                    SecureLocalStore.markUnreadable(PREFS);
                     // Never replace a damaged or future-format store with an empty file.
                     throw new IllegalStateException("自定义词库读取失败，原数据已保留");
                 }
-            } else if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).contains("blob")) {
-                throw new IllegalStateException("自定义词库解密失败，原数据已保留");
             }
+            SecureLocalStore.markReadable(PREFS);
             cache = Collections.unmodifiableMap(result); cachedRevision = revision; return cache;
         }
     }
+    /** Canonical {@code syl'syl} reading of a typed or edited pronunciation (Rust engine rules). */
     static String reading(String value, String word) {
-        String normalized = value.trim().toLowerCase(Locale.ROOT).replace("u:", "v").replace('ü', 'v')
-                .replace('’', '\'').replace('·', '\'').replaceAll("\\s+", "'");
-        if (!normalized.matches("[a-z]+(?:'[a-z]+)*"))
-            throw new IllegalArgumentException("请填写完整拼音，音节用空格或 ' 分隔");
-        if (normalized.indexOf('\'') >= 0) {
-            for (String token : normalized.split("'"))
-                if (!PinyinPathEditor.isCompleteReading(token)) throw new IllegalArgumentException("音节「" + token + "」不完整或不合法");
-            return normalized;
-        }
-        List<List<String>> paths = new PinyinLexer(Collections.emptyList()).splitAll(normalized, 32);
-        int length = word.codePointCount(0, word.length());
-        List<List<String>> matching = new ArrayList<>();
-        for (List<String> path : paths) if (path.size() == length) matching.add(path);
-        if (matching.size() == 1) return String.join("'", matching.get(0));
-        if (matching.isEmpty() && paths.size() == 1) return String.join("'", paths.get(0));
-        throw new IllegalArgumentException("拼音有多种切分，请用空格明确音节，例如 xi an");
+        String canonical = NativeEngine.canonicalReading(value == null ? "" : value, word == null ? "" : word);
+        if (canonical == null || canonical.isEmpty()) throw new IllegalArgumentException("请填写完整拼音，音节用空格或 ' 分隔");
+        if (canonical.charAt(0) == '!') throw new IllegalArgumentException(canonical.substring(1));
+        return canonical;
     }
     static Word validate(String text, String readings, String aliases, String category, boolean pinned, long createdAt) {
         String word = text == null ? "" : text.trim();
@@ -170,7 +162,12 @@ final class CustomWordStore {
             return write(context, all);
         }
     }
-    static boolean clear(Context context) { synchronized (LOCK) { return write(context, Collections.emptyMap()); } }
+    static boolean clear(Context context) { synchronized (LOCK) {
+        if (!SecureLocalStore.clear(context, PREFS, KEY)) return false;
+        cache = Collections.emptyMap(); cachedRevision = Long.MIN_VALUE;
+        notifyChanged(context);
+        return true;
+    } }
     static String exportJson(Context context) {
         synchronized (LOCK) { return encode(load(context)); }
     }
@@ -232,8 +229,15 @@ final class CustomWordStore {
         long revision = Math.max(System.currentTimeMillis(), cachedRevision + 1);
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putLong("revision", revision).apply();
         cache = Collections.unmodifiableMap(new LinkedHashMap<>(all)); cachedRevision = revision;
-        context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putLong("user_words_revision", revision).apply();
+        notifyChanged(context);
         return true;
     }
+
+    private static void notifyChanged(Context context) {
+        SharedPreferences settings = context.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        long revision = Math.max(System.currentTimeMillis(), settings.getLong("custom_words_revision", 0) + 1);
+        settings.edit().putLong("custom_words_revision", revision).apply();
+    }
+
     private CustomWordStore() {}
 }

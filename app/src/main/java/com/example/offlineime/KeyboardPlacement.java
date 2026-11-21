@@ -44,21 +44,21 @@ final class KeyboardPlacement {
     }
     static int height(Context c, SharedPreferences p) {
         int screen = c.getResources().getConfiguration().screenHeightDp;
-        int value = landscape(c) ? p.getInt("key_height_landscape", defaultHeight(c))
+        int value = landscape(c) ? SettingsRepository.integer(p, "key_height_landscape", defaultHeight(c))
                 : (p.contains("key_height") ? KeyboardSizing.height(p) : defaultHeight(c));
-        // All keyboard modes and panels share this height. Never branch on the
-        // input mode here: switching 9-key/26-key/numbers must not move the host.
-        if (floating(c, p)) value = p.getInt("floating_height_" + axis(c), p.getInt("floating_height", value));
+        // Typing layouts and regular panels share this height. Handwriting
+        // measures its half- and full-screen surfaces separately.
+        if (floating(c, p)) value = SettingsRepository.integer(p, "floating_height_" + axis(c), SettingsRepository.integer(p, "floating_height", value));
         int limit = Math.max(1, Math.round(screen * (landscape(c) ? 0.60f : 0.72f)));
         return Math.min(Math.max(landscape(c) ? 120 : 180, value), limit);
     }
     static int width(Context c, SharedPreferences p) {
         int screen = Math.max(1, c.getResources().getConfiguration().screenWidthDp);
         if (floating(c, p)) return Math.min(screen, Math.max(Math.min(280, screen),
-                p.getInt("floating_width_" + axis(c), p.getInt("floating_width", 340))));
+                SettingsRepository.integer(p, "floating_width_" + axis(c), SettingsRepository.integer(p, "floating_width", 340))));
         String preset = preset(c, p);
         if (!"off".equals(side(c, p))) {
-            int width = screen * p.getInt("one_hand_width", 80) / 100;
+            int width = screen * SettingsRepository.integer(p, "one_hand_width", 80) / 100;
             if (screen >= 600) width = Math.min(width, compactNine(c) ? 420 : 560);
             return Math.min(screen, Math.max(Math.min(280, screen), width));
         }
@@ -73,6 +73,6 @@ final class KeyboardPlacement {
         return requested && !compactNine(c) && width(c, p) >= 600;
     }
     static float splitGap(SharedPreferences p) {
-        return Math.max(1f, Math.min(4f, p.getInt("split_gap", 2)));
+        return Math.max(1f, Math.min(4f, SettingsRepository.integer(p, "split_gap", 2)));
     }
 }

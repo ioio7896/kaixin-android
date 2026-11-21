@@ -30,18 +30,22 @@ final class QuickPhraseStore {
     synchronized List<Entry> list() {
         ArrayList<Entry> entries = new ArrayList<>();
         String raw = SecureLocalStore.read(context, PREFS, KEY_ALIAS);
-        if (raw.isEmpty()) return entries;
+        if (raw.isEmpty()) { SecureLocalStore.markReadable(PREFS); return entries; }
         try {
             JSONArray array = new JSONArray(raw);
             for (int i = 0; i < array.length(); i++) {
                 JSONObject value = array.getJSONObject(i);
                 String id = value.getString("id");
                 String text = value.getString("text");
-                if (!id.isEmpty() && !text.trim().isEmpty()) entries.add(new Entry(id, text));
+                if (id.isEmpty() || text.trim().isEmpty()) throw new IllegalStateException("invalid phrase");
+                entries.add(new Entry(id, text));
             }
         } catch (Exception error) {
+            SecureLocalStore.markUnreadable(PREFS);
             Log.e(TAG, "phrase parse failed: " + error.getClass().getSimpleName());
+            throw new IllegalStateException("快捷短语读取失败，原数据已保留；请重新打开页面重试");
         }
+        SecureLocalStore.markReadable(PREFS);
         return entries;
     }
 

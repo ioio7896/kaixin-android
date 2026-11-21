@@ -8,14 +8,28 @@ plugins {
 layout.buildDirectory = rootProject.layout.buildDirectory.dir("offline-ime-app")
 
 // One timestamp identifies the installed version and the exported APK.
-def apkBuildTime = java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+def buildEpoch = providers.gradleProperty("apkBuildEpoch").orNull
+def apkBuildTime = (buildEpoch == null ? java.time.Instant.now() : java.time.Instant.ofEpochSecond(Long.parseLong(buildEpoch)))
+        .atZone(java.time.ZoneId.of("Asia/Shanghai"))
 def apkVersionName = apkBuildTime.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
 def apkVersionCode = Math.toIntExact(apkBuildTime.toEpochSecond())
 
+// Optional -PabiFilter=arm64-v8a speeds up local incremental builds.
+// Full exports (exportDebugApks) always compile all four supported ABIs.
+def allAbis = ["armeabi-v7a", "arm64-v8a", "x86", "x86_64"]
+def isFullDebugExport = gradle.startParameter.taskNames.any { it.endsWith("exportDebugApks") }
+def requestedAbiFilter = isFullDebugExport ? null : providers.gradleProperty("abiFilter").orNull
+def activeAbis = (requestedAbiFilter == null || requestedAbiFilter.trim().isEmpty())
+        ? allAbis
+        : requestedAbiFilter.split(",").collect { it.trim() }.findAll { allAbis.contains(it) }
+if (activeAbis.isEmpty()) {
+    throw new GradleException("Unsupported abiFilter '${requestedAbiFilter}'. Valid values: ${allAbis.join(', ')}")
+}
+
 android {
-    namespace "com.example.offlineime"
+    namespace = "com.example.offlineime"
     compileSdk 35
-    ndkVersion "27.2.12479018"
+    ndkVersion = "27.2.12479018"
 
     defaultConfig {
         applicationId "com.example.offlineime"
@@ -24,27 +38,52 @@ android {
         versionCode apkVersionCode
         versionName apkVersionName
         testInstrumentationRunner "com.example.offlineime.FrontendStabilityInstrumentation"
-        ndk { abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64" }
         externalNativeBuild {
-            cmake { arguments "-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON" }
+            cmake {
+                arguments "-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON"
+                if (activeAbis.size() < allAbis.size()) {
+                    abiFilters.addAll(activeAbis)
+                }
+            }
         }
     }
 
     externalNativeBuild {
         cmake {
             path file("src/main/cpp/handwriting/CMakeLists.txt")
-            version "3.22.1"
+            version = "3.22.1"
         }
     }
 
     buildFeatures {
-        buildConfig true
+        buildConfig = true
+    }
+
+    // Map bundled dictionary and NCNN binary model weights directly from the APK without decompression.
+    androidResources { noCompress += ["dict", "bin"] }
+
+    lint {
+        checkTestSources = false
+        ignoreTestSources = true
+        warningsAsErrors = true
+    }
+
+    splits {
+        abi {
+            enable = true
+            reset()
+            include "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+            if (activeAbis.size() < allAbis.size()) {
+                exclude(*(allAbis - activeAbis))
+            }
+            universalApk = (activeAbis.size() == allAbis.size())
+        }
     }
 
     buildTypes {
         release {
             minifyEnabled true
-            shrinkResources true
+            shrinkResources = true
             proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
         }
     }
@@ -56,10 +95,28 @@ android {
 
     sourceSets {
         main {
-            // 本目录的 lexicon 是桌面项目词库的完整镜像；离线随 APK 打包。
-            assets.srcDirs += ["../lexicon"]
+            // The Rust engine dictionary and lexicon notices are generated before preBuild.
+            assets.srcDirs += [rootProject.layout.buildDirectory.dir("engine-assets").get().asFile]
+            assets.srcDirs += [rootProject.layout.buildDirectory.dir("emoji-assets").get().asFile]
+            jniLibs.srcDirs += [rootProject.layout.buildDirectory.dir("engine-jniLibs").get().asFile]
         }
     }
+}
+
+// Static-only packaging does not create or resolve JVM/device test variants.
+androidComponents {
+    beforeVariants(selector().all()) { variant ->
+        if (providers.gradleProperty("staticOnlyBuild").orNull == "true") {
+            variant.enableUnitTest = false
+            variant.enableAndroidTest = false
+        }
+    }
+}
+
+// Keep exported debug APKs upgrade-compatible with builds from tools/build_debug.ps1.
+def projectDebugKeystore = rootProject.file(".android/debug.keystore")
+if (projectDebugKeystore.isFile()) {
+    android.signingConfigs.debug.storeFile = projectDebugKeystore
 }
 
 def releaseSigning = [
@@ -99,25 +156,92 @@ dependencies {
     testImplementation "junit:junit:4.13.2"
 }
 
-def generatedLexiconDb = rootProject.layout.buildDirectory.file("lexicon-source/pinyin.db").get()
-tasks.register("buildLexiconDatabase", Exec) {
+// ---- Rust pinyin engine (../engine) ---------------------------------------
+// dictgen compiles the text lexicon into one memory-mapped dictionary asset;
+// cargo cross-compiles libkaixin_engine.so with the NDK clang linkers.
+def engineDir = rootProject.file("engine")
+def engineAssets = rootProject.layout.buildDirectory.dir("engine-assets")
+def emojiAssets = rootProject.layout.buildDirectory.dir("emoji-assets")
+def emojiSource = rootProject.file("data_sources/emoji")
+def emojiGenerator = rootProject.file("tools/build_emoji_catalog.py")
+def emojiOutput = emojiAssets.get().dir("emoji").asFile
+def engineLibs = rootProject.layout.buildDirectory.dir("engine-jniLibs")
+def allRustTargets = ["arm64-v8a": "aarch64-linux-android", "armeabi-v7a": "armv7-linux-androideabi",
+                      "x86": "i686-linux-android", "x86_64": "x86_64-linux-android"]
+def rustTargets = allRustTargets.findAll { abi, _ -> activeAbis.contains(abi) }
+def onWindows = System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("windows")
+def ndkHostTag = onWindows ? "windows-x86_64"
+        : System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("mac") ? "darwin-x86_64" : "linux-x86_64"
+def cargoHome = System.getenv("CARGO_HOME") ?: new File(System.getProperty("user.home"), ".cargo").path
+def rustupHome = System.getenv("RUSTUP_HOME") ?: new File(System.getProperty("user.home"), ".rustup").path
+def cargoExecutable = new File(cargoHome, "bin/cargo" + (onWindows ? ".exe" : "")).with { it.isFile() ? it.path : "cargo" }
+def engineSources = fileTree(engineDir) { include "src/**", "Cargo.toml", "Cargo.lock" }
+
+tasks.register("generateEmojiCatalog", Exec) {
+    inputs.dir(emojiSource)
+    inputs.file(emojiGenerator)
+    outputs.dir(emojiOutput)
+    commandLine "python", emojiGenerator.absolutePath, emojiSource.absolutePath, emojiOutput.absolutePath
+}
+
+tasks.register("buildEngineDictionary", Exec) {
+    dependsOn("generateEmojiCatalog")
+    def output = engineAssets.get().file("engine/kaixin.dict").asFile
     inputs.files(fileTree("../lexicon") { include "**/*.txt" })
-    inputs.files(fileTree("src/main/assets/lexicon-corrections") { include "**/*.txt"; include "**/*.tsv" })
+    inputs.files(fileTree("src/main/assets/lexicon-corrections"))
+    inputs.files(fileTree("src/main/assets/opencc") { include "*.txt" })
+    inputs.files(fileTree("src/main/assets/stroke") { include "*.txt" })
     inputs.file("../data_sources/desktop_single_char_readings.txt")
     inputs.file("src/main/assets/language-model/collocations.tsv")
-    inputs.file("../tools/build_lexicon_db.py")
-    inputs.file("src/main/java/com/example/offlineime/PinyinDictionary.java")
-    outputs.file(generatedLexiconDb)
-    commandLine "python", "../tools/build_lexicon_db.py", generatedLexiconDb.asFile.absolutePath
+    inputs.files(engineSources)
+    inputs.file(new File(emojiOutput, "catalog.tsv"))
+    outputs.file(output)
+    workingDir engineDir
+    commandLine cargoExecutable, "run", "--release", "--quiet", "--bin", "dictgen", "--",
+            rootProject.projectDir.absolutePath, output.absolutePath, new File(emojiOutput, "catalog.tsv").absolutePath
 }
-tasks.register("compressLexiconDatabase", Exec) {
-    dependsOn("buildLexiconDatabase")
-    inputs.file(generatedLexiconDb)
-    inputs.file("../tools/compress_lexicon.py")
-    outputs.file("src/main/assets/databases/pinyin.bin")
-    commandLine "python", "../tools/compress_lexicon.py", generatedLexiconDb.asFile.absolutePath, layout.projectDirectory.file("src/main/assets/databases/pinyin.bin").asFile.absolutePath
+
+// License and source notices shown in settings; the word lists themselves are compiled.
+tasks.register("copyLexiconNotices", Copy) {
+    from("../lexicon") { include "**/*.md" }
+    into(engineAssets)
 }
-tasks.named("preBuild").configure { dependsOn("compressLexiconDatabase") }
+
+def engineLibraryTasks = rustTargets.collect { abi, triple ->
+    tasks.register("buildEngine_" + abi.replace("-", "_"), Exec) {
+        inputs.files(engineSources)
+        outputs.file(new File(engineDir, "target/${triple}/release/libkaixin_engine.so"))
+        workingDir engineDir
+        doFirst {
+            def clang = (triple == "armv7-linux-androideabi" ? "armv7a-linux-androideabi" : triple) +
+                    "26-clang" + (onWindows ? ".cmd" : "")
+            def linker = new File(android.ndkDirectory, "toolchains/llvm/prebuilt/${ndkHostTag}/bin/${clang}")
+            if (!linker.isFile()) throw new GradleException("NDK linker not found: ${linker}")
+            def key = triple.toUpperCase(Locale.ROOT).replace("-", "_")
+            environment "CARGO_TARGET_${key}_LINKER", linker.absolutePath
+            // Paths can survive stripping in panic messages and dependency metadata.
+            environment "CARGO_ENCODED_RUSTFLAGS", [
+                    "-C", "link-arg=-Wl,-z,max-page-size=16384",
+                    "-C", "link-arg=-Wl,-z,common-page-size=16384",
+                    "--remap-path-prefix=${rootProject.projectDir.absolutePath}=.",
+                    "--remap-path-prefix=${new File(cargoHome).absolutePath}=cargo",
+                    "--remap-path-prefix=${new File(rustupHome).absolutePath}=rustup"
+            ].join("\u001f")
+        }
+        commandLine cargoExecutable, "build", "--release", "--quiet", "--lib", "--target", triple
+    }
+}
+
+tasks.register("buildEngineLibraries", Copy) {
+    dependsOn(engineLibraryTasks)
+    rustTargets.each { abi, triple ->
+        from(new File(engineDir, "target/${triple}/release/libkaixin_engine.so")) { into(abi) }
+    }
+    into(engineLibs)
+}
+tasks.named("preBuild").configure {
+    dependsOn("buildEngineDictionary", "copyLexiconNotices", "buildEngineLibraries")
+}
 
 // Packaging integrity only: do not run recognition or code tests here.
 tasks.register("verifyHandwritingAssets") {
@@ -146,6 +270,63 @@ tasks.register("verifyHandwritingAssets") {
     }
 }
 tasks.named("preBuild").configure { dependsOn("verifyHandwritingAssets") }
+
+tasks.register("verifySpeechAssets") {
+    def directory = file("src/main/assets/speech")
+    def manifest = new File(directory, "manifest.json")
+    inputs.files(fileTree(directory))
+    doLast {
+        def entries = new groovy.json.JsonSlurper().parse(manifest).sha256
+        entries.each { name, checksum ->
+            def asset = new File(directory, name)
+            if (!asset.isFile()) throw new GradleException("Missing bundled speech asset: ${name}")
+            def digest = java.security.MessageDigest.getInstance("SHA-256")
+            asset.withInputStream { stream ->
+                byte[] buffer = new byte[16384]
+                int count
+                while ((count = stream.read(buffer)) != -1) digest.update(buffer, 0, count)
+            }
+            if (digest.digest().encodeHex().toString() != checksum)
+                throw new GradleException("Bundled speech asset checksum mismatch: ${name}")
+        }
+    }
+}
+tasks.named("preBuild").configure { dependsOn("verifySpeechAssets") }
+
+// Export only complete outputs from this invocation. Version, file name and checksums
+// share one Beijing timestamp; universal and ARM64 packages use the same signing key.
+tasks.register("exportDebugApks") {
+    dependsOn("assembleDebug", "lintDebug")
+    doLast {
+        def apkDir = layout.buildDirectory.dir("outputs/apk/debug").get().asFile
+        def metadata = new groovy.json.JsonSlurper().parse(new File(apkDir, "output-metadata.json"))
+        def exported = []
+        ["universal", "arm64-v8a"].each { abi ->
+            def output = metadata.elements.find { item ->
+                abi == "universal" ? item.filters.isEmpty() : item.filters.any { it.filterType == "ABI" && it.value == abi }
+            }
+            if (output == null || output.versionName != apkVersionName || output.versionCode != apkVersionCode)
+                throw new GradleException("Missing or stale debug output: ${abi}")
+            def source = new File(apkDir, output.outputFile)
+            def name = abi == "universal" ? "kaixin-android-debug-${apkVersionName}.apk"
+                    : "kaixin-android-arm64-debug-${apkVersionName}.apk"
+            def target = new File(rootProject.projectDir, name)
+            java.nio.file.Files.copy(source.toPath(), target.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            def digest = java.security.MessageDigest.getInstance("SHA-256")
+            target.withInputStream { stream ->
+                byte[] buffer = new byte[1024 * 1024]; int count
+                while ((count = stream.read(buffer)) != -1) digest.update(buffer, 0, count)
+            }
+            exported.add([file: name, abi: abi, versionName: apkVersionName, versionCode: apkVersionCode,
+                          bytes: target.length(), sha256: digest.digest().encodeHex().toString()])
+        }
+        def checksum = new File(rootProject.projectDir, "kaixin-android-debug-${apkVersionName}.sha256")
+        checksum.setText(exported.collect { "${it.sha256}  ${it.file}" }.join("\n") + "\n", "UTF-8")
+        def report = rootProject.layout.buildDirectory.file("debug-export.json").get().asFile
+        report.setText(groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(exported)), "UTF-8")
+        logger.lifecycle("Exported timestamped debug APKs: ${exported.collect { it.file }}")
+    }
+}
 
 // Gradle's Windows test worker can misdecode non-ASCII paths in its generated
 // @argfile. Route the test classpath through an ASCII-path manifest JAR so

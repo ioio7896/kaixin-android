@@ -23,12 +23,23 @@ final class ExtendedHandwritingModel implements AutoCloseable {
     private String[] labels;
     private boolean unavailable, closed;
 
+    boolean prepare(Context context) {
+        if (closed || unavailable) return false;
+        if (handle != 0) return true;
+        try {
+            load(context.getApplicationContext().getAssets());
+            return true;
+        } catch (Exception | LinkageError error) {
+            disable(error);
+            return false;
+        }
+    }
+
     NeuralHandwritingModel.Prediction recognize(Context context,
             List<? extends List<OfflineHandwritingRecognizer.Point>> strokes, boolean single) {
-        if (closed || unavailable) return empty(false);
         if (Thread.currentThread().isInterrupted()) return empty(true);
+        if (!prepare(context)) return empty(false);
         try {
-            if (handle == 0) load(context.getApplicationContext().getAssets());
             Bitmap bitmap = render(strokes, single);
             if (bitmap == null) return empty(true);
             byte[] gray;
@@ -48,9 +59,15 @@ final class ExtendedHandwritingModel implements AutoCloseable {
             CtcHandwritingDecoder.Result result = CtcHandwritingDecoder.decode(indices, probabilities, steps, labels, single);
             return new NeuralHandwritingModel.Prediction(result.candidates, result.confidence, true);
         } catch (Exception | LinkageError error) {
-            Log.w("OfflineImeHandwriting", "Extended model unavailable: " + error.getClass().getSimpleName());
-            unavailable = true; release(); return empty(false);
+            disable(error);
+            return empty(false);
         }
+    }
+
+    private void disable(Throwable error) {
+        Log.w("OfflineImeHandwriting", "Extended model unavailable: " + error.getClass().getSimpleName());
+        unavailable = true;
+        release();
     }
 
     private static NeuralHandwritingModel.Prediction empty(boolean ready) {

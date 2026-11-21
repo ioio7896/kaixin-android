@@ -106,7 +106,8 @@ public final class CustomWordManagerActivity extends Activity {
             String haystack = (word + " " + codes + " " + codes.replace("'", "")).toLowerCase(Locale.ROOT);
             if (query.isEmpty() || haystack.contains(query) || haystack.contains(query.replace(" ", "'"))) visible.add(word);
         }
-        rows.removeAllViews(); summary.setText("主动保存 " + custom.size() + " 个词 · 当前找到 " + visible.size() + " 个词");
+        rows.removeAllViews();
+        summary.setText(getString(R.string.custom_words_summary, custom.size(), visible.size()));
         for (String word : visible.subList(0, Math.min(pageSize, visible.size()))) {
             CustomWordStore.Word record = custom.get(word);
             String detail = record == null ? (legacyPinned.contains(word) ? "既有固定记录 · " : "学习记录 · ") + String.join("、", learned.get(word))
@@ -118,7 +119,8 @@ public final class CustomWordManagerActivity extends Activity {
             rows.addView(row, lp); row.setOnClickListener(v -> wordMenu(word));
         }
         if (pageSize < visible.size()) {
-            Button more = new Button(this); more.setText("再显示 50 个词"); styleActionButton(more);
+            Button more = new Button(this);
+            more.setText(getString(R.string.custom_words_show_more, 50)); styleActionButton(more);
             more.setOnClickListener(v -> { pageSize += 50; render(); });
             LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(-1, dp(48));
             params.topMargin = dp(4); rows.addView(more, params);
@@ -141,7 +143,7 @@ public final class CustomWordManagerActivity extends Activity {
         }));
         menu.item("屏蔽候选", "可在设置中的屏蔽词管理里恢复", null, false, true, () -> {
             getSharedPreferences("blocked_words", MODE_PRIVATE).edit().putBoolean(word, true).apply();
-            getSharedPreferences("settings", MODE_PRIVATE).edit().putLong("user_words_revision", System.currentTimeMillis()).apply(); toast("已屏蔽：" + word);
+            getSharedPreferences("settings", MODE_PRIVATE).edit().putLong("blocked_words_revision", System.currentTimeMillis()).apply(); toast("已屏蔽：" + word);
         });
         menu.show(search);
     }
@@ -234,7 +236,6 @@ public final class CustomWordManagerActivity extends Activity {
                                 if (!CustomWordStore.clear(getApplicationContext())) throw new IllegalStateException("清除失败");
                                 for (String word : words.keySet()) PinyinDictionary.deleteManagedWord(getApplicationContext(), word);
                             }
-                            getSharedPreferences("settings", MODE_PRIVATE).edit().putLong("user_words_revision", System.currentTimeMillis()).apply();
                             return "已清除所选词库记录";
                         })).setNegativeButton("取消", null).show()).show();
     }

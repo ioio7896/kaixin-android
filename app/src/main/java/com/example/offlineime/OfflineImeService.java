@@ -37,19 +37,15 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private PinyinDictionary dictionary;
     private KeyboardView keyboardView;
     private boolean originalImeWindowLayoutSaved;
-    private boolean floatingImeWindow;
+    private boolean customImeWindowLayout;
     private int originalImeWindowWidth;
     private int originalImeWindowHeight;
     private int originalImeWindowGravity;
     private int originalImeWindowX;
     private int originalImeWindowY;
     private android.graphics.drawable.Drawable originalImeWindowBackground;
-    private EditorInfo editorInfo;
-    private int lastEditorSelectionStart = -1;
-    private int lastEditorSelectionEnd = -1;
-    private boolean hostHasComposingText;
     private boolean candidateCommitInProgress;
-    private final StringBuilder composing = new StringBuilder();
+    private final ComposingSessionController composingSession = new ComposingSessionController();
     private Mode mode = Mode.PINYIN;
     private Mode modeBeforeSymbols = Mode.PINYIN;
     private Mode modeBeforeEnglish = Mode.PINYIN;
@@ -57,10 +53,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private boolean capsLock;
     private long lastShiftTapUptime;
     private boolean englishWordMode = true;
-    private boolean numericEditor;
-    private boolean editorForcesKeyboardLayout;
-    private String editorLayoutKind = "text";
-    private boolean secureEditor;
     private boolean toolsShown;
     private boolean clipboardShown;
     private boolean clipboardEnablePromptShown;
@@ -82,24 +74,32 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             this::captureClipboardWhileActive;
     private static final Pattern LABELED_ONE_TIME_CODE = Pattern.compile(
             "(?i)(验证码|动态码|校验码|一次性密码|otp|one[- ]?time code).{0,16}\\b\\d{4,8}\\b");
-    private boolean handwritingShown;
+    private boolean handwritingShown, handwritingFullscreen;
+    private boolean voiceShown, voiceFinishing;
+    private String voiceStatus = "", voicePreview = "";
+    private long voiceEditorGeneration;
+    private int voiceSelectionStart = -1, voiceSelectionEnd = -1;
+    private VoiceInputController voiceInput;
     private boolean emojiShown;
+    private String emojiSearchQuery = "";
+    private boolean panelSearchRestoresEmoji;
+    private Mode emojiSearchReturnMode;
     private boolean symbolsShown;
     private boolean layoutChooserShown;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private boolean userDataReceiverRegistered;
     private final android.content.BroadcastReceiver userDataClearedReceiver = new android.content.BroadcastReceiver() {
         @Override public void onReceive(Context context, android.content.Intent intent) {
-            userDataEpoch++; ordinaryWordAssembly.clear(); ordinaryWordOffer = null;
-            wordCreation.clear(); lastCustomWordChange = null; lastCustomWordNotice = "";
-            if (dictionary != null) dictionary.clearUserWords();
-            if (contextModel != null) contextModel.clear();
+            userDataEpoch++;
+            selectionEdit.clearAll();
+            synchronized (OfflineImeService.this.deferredLearning) { OfflineImeService.this.deferredLearning.clear(); }
+            wordCreationController.clearAllUserData();
+            if (dictionary != null) dictionary.discardClearedUserData();
             if (clipboardHistory != null) clipboardHistory.resumeAfterGlobalClear();
             ClipboardManager manager = getClipboardManager();
             ClipDescription currentClip = manager == null ? null : manager.getPrimaryClipDescription();
             if (currentClip != null) rememberClipboardTimestamp(currentClip.getTimestamp());
-            composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-            lockedPinyinPath = "";
+            composingSession.clearInputOnly();
             previousCommittedWord = "";
             previousPreviousCommittedWord = "";
             lastChineseCommitAt = 0;
@@ -117,76 +117,103 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private Future<?> contextPrewarmTask;
     private boolean prewarmScheduled;
     private boolean prewarmFinished;
-    private final Runnable dictionaryPrewarmRunnable = this::startDictionaryPrewarmIfIdle;
-    private ClipboardHistoryStore clipboardHistory;
-    private QuickPhraseStore quickPhrases;
-    private volatile UserContextModel contextModel;
+    private ClipboardController clipboardHistory;
+    private QuickPhraseRepository quickPhrases;
+    private final Runnable quickPhraseObserver = this::onQuickPhrasesChanged;
+    private void onQuickPhrasesChanged() { if (!destroyed && clipboardShown) refresh(); }
+    private boolean storageWarningShown;
+    private void notifyStorageReadFailure() {
+        if (!SecureLocalStore.hasReadErrors()) { storageWarningShown = false; return; }
+        if (!storageWarningShown && !destroyed) {
+            storageWarningShown = true;
+            toastWord("部分本地数据读取失败，原数据已保留，已暂停覆盖；请重新打开相关页面重试");
+        }
+    }
     private String previousCommittedWord = "";
     private String previousPreviousCommittedWord = "";
     private long lastChineseCommitAt;
     private Runnable nextWordPredictionExpiry;
-    private CandidateQueryCoordinator candidateQueries;
-    private final TouchCorrectionModel touchCorrection = new TouchCorrectionModel();
-    private TouchCorrectionModel.Sample pendingTouch;
-    private boolean nameMode;
-    private final WordCreationSession wordCreation = new WordCreationSession();
-    private volatile long wordEditorSession;
     private volatile long userDataEpoch;
-    private final WordCreationSession ordinaryWordAssembly = new WordCreationSession();
-    private CustomWordStore.Word ordinaryWordOffer;
-    private CustomWordStore.Change lastCustomWordChange;
-    private String lastCustomWordNotice = "";
-    private Runnable customWordNoticeExpiry;
-    private String wordCreationCategory = "普通词";
-    private final ShuangpinInput shuangpin = new ShuangpinInput();
+    private final SelectionEditController selectionEdit = new SelectionEditController();
+    private final WordCreationController wordCreationController = new WordCreationController(new WordCreationController.Host() {
+        @Override public Context context() { return OfflineImeService.this; }
+        @Override public Handler mainHandler() { return mainHandler; }
+        @Override public ComposingSessionController composing() { return composingSession; }
+        @Override public PinyinDictionary dictionary() { return dictionary; }
+        @Override public KeyboardView keyboardView() { return keyboardView; }
+        @Override public HandwritingView handwritingInput() { return OfflineImeService.this.handwritingInput(); }
+        @Override public InputConnection currentInputConnection() { return getCurrentInputConnection(); }
+        @Override public Mode mode() { return mode; }
+        @Override public void setMode(Mode next) { mode = next; }
+        @Override public Mode restoreLastChineseMode() { return OfflineImeService.this.restoreLastChineseMode(); }
+        @Override public void rememberKeyboardMode(Mode selected) { OfflineImeService.this.rememberKeyboardMode(selected); }
+        @Override public boolean isShuangpin() { return OfflineImeService.this.isShuangpin(); }
+        @Override public boolean isDarkMode() { return OfflineImeService.this.isDarkMode(); }
+        @Override public boolean isDestroyed() { return destroyed; }
+        @Override public boolean isSensitiveEditor() { return editorSession.sensitive; }
+        @Override public boolean canSaveExplicitWord() { return OfflineImeService.this.canSaveExplicitWord(); }
+        @Override public boolean learningAllowed() { return OfflineImeService.this.learningAllowed(); }
+        @Override public boolean canLearn() { return OfflineImeService.this.canLearn(); }
+        @Override public long editorGeneration() { return editorSession.generation; }
+        @Override public String currentCandidateKey() { return OfflineImeService.this.currentCandidateKey(); }
+        @Override public List<PinyinPathEditor.Segment> pinyinSegments() { return OfflineImeService.this.pinyinSegments(); }
+        @Override public boolean clearComposing(boolean commitBest) { return OfflineImeService.this.clearComposing(commitBest); }
+        @Override public boolean commitText(CharSequence text) { return commit(text); }
+        @Override public void hidePanels() { OfflineImeService.this.hidePanels(); }
+        @Override public void closeHandwriting() { OfflineImeService.this.closeHandwriting(); }
+        @Override public void invalidateCandidates() { OfflineImeService.this.invalidateCandidates(); }
+        @Override public void resetCandidatePaging() { candidateExpanded = false; candidatePage = 0; }
+        @Override public void updateComposing() { OfflineImeService.this.updateComposing(); }
+        @Override public void refresh() { OfflineImeService.this.refresh(); }
+        @Override public void expandCandidates() { onCandidateExpand(); }
+        @Override public void dispatchKey(String key) { onKey(key); }
+        @Override public void rememberWord(String word) { OfflineImeService.this.rememberWord(word); }
+        @Override public void queueAssembledWordLearning(String code, String word) {
+            queueWordLearning(code, word, "*", PinyinDictionary.TIER_EXACT_FULL, true);
+        }
+        @Override public void toast(String message) { toastWord(message); }
+    });
     boolean isShuangpin() { return mode == Mode.PINYIN && settingsPreferences != null
             && "xiaohe".equals(settingsPreferences.getString("pinyin_scheme", "full")); }
-    boolean isNameMode() { return nameMode; }
-    private volatile String candidateResultKey = "";
-    private volatile String candidatePendingKey = "";
-    private volatile String candidateCompleteKey = "";
-    private String candidateFirstFrameKey = "";
-    private long candidateFirstFrameAt;
-    private volatile String candidateSelectableKey = "";
-    private String measuredCandidateKey = "";
-    private long measuredCandidateAt;
-    private boolean measuredCandidateDrawn;
-    private volatile List<PinyinDictionary.Entry> candidateResults = java.util.Collections.emptyList();
-    private Mode candidateDisplayMode;
-    private String candidateDisplayInput = "";
-    private static final class CandidateFrame {
-        final String input;
-        final boolean doubleInput;
-        final List<PinyinDictionary.Entry> entries;
-        CandidateFrame(String input, boolean doubleInput, List<PinyinDictionary.Entry> entries) {
-            this.input = input; this.doubleInput = doubleInput; this.entries = entries;
-        }
-    }
-    private final ByteBudgetCache<CandidateFrame> candidateCache = new ByteBudgetCache<>(4 * 1024 * 1024, 512,
-            frame -> 48 + frame.input.length() * 2 + ByteBudgetCache.entries(frame.entries), 0);
+    boolean isNameMode() { return wordCreationController.isNameMode(); }
+    private final EditorSession editorSession = new EditorSession();
+    private final CandidateSession candidateSession = new CandidateSession();
+    private CandidateInputSnapshot candidateInputSnapshot;
     private boolean refreshScheduled;
     private final Runnable renderRefreshRunnable = this::renderRefreshNow;
     private final OrderedKeyInput keyInputOrder = new OrderedKeyInput();
     OrderedKeyInput keyInputOrder() { return keyInputOrder; }
+    private KeyPreview keyPreview;
+    KeyPreview keyPreview() {
+        if (settingsPreferences != null && !settingsPreferences.getBoolean("key_preview", true)) return null;
+        if (keyPreview == null) keyPreview = new KeyPreview(this);
+        return keyPreview;
+    }
     String candidateInputVersion() { return currentCandidateKey(); }
     private long settingsRevision;
     private android.content.SharedPreferences settingsPreferences;
+    private boolean privacyMode;
     private final android.content.SharedPreferences.OnSharedPreferenceChangeListener settingsListener = (preferences, name) -> {
+        if ("key_preview".equals(name) && keyPreview != null && !preferences.getBoolean(name, true))
+            keyPreview.dismiss();
         if ("pinyin_scheme".equals(name)) {
-            InputConnection connection = getCurrentInputConnection();
-            if (connection != null && hostHasComposingText) { connection.setComposingText("", 1); connection.finishComposingText(); }
-            hostHasComposingText = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-            composingCursor = 0; OfflineImeService.this.pathEditor.clear(); lockedPinyinPath = "";
+            composingSession.resetForSchemeChange(getCurrentInputConnection());
         }
-        if ("privacy_mode".equals(name)) {
+        if (name == null || "privacy_mode".equals(name)) {
+            privacyMode = preferences.getBoolean("privacy_mode", false);
+            selectionEdit.clearAll();
             userDataEpoch++;
-            OfflineImeService.this.editorUndo.clear(); if (clipboardHistory != null) clipboardHistory.releaseMemory(); previousCommittedWord = previousPreviousCommittedWord = "";
+            synchronized (OfflineImeService.this.deferredLearning) { OfflineImeService.this.deferredLearning.clear(); }
+            if (clipboardHistory != null) clipboardHistory.releaseMemory(); previousCommittedWord = previousPreviousCommittedWord = "";
             lastChineseCommitAt = 0; stopClipboardListener();
         }
         if ("clipboard_enabled".equals(name) || "clipboard_capture_while_typing".equals(name)
                 || "privacy_mode".equals(name)) {
             stopClipboardListener();
             mainHandler.post(this::startClipboardListenerIfNeeded);
+        }
+        if ("learn_words".equals(name) && !preferences.getBoolean("learn_words", true)) {
+            synchronized (OfflineImeService.this.deferredLearning) { OfflineImeService.this.deferredLearning.clear(); }
         }
         settingsRevision++;
         invalidateCandidates();
@@ -195,169 +222,64 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             mainHandler.post(() -> { updateInputViewLayout(); refresh(); });
         }
     };
-    private String segmentsCacheKey = "";
-    private List<PinyinPathEditor.Segment> segmentsCache = java.util.Collections.emptyList();
-    private final PinyinPathEditor pathEditor = new PinyinPathEditor();
     private volatile boolean destroyed;
-    private boolean selectionMode;
-    private final EditorUndo editorUndo = new EditorUndo();
-    private EditorUndo.Snapshot candidateUndoBefore;
-    private boolean undoCandidateCommit;
-    private int selectionAnchor = -1;
-    private int selectionExtent = -1;
 
-    List<List<String>> pinyinPaths(String input) {
-        if (isShuangpin()) {
-            List<List<String>> paths = new ArrayList<>();
-            for (ShuangpinInput.Path path : shuangpin.paths(input)) paths.add(path.readings);
-            return PinyinDisplayOrder.paths(paths);
-        }
-        if (dictionary == null) return java.util.Collections.emptyList();
-        return PinyinDisplayOrder.paths(mode == Mode.NINE ? dictionary.cachedT9Paths(input) : dictionary.paths(input));
-    }
     String activePinyinPath() {
-        if (isShuangpin()) {
-            List<String> readings = new ArrayList<>();
-            for (PinyinPathEditor.Segment segment : pinyinSegments()) readings.add(segment.reading);
-            return String.join("·", readings);
-        }
-        if (!pathEditor.hasLocks()) return lockedPinyinPath.replace("'", "·");
-        List<String> readings = new ArrayList<>();
-        for (PinyinPathEditor.Segment segment : pinyinSegments()) readings.add(segment.reading);
-        return String.join("·", readings);
+        return composingSession.activePinyinPath(isShuangpin(), pinyinSegments());
     }
     String selectedPinyinPath() {
-        if (secureEditor || composing.length() == 0
-                || mode != Mode.PINYIN && mode != Mode.NINE) return "";
-        List<String> readings = new ArrayList<>();
-        if (isShuangpin()) {
-            for (PinyinPathEditor.Segment segment : pinyinSegments())
-                if (segment.locked) readings.add(segment.reading);
-        } else {
-            PinyinPathEditor.Query query = pathQuery();
-            if (query != null) for (PinyinPathEditor.Part part : query.parts)
-                if (part.locked) readings.add(part.text);
-        }
-        return String.join("·", readings);
+        return composingSession.selectedPinyinPath(mode, isShuangpin(), editorSession.sensitive, pinyinSegments());
     }
     String currentPinyinPath() {
-        if (secureEditor || composing.length() == 0
-                || mode != Mode.PINYIN && mode != Mode.NINE) return "";
-        List<String> readings = new ArrayList<>();
-        for (PinyinPathEditor.Segment segment : pinyinSegments()) {
-            String reading = pinyinDisplayReading(segment);
-            if (!reading.isEmpty() && reading.matches("[a-z/]+")) readings.add(reading);
-        }
-        if (!readings.isEmpty()) return String.join("·", readings);
-        // In 26-key mode the typed letters remain useful even before a valid
-        // syllable has been resolved. Never present T9 digits as a reading.
-        return mode == Mode.PINYIN ? composing.toString().replace('\'', '·') : "";
+        return composingSession.currentPinyinPath(mode, isShuangpin(), editorSession.sensitive, pinyinSegments());
     }
     List<PinyinPathEditor.Segment> pinyinSegments() {
-        if (isShuangpin() && !secureEditor) return shuangpin.segments(composing.toString(),
-                candidateResults.isEmpty() ? "" : candidateResults.get(0).pronunciation);
-        if (secureEditor || mode != Mode.NINE && mode != Mode.PINYIN) return java.util.Collections.emptyList();
-        PinyinPathEditor.Query constraint = pathQuery();
-        String reading = candidateResults.isEmpty() ? "" : candidateResults.get(0).pronunciation;
-        String key = mode + ":" + composing + ':' + (constraint == null ? "" : constraint.key)
-                + ':' + candidateResultKey + ':' + candidateCompleteKey + ':' + reading;
-        if (key.equals(segmentsCacheKey)) return segmentsCache;
-        List<PinyinPathEditor.Segment> valuesForInput = pathEditor.segments(composing.toString(), mode == Mode.NINE, fragment -> {
-            List<List<String>> values = pinyinPaths(fragment);
-            if (!fragment.equals(composing.toString()) || !candidateResultKey.equals(currentCandidateKey()))
-                return values;
-            if (!candidateResults.isEmpty()) {
-                PinyinDictionary.Entry entry = candidateResults.get(0);
-                if (!entry.pronunciation.matches("[a-z]+(?:[ ']+[a-z]+)*")) return values;
-                List<String> candidatePath = java.util.Arrays.asList(entry.pronunciation.split("[ ']+"));
-                for (String syllable : candidatePath)
-                    if (!PinyinPathEditor.isCompleteReading(syllable)) return values;
-                List<List<String>> preferred = new ArrayList<>();
-                preferred.add(candidatePath);
-                preferred.addAll(values); return preferred;
-            }
-            return values;
-        });
-        segmentsCache = valuesForInput;
-        segmentsCacheKey = key;
-        return valuesForInput;
+        return composingSession.pinyinSegments(mode, isShuangpin(), editorSession.sensitive,
+                candidateSession, currentCandidateKey(), dictionary);
     }
     PinyinPathEditor.Segment focusedPinyinSegment() {
-        List<PinyinPathEditor.Segment> segments = pinyinSegments();
-        for (PinyinPathEditor.Segment segment : segments)
-            if (segment.start == pathEditor.focus()) return segment;
-        // Continue from the first unconfirmed syllable when input or its
-        // segmentation changes. Explicit editing still takes precedence.
-        for (PinyinPathEditor.Segment segment : segments)
-            if (!segment.locked) return segment;
-        return segments.isEmpty() ? null : segments.get(segments.size() - 1);
+        return composingSession.focusedPinyinSegment(pinyinSegments());
     }
     private void advancePinyinSelection(int selectedStart, int selectedEnd) {
-        int nextStart = selectedEnd;
-        while (nextStart < composing.length() && composing.charAt(nextStart) == '\'') nextStart++;
-        // Store the raw boundary so asynchronous candidate updates can resolve
-        // the remaining syllables without reusing the selected one's focus.
-        pathEditor.focus(nextStart < composing.length() ? nextStart : selectedStart);
+        composingSession.advancePinyinSelection(selectedStart, selectedEnd);
     }
     boolean pinyinSegmentFocused(PinyinPathEditor.Segment segment) {
         PinyinPathEditor.Segment focused = focusedPinyinSegment();
         return focused != null && focused.start == segment.start;
     }
     boolean pinyinPathLocked() {
-        if (isShuangpin()) return !shuangpin.signature(composing.toString()).isEmpty();
-        pathQuery(); return pathEditor.hasLocks();
+        return composingSession.isPathLocked(mode, isShuangpin());
     }
-    boolean pinyinCandidatesReady() { return currentCandidateKey().equals(candidateSelectableKey); }
-    boolean candidateSurfaceReady() { return currentCandidateKey().equals(candidateSelectableKey); }
-    boolean pinyinCandidatesEmpty() { return candidateResults.isEmpty(); }
+    boolean pinyinCandidatesReady() { return currentCandidateKey().equals(candidateSession.candidateSelectableKey); }
+    boolean candidateSurfaceReady() { return currentCandidateKey().equals(candidateSession.candidateSelectableKey); }
+    boolean candidateFirstFramePending() {
+        if (destroyed || editorSession.sensitive || candidateSession.candidatePendingKey.isEmpty()) return false;
+        String key = currentCandidateKey();
+        return key.equals(candidateSession.candidatePendingKey)
+                && !key.equals(candidateSession.candidateSelectableKey);
+    }
+    boolean pinyinCandidatesEmpty() { return candidateSession.candidateResults.isEmpty(); }
     boolean nineKeyMode() { return mode == Mode.NINE; }
     boolean compactNineLayout() { return mode == Mode.NINE && !handwritingShown; }
     void refreshPinyinPaths() { if (!destroyed) refresh(); }
     String pinyinDisplayReading(PinyinPathEditor.Segment segment) {
-        if (isShuangpin()) return segment.reading;
-        if (segment.prefix) {
-            List<String> entered = PinyinPathEditor.enteredReadings(
-                    composing.substring(segment.start, segment.end), mode == Mode.NINE, segment.reading);
-            if (!entered.isEmpty()) return String.join("/", entered);
-        }
-        return segment.reading.substring(0, Math.min(segment.typedLetters, segment.reading.length()));
+        return composingSession.displayReading(segment, isShuangpin(), mode == Mode.NINE);
     }
     boolean pinyinReadingSelected(PinyinPathEditor.Segment segment, String reading) {
-        if (isShuangpin()) return segment != null && shuangpin.selected(segment.start, reading);
-        return segment != null && segment.locked && (segment.prefix
-                ? reading.startsWith(segment.reading) : reading.equals(segment.reading));
+        return composingSession.readingSelected(segment, reading, isShuangpin());
     }
     List<String> pinyinSyllableChoices(PinyinPathEditor.Segment segment) {
-        if (dictionary == null || segment == null || secureEditor) return java.util.Collections.emptyList();
-        String raw = composing.substring(segment.start, segment.end);
-        if (isShuangpin()) {
-            List<String> choices = new ArrayList<>(ShuangpinInput.choices(raw));
-            choices.sort(PinyinDisplayOrder.READINGS);
-            return choices;
-        }
-        List<String> readings = dictionary.syllableChoices(raw, mode == Mode.NINE);
-        String currentSpelling = mode == Mode.NINE ? PinyinDictionary.toT9(segment.reading) : segment.reading;
-        if (segment.locked && currentSpelling.equals(raw) && !readings.contains(segment.reading))
-            readings.add(segment.reading);
-        // Stable longest-first alphabetical display; selection is conveyed by a checkmark.
-        readings.sort(PinyinDisplayOrder.READINGS);
-        return readings;
+        return composingSession.syllableChoices(segment, isShuangpin(), mode == Mode.NINE,
+                editorSession.sensitive, dictionary);
     }
 
     List<PinyinPathEditor.Segment> ninePinyinChoiceSegments() {
-        PinyinPathEditor.Segment focus = focusedPinyinSegment();
-        return pathEditor.alternativeSegments(composing.toString(), true, focus, this::pinyinPaths);
+        return composingSession.ninePinyinChoiceSegments(focusedPinyinSegment(), isShuangpin(), dictionary);
     }
     private PinyinPathEditor.Query pathQuery() {
-        if (isShuangpin()) { shuangpin.sync(composing.toString()); return null; }
-        if (mode != Mode.PINYIN && mode != Mode.NINE) { pathEditor.clear(); return null; }
-        pathEditor.sync(composing.toString(), mode == Mode.NINE);
-        return pathEditor.hasLocks() || composing.indexOf("'") >= 0
-                ? pathEditor.query(composing.toString(), mode == Mode.NINE) : null;
+        return composingSession.pathQuery(mode, isShuangpin());
     }
     private boolean candidateExpanded;
-    private String lockedPinyinPath = "";
-    private int composingCursor;
     private String deferredCommitKey = "", deferredCommitAction = "";
     private long contextRevision;
     private int candidatePage;
@@ -366,14 +288,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         super.onCreate();
         ByteBudgetCache.configure(this);
         keyInputOrder.setOnIdle(() -> { if (keyboardView != null) keyboardView.onKeyInputIdle(); });
-        settingsPreferences = getSharedPreferences("settings", MODE_PRIVATE);
+        settingsPreferences = SettingsRepository.preferences(this);
+        privacyMode = settingsPreferences.getBoolean("privacy_mode", false);
         settingsPreferences.registerOnSharedPreferenceChangeListener(settingsListener);
         dictionary = new PinyinDictionary(getAssets(), this);
-        clipboardHistory = new ClipboardHistoryStore(this);
+        clipboardHistory = new ClipboardController(this, () -> { if (!destroyed && clipboardShown) refresh(); }, this::toastWord);
         lastClipboardTimestamp = getSharedPreferences("clipboard_capture_state", MODE_PRIVATE)
                 .getLong("last_timestamp", 0);
         startClipboardListenerIfNeeded();
-        quickPhrases = new QuickPhraseStore(this);
+        quickPhrases = QuickPhraseRepository.get(this);
+        quickPhrases.observe(quickPhraseObserver);
         loaderExecutor = Executors.newSingleThreadExecutor(r -> {
             Thread t = new Thread(() -> {
                 android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
@@ -382,39 +306,31 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             t.setDaemon(true);
             return t;
         });
-        candidateQueries = new CandidateQueryCoordinator();
+        candidateSession.queries = new CandidateQueryCoordinator();
         contextRevision = settingsPreferences.getLong("context_revision", 0);
-        loadContextModel();
-        loaderTask = loaderExecutor.submit(() -> dictionary.load(() -> mainHandler.post(this::onDictionaryReady)));
+        // A replacement service must load its personal data after the previous service saves it.
+        loaderTask = CustomWordStore.IO.submit(() -> dictionary.load(() -> mainHandler.post(this::onDictionaryReady)));
+        loaderExecutor.execute(() -> EmojiCatalog.get(this).prewarm());
         registerUserDataReceiver();
         logImeLifecycle("service_created");
     }
 
     @Override public View onCreateInputView() {
+        stopVoiceInput();
         cancelRenderRefresh();
-        if (keyboardView != null) keyboardView.releaseAudio();
-        keyboardView = new KeyboardView(this, this);
+        if (keyboardView == null || !handwritingShown) {
+            if (keyboardView != null) keyboardView.releaseAudio();
+            keyboardView = new KeyboardView(this);
+        } else if (keyboardView.getParent() instanceof android.view.ViewGroup) {
+            ((android.view.ViewGroup) keyboardView.getParent()).removeView(keyboardView);
+        }
         keyboardView.setDark(isDarkMode());
         updateInputViewLayout();
         // Supply key rows and a non-zero height before the framework measures it.
-        keyboardView.refresh(mode, shift, "", java.util.Collections.emptyList());
+        if (handwritingShown) keyboardView.showHandwriting();
+        else keyboardView.refresh(mode, shift, "", java.util.Collections.emptyList());
         logImeLifecycle("create_input_view");
         return keyboardView;
-    }
-
-    private void loadContextModel() {
-        if (contextModel != null) contextModel.cancelDeferredLoad();
-        final UserContextModel model = new UserContextModel(this, true);
-        contextModel = model;
-        dictionary.setSentenceContext(model);
-        loaderExecutor.submit(() -> {
-            model.loadDeferred();
-            mainHandler.post(() -> {
-                if (destroyed || contextModel != model) return;
-                invalidateCandidates();
-                refresh();
-            });
-        });
     }
 
     private void cancelRenderRefresh() {
@@ -426,13 +342,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
             ByteBudgetCache.trimMemory(level == android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_CRITICAL
                     || level >= android.content.ComponentCallbacks2.TRIM_MEMORY_COMPLETE);
-            if (keyboardView != null) keyboardView.trimArtwork();
             if (clipboardHistory != null) clipboardHistory.releaseMemory();
+            if (voiceInput != null) voiceInput.trimMemory();
         }
     }
 
     void onKeyboardViewDetached(KeyboardView view) {
-        if (view == keyboardView) cancelRenderRefresh();
+        if (view == keyboardView) { stopVoiceInput(); cancelRenderRefresh(); }
     }
 
     private void logImeLifecycle(String event) {
@@ -459,8 +375,11 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     @Override public void onWindowHidden() {
+        stopVoiceInput();
         keyInputOrder.cancelAll();
         if (keyboardView != null) keyboardView.cancelKeyTouches();
+        HandwritingView pad = handwritingInput();
+        if (pad != null) pad.cancelPendingConfirmation();
         super.onWindowHidden();
         logImeLifecycle("window_hidden");
     }
@@ -474,51 +393,63 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     private void updateInputViewLayout() {
         if (keyboardView == null) return;
-        boolean landscape = KeyboardPlacement.landscape(this);
-        android.content.SharedPreferences layoutSettings = getSharedPreferences("settings", MODE_PRIVATE);
-        keyboardView.setFloatingLandscape(KeyboardPlacement.floating(this, layoutSettings)
-                || KeyboardPlacement.width(this, layoutSettings) < getResources().getConfiguration().screenWidthDp);
+        android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
+        boolean floating = !handwritingShown && KeyboardPlacement.floating(this, p);
+        int screen = getResources().getConfiguration().screenWidthDp;
+        int width = handwritingShown ? screen : KeyboardPlacement.width(this, p);
+        String side = handwritingShown ? "off" : KeyboardPlacement.side(this, p);
+        keyboardView.setHandwritingFullscreen(handwritingShown && handwritingFullscreen);
+        keyboardView.setFloatingLandscape(floating || width < screen);
+        keyboardView.requestLayout();
         android.app.Dialog dialog = getWindow();
         android.view.Window window = dialog == null ? null : dialog.getWindow();
         if (window == null) return;
         WindowManager.LayoutParams params = window.getAttributes();
-        android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
-        boolean floating = KeyboardPlacement.floating(this, p);
-        String side = KeyboardPlacement.side(this, p);
-        boolean resized = floating || landscape || !"off".equals(side)
-                || KeyboardPlacement.width(this, p) < getResources().getConfiguration().screenWidthDp;
+        boolean resized = handwritingShown || floating || KeyboardPlacement.landscape(this)
+                || !"off".equals(side) || width < screen;
         if (resized) {
             if (!originalImeWindowLayoutSaved) {
                 originalImeWindowWidth = params.width; originalImeWindowHeight = params.height;
                 originalImeWindowGravity = params.gravity; originalImeWindowX = params.x; originalImeWindowY = params.y;
                 originalImeWindowBackground = window.getDecorView().getBackground(); originalImeWindowLayoutSaved = true;
             }
-            float density = getResources().getDisplayMetrics().density;
-            int screen = getResources().getConfiguration().screenWidthDp;
-            int width = KeyboardPlacement.width(this, p);
-            params.width = Math.round(width * density);
-            params.gravity = Gravity.BOTTOM | Gravity.LEFT;
-            String axis = KeyboardPlacement.axis(this);
-            int x = floating ? p.getInt("floating_x_" + axis, (screen - width) / 2)
-                    : "left".equals(side) ? 0 : "right".equals(side) ? screen - width : (screen - width) / 2;
-            int maxY = Math.max(0, getResources().getConfiguration().screenHeightDp - KeyboardPlacement.height(this, p) - 32);
-            params.x = Math.round(Math.max(0, Math.min(screen - width, x)) * density);
-            params.y = floating ? Math.round(Math.max(0, Math.min(maxY, p.getInt("floating_y_" + axis, 48))) * density) : 0;
+            if (handwritingShown) {
+                params.width = WindowManager.LayoutParams.MATCH_PARENT;
+                params.height = handwritingFullscreen ? WindowManager.LayoutParams.MATCH_PARENT
+                        : WindowManager.LayoutParams.WRAP_CONTENT;
+                params.gravity = Gravity.BOTTOM;
+                params.x = 0;
+                params.y = 0;
+            } else {
+                float density = getResources().getDisplayMetrics().density;
+                params.width = Math.round(width * density);
+                params.height = originalImeWindowHeight;
+                params.gravity = Gravity.BOTTOM | Gravity.START;
+                String axis = KeyboardPlacement.axis(this);
+                int x = floating ? p.getInt("floating_x_" + axis, (screen - width) / 2)
+                        : "left".equals(side) ? 0 : "right".equals(side) ? screen - width : (screen - width) / 2;
+                int maxY = Math.max(0, getResources().getConfiguration().screenHeightDp - KeyboardPlacement.height(this, p) - 32);
+                int physicalX = Math.max(0, Math.min(screen - width, x));
+                boolean rtl = window.getDecorView().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
+                params.x = Math.round((rtl ? screen - width - physicalX : physicalX) * density);
+                params.y = floating ? Math.round(Math.max(0, Math.min(maxY, p.getInt("floating_y_" + axis, 48))) * density) : 0;
+            }
             window.setAttributes(params);
-            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
-            floatingImeWindow = true;
-        } else if (floatingImeWindow && originalImeWindowLayoutSaved) {
+            if (!customImeWindowLayout)
+                window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(Color.TRANSPARENT));
+            customImeWindowLayout = true;
+        } else if (customImeWindowLayout && originalImeWindowLayoutSaved) {
             params.width = originalImeWindowWidth; params.height = originalImeWindowHeight;
             params.gravity = originalImeWindowGravity; params.x = originalImeWindowX; params.y = originalImeWindowY;
             window.setAttributes(params); window.setBackgroundDrawable(originalImeWindowBackground);
-            floatingImeWindow = false;
+            customImeWindowLayout = false;
         }
-        keyboardView.requestLayout();
     }
 
     void moveFloatingKeyboard(float dx, float dy, boolean save) {
         android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
-        if (!KeyboardPlacement.floating(this, p) || getWindow() == null || getWindow().getWindow() == null) return;
+        if (handwritingShown || !KeyboardPlacement.floating(this, p)
+                || getWindow() == null || getWindow().getWindow() == null) return;
         android.view.Window window = getWindow().getWindow();
         WindowManager.LayoutParams params = window.getAttributes();
         float density = getResources().getDisplayMetrics().density;
@@ -534,7 +465,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onComputeInsets(android.inputmethodservice.InputMethodService.Insets out) {
         super.onComputeInsets(out);
-        if (keyboardView != null && KeyboardPlacement.floating(this, getSharedPreferences("settings", MODE_PRIVATE))) {
+        if (keyboardView == null) return;
+        if (handwritingShown) {
+            if (handwritingFullscreen && isInputViewShown()) {
+                // Keep the editor's layout behind the full-screen writing surface.
+                out.contentTopInsets = keyboardView.getRootView().getHeight();
+            }
+        } else if (KeyboardPlacement.floating(this, getSharedPreferences("settings", MODE_PRIVATE))) {
             int[] position = new int[2]; keyboardView.getLocationInWindow(position);
             int bottom = position[1] + keyboardView.getHeight();
             out.contentTopInsets = bottom; out.visibleTopInsets = bottom;
@@ -548,87 +485,92 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         return false;
     }
 
-    private static boolean sameEditor(EditorInfo left, EditorInfo right) {
-        return left != null && right != null && java.util.Objects.equals(left.packageName, right.packageName)
-                && left.fieldId == right.fieldId && left.inputType == right.inputType;
-    }
+    private static boolean sameEditor(EditorInfo left, EditorInfo right) { return EditorSession.sameEditor(left, right); }
 
     @Override public void onStartInput(EditorInfo info, boolean restarting) {
-        if (restarting && sameEditor(editorInfo, info) && composing.length() > 0
-                && info.initialSelStart == lastEditorSelectionStart && info.initialSelEnd == lastEditorSelectionEnd
+        stopVoiceInput();
+        selectionEdit.clearTransientState();
+        if (restarting && sameEditor(editorSession.info, info) && (!composingSession.isEmpty() || handwritingShown)
+                && info.initialSelStart == editorSession.selectionStart && info.initialSelEnd == editorSession.selectionEnd
                 && !clipboardSearchDialogOpen) {
-            super.onStartInput(info, true); editorInfo = info; return;
+            super.onStartInput(info, true); editorSession.info = info; return;
         }
-        editorUndo.clear();
+        selectionEdit.clearUndo();
         keyInputOrder.cancelAll();
+        if (keyboardView != null) keyboardView.cancelKeyTouches();
         long revision = getSharedPreferences("settings", MODE_PRIVATE).getLong("context_revision", 0);
         if (revision != contextRevision) {
             contextRevision = revision;
-            loadContextModel();
+            invalidateCandidates();
         }
         stopClipboardListener();
         super.onStartInput(info, restarting);
         logImeLifecycle("start_input restarting=" + restarting);
-        editorInfo = info;
-        ordinaryWordAssembly.clear(); ordinaryWordOffer = null;
-        wordCreation.clear(); wordEditorSession++; lastCustomWordChange = null; lastCustomWordNotice = "";
-        nameMode = false; touchCorrection.clear(); pendingTouch = null;
-        hostHasComposingText = false;
-        lastEditorSelectionStart = info == null ? -1 : info.initialSelStart;
-        lastEditorSelectionEnd = info == null ? -1 : info.initialSelEnd;
-        composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        pathEditor.clear();
-        composingCursor = 0;
-        lockedPinyinPath = "";
+        editorSession.info = info;
+        wordCreationController.clearOnStartInput();
+        editorSession.generation++;
+        composingSession.pendingTouch = null;
+        composingSession.hostHasComposingText = false;
+        editorSession.selectionStart = info == null ? -1 : info.initialSelStart;
+        editorSession.selectionEnd = info == null ? -1 : info.initialSelEnd;
+        composingSession.clearAll();
         previousCommittedWord = "";
         previousPreviousCommittedWord = "";
         lastChineseCommitAt = 0;
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         nextWordPredictionExpiry = null;
         int cls = info == null ? 0 : (info.inputType & InputType.TYPE_MASK_CLASS);
-        editorLayoutKind = classifyEditorLayout(info);
-        numericEditor = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE || cls == InputType.TYPE_CLASS_DATETIME;
-        editorForcesKeyboardLayout = numericEditor || "email".equals(editorLayoutKind)
-                || "uri".equals(editorLayoutKind);
+        editorSession.layout = classifyEditorLayout(info);
+        editorSession.numeric = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE || cls == InputType.TYPE_CLASS_DATETIME;
+        editorSession.forcedLayout = editorSession.numeric || "email".equals(editorSession.layout)
+                || "uri".equals(editorSession.layout);
         invalidateCandidates();
-        secureEditor = isSensitiveEditor(info);
+        editorSession.sensitive = isSensitiveEditor(info);
         boolean clipboardSearchEditor = clipboardSearchDialogOpen && info != null
                 && getPackageName().equals(info.packageName) && "offlineime-panel-search".equals(info.privateImeOptions);
         if (clipboardSearchEditor) {
             // Internal keyword search may compose Chinese, but never learns or captures clipboard.
-            secureEditor = false; mode = restoreLastChineseMode(); numericEditor = false; editorForcesKeyboardLayout = false;
+            editorSession.sensitive = false; mode = restoreLastChineseMode(); editorSession.numeric = false; editorSession.forcedLayout = false;
+            return;
+        }
+        if (clipboardSearchDialogOpen && panelSearchRestoresEmoji && clipboardSearchRestorePanel
+                && sameEditor(info, clipboardSearchReturnEditorInfo)) {
+            if (emojiSearchReturnMode != null) mode = emojiSearchReturnMode;
             return;
         }
         if (clipboardSearchResumePending && clipboardSearchRestorePanel && sameEditor(info, clipboardSearchReturnEditorInfo)) {
             clipboardSearchResumePending = false;
             clipboardSearchRestorePanel = false;
             clipboardSearchReturnEditorInfo = null;
-            clipboardShown = true; emojiShown = false;
+            clipboardShown = !panelSearchRestoresEmoji; emojiShown = panelSearchRestoresEmoji;
+            if (emojiShown && emojiSearchReturnMode != null) mode = emojiSearchReturnMode;
+            panelSearchRestoresEmoji = false;
             clipboardEnablePromptShown = false;
             return;
         }
         clipboardSearchResumePending = false; clipboardSearchRestorePanel = false; clipboardSearchReturnEditorInfo = null;
+        panelSearchRestoresEmoji = false;
+        emojiSearchQuery = "";
         englishWordMode = getSharedPreferences(KEYBOARD_STATE_PREFERENCES, MODE_PRIVATE)
                 .getBoolean(ENGLISH_WORD_MODE, true);
-        mode = numericEditor ? Mode.SYMBOLS
-                : "email".equals(editorLayoutKind) || "uri".equals(editorLayoutKind) ? Mode.ENGLISH
+        mode = editorSession.numeric ? Mode.SYMBOLS
+                : "email".equals(editorSession.layout) || "uri".equals(editorSession.layout) ? Mode.ENGLISH
                 : cls == InputType.TYPE_CLASS_TEXT ? restoreKeyboardMode() : Mode.ENGLISH;
         if (isOwnWordEditor(info) && "offlineime-word-code".equals(info.privateImeOptions)) {
-            mode = Mode.ENGLISH; englishWordMode = false; editorForcesKeyboardLayout = true;
+            mode = Mode.ENGLISH; englishWordMode = false; editorSession.forcedLayout = true;
         }
         toolsShown = false;
         clipboardShown = false;
         clipboardEnablePromptShown = false;
         clipboardClearConfirmShown = false;
-        handwritingShown = false;
+        closeHandwriting();
         emojiShown = false;
         symbolsShown = false;
         layoutChooserShown = false;
         candidateExpanded = false;
         clipboardMultiSelect = false;
         clipboardSelection.clear();
-        selectionMode = false;
-        selectionAnchor = selectionExtent = -1;
+        selectionEdit.resetSelectionMode();
         // 数字输入框临时使用符号布局；普通文本框恢复上次主动选择的键盘。
         modeBeforeSymbols = mode == Mode.SYMBOLS ? restoreBeforeNumericMode() : mode;
         modeBeforeEnglish = mode == Mode.ENGLISH ? restoreLastChineseMode() : mode;
@@ -639,16 +581,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         startClipboardListenerIfNeeded();
     }
 
-    String editorLayoutKind() { return editorLayoutKind; }
-    boolean hasEditorSelection() { return lastEditorSelectionStart >= 0 && lastEditorSelectionEnd >= 0 && lastEditorSelectionStart != lastEditorSelectionEnd; }
-    boolean selectionActive() { return selectionMode; }
+    String editorLayoutKind() { return editorSession.layout; }
+    boolean hasEditorSelection() { return editorSession.selectionStart >= 0 && editorSession.selectionEnd >= 0 && editorSession.selectionStart != editorSession.selectionEnd; }
+    boolean selectionActive() { return selectionEdit.isSelectionMode(); }
     boolean englishWordMode() { return englishWordMode; }
     boolean capsLockEnabled() { return capsLock; }
 
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         ImePerformanceMonitor.inputStarted();
         super.onStartInputView(info, restarting);
-        editorInfo = info;
+        editorSession.info = info;
         updateInputViewLayout();
         if (!clipboardSearchDialogOpen) {
             startClipboardListenerIfNeeded();
@@ -666,13 +608,21 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     @Override public void onFinishInputView(boolean finishingInput) {
+        selectionEdit.clearTransientState();
+        keyInputOrder.cancelAll();
+        if (keyboardView != null) keyboardView.cancelKeyTouches();
+        stopVoiceInput();
+        HandwritingView pad = handwritingInput();
+        if (pad != null) pad.cancelPendingConfirmation();
         cancelRenderRefresh();
         super.onFinishInputView(finishingInput);
         logImeLifecycle("finish_input_view finishing=" + finishingInput);
     }
 
     @Override public void onFinishInput() {
-        editorUndo.clear(); candidateUndoBefore = null;
+        flushPersonalDataSave();
+        stopVoiceInput();
+        selectionEdit.clearAll();
         cancelRenderRefresh();
         keyInputOrder.cancelAll();
         stopClipboardListener();
@@ -680,34 +630,36 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             super.onFinishInput();
             return;
         }
-        wordCreation.clear(); wordEditorSession++;
+        wordCreationController.clearOnFinishInput(); editorSession.generation++;
         invalidateCandidates();
-        pathEditor.clear();
+        composingSession.pathEditor.clear();
         hidePanels();
-        composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = "";
+        composingSession.clearInputOnly();
         previousCommittedWord = "";
         previousPreviousCommittedWord = "";
         lastChineseCommitAt = 0;
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         nextWordPredictionExpiry = null;
-        editorInfo = null;
-        secureEditor = false;
-        lastEditorSelectionStart = -1;
-        lastEditorSelectionEnd = -1;
+        editorSession.info = null;
+        editorSession.sensitive = false;
+        editorSession.selectionStart = -1;
+        editorSession.selectionEnd = -1;
         super.onFinishInput();
         startClipboardListenerIfNeeded();
     }
 
     @Override public void onDestroy() {
         destroyed = true;
+        if (keyPreview != null) keyPreview.dismiss();
+        if (voiceInput != null) { voiceInput.close(); voiceInput = null; }
+        stopVoiceInput();
         cancelRenderRefresh();
-        if (contextModel != null) contextModel.cancelDeferredLoad();
         keyInputOrder.cancelAll();
         cancelCandidateWork();
         if (settingsPreferences != null) settingsPreferences.unregisterOnSharedPreferenceChangeListener(settingsListener);
         stopClipboardListener();
         if (clipboardHistory != null) clipboardHistory.close();
+        if (quickPhrases != null) quickPhrases.removeObserver(quickPhraseObserver);
         if (clipboardUndoExpiry != null) mainHandler.removeCallbacks(clipboardUndoExpiry);
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         clipboardClearBackup = null;
@@ -715,8 +667,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (prewarmTask != null) prewarmTask.cancel(true);
         if (contextPrewarmTask != null) contextPrewarmTask.cancel(true);
         if (loaderExecutor != null) loaderExecutor.shutdownNow();
-        if (candidateQueries != null) candidateQueries.close();
-        if (dictionary != null) dictionary.close();
+        candidateSession.close();
+        flushPersonalDataSave();
+        if (dictionary != null) CustomWordStore.IO.execute(dictionary::close);
         if (userDataReceiverRegistered) {
             unregisterReceiver(userDataClearedReceiver);
             userDataReceiverRegistered = false;
@@ -729,14 +682,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     private void onDictionaryReady() {
         if (destroyed) return;
+        flushDeferredLearning();
+        notifyStorageReadFailure();
         // Keep the small bundled first frame visible until the full candidate
         // query replaces it. Old entries are disabled while that query runs.
-        if (composing.length() > 0 && !candidateResults.isEmpty()
-                && candidateResultKey.equals(currentCandidateKey())) {
-            candidateCache.evictAll();
-            segmentsCacheKey = "";
+        if (!composingSession.isEmpty() && !candidateSession.candidateResults.isEmpty()
+                && candidateSession.candidateResultKey.equals(currentCandidateKey())) {
+            candidateSession.candidateCache.evictAll();
+            composingSession.clearSegmentsCache();
             cancelCandidateWork();
-            candidatePendingKey = candidateCompleteKey = candidateSelectableKey = "";
+            candidateSession.candidatePendingKey = candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = "";
         } else {
             invalidateCandidates();
         }
@@ -744,41 +699,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         scheduleDictionaryPrewarm();
     }
 
-    private void scheduleDictionaryPrewarm() {
-        if (destroyed || prewarmFinished || prewarmScheduled || dictionary == null
-                || !dictionary.isLoaded() || loaderExecutor == null) return;
-        prewarmScheduled = true;
-        mainHandler.postDelayed(dictionaryPrewarmRunnable, 1200L);
-    }
+    private void scheduleDictionaryPrewarm() { }
 
-    private void startDictionaryPrewarmIfIdle() {
-        prewarmScheduled = false;
-        if (destroyed || prewarmFinished || loaderExecutor == null || loaderExecutor.isShutdown()) return;
-        if (composing.length() > 0 || !candidatePendingKey.isEmpty() || keyInputOrder.hasPending()) {
-            scheduleDictionaryPrewarm();
-            return;
-        }
-        prewarmTask = loaderExecutor.submit(() -> {
-            try {
-                dictionary.prewarmCommonQueries();
-                if (!Thread.currentThread().isInterrupted())
-                    mainHandler.post(() -> prewarmFinished = true);
-            } catch (android.os.OperationCanceledException ignored) {
-                // A real key press always takes priority over speculative warming.
-            }
-        });
-    }
-
-    private void updateDictionaryPrewarmForInput() {
-        if (composing.length() > 0) {
-            if (prewarmScheduled) mainHandler.removeCallbacks(dictionaryPrewarmRunnable);
-            prewarmScheduled = false;
-            if (prewarmTask != null && !prewarmTask.isDone()) prewarmTask.cancel(true);
-            prewarmTask = null;
-        } else {
-            scheduleDictionaryPrewarm();
-        }
-    }
+    private void updateDictionaryPrewarmForInput() { }
 
     @android.annotation.SuppressLint("UnspecifiedRegisterReceiverFlag")
     private void registerUserDataReceiver() {
@@ -796,15 +719,27 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                                              int newSelEnd, int candidatesStart, int candidatesEnd) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd,
                 candidatesStart, candidatesEnd);
+        selectionEdit.onUpdateSelection(newSelStart, newSelEnd);
+        HandwritingView pad = handwritingInput();
+        if (pad != null && editorSession.selectionStart >= 0
+                && (newSelStart != editorSession.selectionStart || newSelEnd != editorSession.selectionEnd)) {
+            pad.cancelPendingConfirmation();
+        }
+        if (voiceShown && voiceSelectionStart >= 0 && voiceSelectionEnd >= 0
+                && (newSelStart != voiceSelectionStart || newSelEnd != voiceSelectionEnd)) {
+            stopVoiceInput();
+            toastWord("光标已移动，语音输入已取消");
+            refresh();
+        }
         if (candidateCommitInProgress) {
-            lastEditorSelectionStart = newSelStart;
-            lastEditorSelectionEnd = newSelEnd;
+            editorSession.selectionStart = newSelStart;
+            editorSession.selectionEnd = newSelEnd;
             return;
         }
-        if (wordCreation.active) { lastEditorSelectionStart = newSelStart; lastEditorSelectionEnd = newSelEnd; return; }
-        if (!composing.toString().isEmpty()) {
-            boolean selectionMoved = lastEditorSelectionStart >= 0
-                    && (newSelStart != lastEditorSelectionStart || newSelEnd != lastEditorSelectionEnd);
+        if (wordCreationController.isActive()) { editorSession.selectionStart = newSelStart; editorSession.selectionEnd = newSelEnd; return; }
+        if (!composingSession.isEmpty()) {
+            boolean selectionMoved = editorSession.selectionStart >= 0
+                    && (newSelStart != editorSession.selectionStart || newSelEnd != editorSession.selectionEnd);
             if (mode == Mode.NINE || mode == Mode.STROKE) {
                 // 九键数字和笔画编码只留在本地组合区，宿主选择区必须保持不动。
                 if (selectionMoved) clearComposing(false);
@@ -815,18 +750,28 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 if (!caretAtCompositionEnd) clearComposing(false);
             }
         }
-        lastEditorSelectionStart = newSelStart;
-        lastEditorSelectionEnd = newSelEnd;
+        editorSession.selectionStart = newSelStart;
+        editorSession.selectionEnd = newSelEnd;
         if (toolsShown) refresh();
     }
 
     @Override public void onTouchKey(String key, TouchCorrectionModel.Sample sample) {
-        pendingTouch = sample;
-        try { onKey(key); } finally { pendingTouch = null; }
+        composingSession.pendingTouch = sample;
+        try { onKey(key); } finally { composingSession.pendingTouch = null; }
     }
 
     @Override public void onKey(String key) {
         if (key == null || key.isEmpty()) return;
+        selectionEdit.onKeyBegin(key);
+        if ("语音".equals(key)) { beginVoiceInput(); return; }
+        if ("语音取消".equals(key)) { stopVoiceInput(); refresh(); return; }
+        if ("语音完成".equals(key)) {
+            if (voiceShown && !voiceFinishing && voiceInput != null) {
+                voiceFinishing = true; voiceStatus = "正在完成识别…";
+                voiceInput.finish(); refresh();
+            }
+            return;
+        }
         if ("隐私模式".equals(key)) {
             android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
             boolean enabled = !p.getBoolean("privacy_mode", false);
@@ -834,29 +779,24 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             toastWord(enabled ? "隐私模式已开启" : "隐私模式已关闭"); return;
         }
         if ("原文上屏".equals(key)) {
-            if (composing.length() == 0 || !commit(composing.toString())) return;
-            composing.setLength(0); composingCursor = 0;
-            touchCorrection.clear(); shuangpin.clear(); pathEditor.clear();
-            lockedPinyinPath = ""; updateComposing(); return;
+            if (composingSession.isEmpty() || !commit(composingSession.raw())) return;
+            composingSession.clearAll(); updateComposing(); return;
         }
         if (!"⇧".equals(key)) lastShiftTapUptime = 0;
-        if (handleWordCreationKey(key)) return;
+        if (wordCreationController.handleKey(key)) return;
         deferredCommitKey = ""; deferredCommitAction = "";
-        if ("重输".equals(key) || "中英".equals(key) || "字".equals(key) || "9键".equals(key) || "ABC".equals(key) || "123".equals(key)) ordinaryWordAssembly.clear();
+        if ("重输".equals(key) || "中英".equals(key) || "字".equals(key) || "9键".equals(key) || "ABC".equals(key) || "123".equals(key)) wordCreationController.clearAssembly();
         if ("人名模式".equals(key)) {
-            if (secureEditor || mode != Mode.PINYIN && mode != Mode.NINE) return;
-            nameMode = !nameMode; hidePanels(); invalidateCandidates(); refresh();
-            if (keyboardView != null) keyboardView.announceForAccessibility(nameMode ? "人名候选已开启" : "已恢复普通候选");
-            android.widget.Toast.makeText(this, nameMode ? "人名候选已开启，本输入框有效" : "已恢复普通候选", android.widget.Toast.LENGTH_SHORT).show();
+            wordCreationController.toggleNameMode();
             return;
         }
         if (key.startsWith("编辑音节:")) {
             String[] parts = key.substring("编辑音节:".length()).split(":", 2);
-            if (parts.length != 2 || !parts[0].equals(composing.toString())) return;
+            if (parts.length != 2 || !parts[0].equals(composingSession.raw())) return;
             try {
                 int start = Integer.parseInt(parts[1]);
                 for (PinyinPathEditor.Segment segment : pinyinSegments()) if (segment.start == start) {
-                    pathEditor.focus(start); composingCursor = segment.end;
+                    composingSession.pathEditor.focus(start); composingSession.cursor = segment.end;
                     refresh(); break;
                 }
             } catch (NumberFormatException ignored) { }
@@ -864,27 +804,27 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
         if (key.startsWith("选择音节:")) {
             String[] parts = key.substring("选择音节:".length()).split(":", 4);
-            if (parts.length != 4 || !parts[0].equals(composing.toString())) return;
+            if (parts.length != 4 || !parts[0].equals(composingSession.raw())) return;
             try {
                 int start = Integer.parseInt(parts[1]), end = Integer.parseInt(parts[2]);
-                if (start < 0 || end > composing.length() || start >= end) return;
+                if (start < 0 || end > composingSession.length() || start >= end) return;
                 if (isShuangpin()) {
-                    if (shuangpin.select(parts[0], start, end, parts[3])) {
+                    if (composingSession.shuangpin.select(parts[0], start, end, parts[3])) {
                         advancePinyinSelection(start, end);
                         candidatePage = 0; updateComposing();
                     }
                     return;
                 }
                 String spelling = mode == Mode.NINE ? PinyinDictionary.toT9(parts[3]) : parts[3];
-                if (!spelling.equals(composing.substring(start, end))) return;
-                if (pathEditor.select(parts[0], mode == Mode.NINE,
+                if (!spelling.equals(composingSession.buffer.substring(start, end))) return;
+                if (composingSession.pathEditor.select(parts[0], mode == Mode.NINE,
                         start, end, parts[3])) {
                     advancePinyinSelection(start, end);
                     // Choosing a reading changes the lookup, not the insertion
                     // point. Keep appending at the end unless the user moved
                     // the cursor explicitly through the syllable editor.
-                    lockedPinyinPath = "";
-                    composingCursor = Math.max(0, Math.min(composing.length(), composingCursor));
+                    composingSession.lockedPinyinPath = "";
+                    composingSession.cursor = Math.max(0, Math.min(composingSession.length(), composingSession.cursor));
                     if (canLearn()) {
                         android.content.SharedPreferences usage = getSharedPreferences("pinyin_path_usage", MODE_PRIVATE);
                         String usageKey = "syllable:" + parts[3];
@@ -898,15 +838,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if ("删除当前音节".equals(key)) {
             PinyinPathEditor.Segment segment = focusedPinyinSegment();
             if (segment != null) {
-                pathEditor.replace(composing.toString(), segment.start, segment.end, "", mode == Mode.NINE);
-                touchCorrection.delete(composing.toString(), segment.start, segment.end);
-                composing.delete(segment.start, segment.end); composingCursor = segment.start;
-                lockedPinyinPath = ""; updateComposing();
+                composingSession.deleteSegment(segment, mode == Mode.NINE);
+                updateComposing();
             }
             return;
         }
         if (key.startsWith("定位拼音:")) {
-            try { composingCursor = Math.max(0, Math.min(composing.length(), Integer.parseInt(key.substring(5)))); } catch (NumberFormatException ignored) { }
+            try { composingSession.cursor = Math.max(0, Math.min(composingSession.length(), Integer.parseInt(key.substring(5)))); } catch (NumberFormatException ignored) { }
             refresh(); return;
         }
         if (key.startsWith("词偏好:")) {
@@ -924,16 +862,23 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             insertPinyinSeparator();
             return;
         }
-        if (("中英".equals(key) || "123".equals(key) || "符".equals(key) || "26键".equals(key) || "ABC".equals(key) || "字".equals(key) || "9键".equals(key) || "笔画".equals(key)) && composing.length() > 0 && !clearComposing(true)) return;
-        if ("中英".equals(key) || "123".equals(key) || "符".equals(key)
-                || "26键".equals(key) || "ABC".equals(key) || "字".equals(key)
-                || "9键".equals(key) || "笔画".equals(key)) hidePanels();
+        boolean openingNumbers = "123".equals(key) || "符".equals(key);
+        if (openingNumbers || "中英".equals(key) || "26键".equals(key) || "ABC".equals(key)
+                || "字".equals(key) || "9键".equals(key) || "笔画".equals(key)) {
+            if (!composingSession.isEmpty()) {
+                boolean finished = openingNumbers && mode == Mode.ENGLISH
+                        ? finishEnglishText() : clearComposing(true);
+                if (!finished) return;
+            }
+            hidePanels();
+        }
         if (key.startsWith("符号分类:")) {
             if (symbolsShown && keyboardView != null) keyboardView.showSymbols(key.substring(5));
             return;
         }
         if (key.startsWith("符号输入:")) {
-            if (symbolsShown) { String symbol = key.substring(5); if (!clearComposing(true) || !commit(symbol)) return;
+            if (symbolsShown) { String symbol = key.substring(5);
+                if (!clearComposing(true) || !commitPunctuationOrText(symbol, true)) return;
                 if (mayRememberEdit()) {
                     android.content.SharedPreferences p = getSharedPreferences("symbol_recent", MODE_PRIVATE);
                     java.util.LinkedHashSet<String> values = new java.util.LinkedHashSet<>(); values.add(symbol);
@@ -945,28 +890,49 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             } return;
         }
         if (key.startsWith("粘贴历史")) { pasteHistoryItem(key.substring("粘贴历史".length())); return; }
-        if (key.startsWith("手写字:")) { commit(convertGeneratedText(key.substring(4))); return; }
-        if (key.startsWith("表情分类:")) { if (keyboardView != null) keyboardView.showEmoji(key.substring(5)); return; }
-        if (key.startsWith("表情样式:")) {
-            if (emojiShown && keyboardView != null) {
-                keyboardView.setEmojiStyle(key.substring(5));
-                invalidateCandidates();
+        if (key.startsWith("手写字:")) {
+            HandwritingView pad = handwritingInput();
+            if (pad != null) {
+                if (commit(convertGeneratedText(key.substring(4)))) pad.clear();
+                else toastWord("上屏失败，笔迹已保留，请重试");
             }
             return;
         }
-        if (key.startsWith("收藏表情:")) {
-            if (!mayRememberEdit()) return;
-            String emoji = key.substring(5);
-            android.content.SharedPreferences p = getSharedPreferences("emoji", MODE_PRIVATE);
-            p.edit().putBoolean("favorite_" + emoji, !p.getBoolean("favorite_" + emoji, false)).apply();
-            if (keyboardView != null && emojiShown) keyboardView.showEmoji(
-                    EmojiStyleAssets.WECHAT.equals(getSharedPreferences("emoji", MODE_PRIVATE)
-                            .getString("style", EmojiStyleAssets.SYSTEM)) ? "黄脸" : "收藏");
+        if (key.startsWith("表情分类:")) {
+            emojiSearchQuery = "";
+            if (emojiShown && keyboardView != null) keyboardView.selectEmojiCategory(key.substring(5));
             return;
         }
-        if (key.startsWith("表情:")) { String emoji = key.substring(3); if (clearComposing(true) && commit(emoji)) rememberEmoji(emoji); return; }
+        if (key.startsWith("表情样式:")) {
+            if (emojiShown && keyboardView != null) {
+                emojiSearchQuery = "";
+                keyboardView.setEmojiMarkers("wechat".equals(key.substring(5)));
+            }
+            return;
+        }
+        if (key.startsWith("收藏表情:") || key.startsWith("表情前移:") || key.startsWith("表情后移:")) {
+            if (!emojiShown || !mayRememberEdit()) return;
+            String glyph = key.substring(5);
+            android.content.SharedPreferences prefs = getSharedPreferences("emoji", MODE_PRIVATE);
+            if (key.startsWith("收藏表情:")) EmojiPreferences.toggleFavorite(prefs, glyph);
+            else EmojiPreferences.moveFavorite(prefs, glyph, key.startsWith("表情前移:") ? -1 : 1);
+            if (keyboardView != null) keyboardView.refreshEmojiItems();
+            return;
+        }
+        if (key.startsWith("表情:") || key.startsWith("表情肤色:")) {
+            boolean skinTone = key.startsWith("表情肤色:");
+            String glyph = key.substring(skinTone ? 5 : 3);
+            if (WeChatEmojiCatalog.contains(glyph) && !settingsPreferences.getBoolean("emoji_legacy_markers", false)) return;
+            if (emojiShown && EmojiCatalog.visible(glyph) && clearComposing(true) && commit(glyph)) {
+                if (skinTone && mayRememberEdit())
+                    EmojiPreferences.saveTone(getSharedPreferences("emoji", MODE_PRIVATE), EmojiCatalog.get(this), glyph);
+                rememberEmoji(glyph);
+                if (keyboardView != null && emojiShown) keyboardView.refreshEmojiItems();
+            }
+            return;
+        }
         if (key.startsWith("加入词:")) {
-            if (!secureEditor && canLearn()
+            if (!editorSession.sensitive && canLearn()
                     && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("learn_long_press", true)) {
                 dictionary.addCustomWord(learningCode(), key.substring(3),
                         mode == Mode.ENGLISH ? "en" : "*");
@@ -976,40 +942,39 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
         if (key.startsWith("选择完整路径:")) {
             String[] parts = key.substring("选择完整路径:".length()).split(":", 2);
-            if (parts.length == 2 && parts[0].equals(composing.toString())) onKey("选择路径:" + parts[1]);
+            if (parts.length == 2 && parts[0].equals(composingSession.raw())) onKey("选择路径:" + parts[1]);
             return;
         }
         if ("解锁当前音节".equals(key)) {
             PinyinPathEditor.Segment focus = focusedPinyinSegment();
-            if (focus != null) { if (isShuangpin()) shuangpin.unlock(focus.start); else pathEditor.unlock(focus.start);
-                lockedPinyinPath = ""; invalidateCandidates(); refresh(); }
+            if (focus != null) { if (isShuangpin()) composingSession.shuangpin.unlock(focus.start); else composingSession.pathEditor.unlock(focus.start);
+                composingSession.lockedPinyinPath = ""; invalidateCandidates(); refresh(); }
             return;
         }
         if (key.startsWith("选择路径:")) {
             String selected = key.substring(5);
             if (isShuangpin()) {
-                if ("自动".equals(selected)) { shuangpin.clear(); candidatePage = 0; refresh(); }
+                if ("自动".equals(selected)) { composingSession.shuangpin.clear(); candidatePage = 0; refresh(); }
                 return;
             }
             if ("自动".equals(selected)) {
-                pathEditor.automatic(); lockedPinyinPath = ""; composingCursor = composing.length();
+                composingSession.pathEditor.automatic(); composingSession.lockedPinyinPath = ""; composingSession.cursor = composingSession.length();
             } else {
-                pathEditor.automatic();
+                composingSession.pathEditor.automatic();
                 List<List<String>> chosen = java.util.Collections.singletonList(
                         java.util.Arrays.asList(selected.split("[·']")));
-                for (PinyinPathEditor.Segment segment : pathEditor.segments(
-                        composing.toString(), mode == Mode.NINE, ignored -> chosen))
-                    pathEditor.select(composing.toString(), mode == Mode.NINE,
+                for (PinyinPathEditor.Segment segment : composingSession.pathEditor.segments(
+                        composingSession.raw(), mode == Mode.NINE, ignored -> chosen))
+                    composingSession.pathEditor.select(composingSession.raw(), mode == Mode.NINE,
                             segment.start, segment.end, segment.reading);
-                pathEditor.focus(-1);
-                lockedPinyinPath = "";
+                composingSession.pathEditor.focus(-1);
+                composingSession.lockedPinyinPath = "";
             }
             if (!"自动".equals(selected) && canLearn()) {
                 android.content.SharedPreferences usage = getSharedPreferences("pinyin_path_usage", MODE_PRIVATE);
                 usage.edit().putInt(selected, Math.min(10000, usage.getInt(selected, 0) + 1))
                         .putLong("time_" + selected, System.currentTimeMillis()).apply();
             }
-            if (dictionary != null) dictionary.clearPinyinPathCache();
             candidatePage = 0; refresh(); return;
         }
         if (key.startsWith("屏蔽词:")) { getSharedPreferences("blocked_words", MODE_PRIVATE).edit().putBoolean(key.substring(4), true).apply(); refresh(); return; }
@@ -1037,7 +1002,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             return;
         }
         if (key.startsWith("删除快捷短语:")) {
-            if (!quickPhrases.remove(key.substring("删除快捷短语:".length()))) toastWord("删除短语失败");
+            quickPhrases.remove(key.substring("删除快捷短语:".length()), error -> {
+                if (!destroyed && !error.isEmpty()) toastWord(error);
+            });
             refresh(); return;
         }
         if (key.startsWith("选择剪贴板:")) {
@@ -1065,13 +1032,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
         switch (key) {
             case "分词":
-                if (composing.length() > 0) onCandidateExpand();
+                if (!composingSession.isEmpty()) onCandidateExpand();
                 return;
             case "收起键盘":
                 // Persist synchronously before Android may stop the IME process.
                 // Phone/email/URI layouts are selected automatically and must
                 // not replace the user's explicit keyboard choice.
-                if (!editorForcesKeyboardLayout) rememberKeyboardMode(mode);
+                if (!editorSession.forcedLayout) rememberKeyboardMode(mode);
                 requestHideSelf(0);
                 return;
             case "设置":
@@ -1082,18 +1049,19 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             case "删除": delete(); return;
             case "空格": space(); return;
             case "0\n空格": space(); return;
-            case "回车": enter(); return;
+            case "回车手写":
+            case "回车":
+                HandwritingView confirmPad = handwritingInput();
+                if (confirmPad == null || !confirmPad.confirm()) enter();
+                return;
             case "英文输入模式":
                 if (mode != Mode.ENGLISH) return;
                 // Preserve the letters already entered instead of replacing
                 // them with a suggested word when switching to direct input.
-                if (composing.length() > 0) {
-                    if (!commit(composing.toString())) return;
-                    clearComposing(false);
-                }
+                if (!finishEnglishText()) return;
                 InputConnection englishConnection = getCurrentInputConnection();
                 if (englishConnection != null) englishConnection.finishComposingText();
-                hostHasComposingText = false;
+                composingSession.hostHasComposingText = false;
                 englishWordMode = !englishWordMode;
                 getSharedPreferences(KEYBOARD_STATE_PREFERENCES, MODE_PRIVATE).edit()
                         .putBoolean(ENGLISH_WORD_MODE, englishWordMode).apply();
@@ -1112,47 +1080,81 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                     mode = Mode.ENGLISH;
                 }
                 rememberKeyboardMode(mode);
-                composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = "";
+                composingSession.clearInputOnly();
                 refresh();
                 return;
             case "123":
             case "符":
                 if (mode == Mode.SYMBOLS) { refresh(); return; }
-                modeBeforeSymbols = mode; mode = Mode.SYMBOLS; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = ""; refresh(); return;
+                modeBeforeSymbols = mode;
+                mode = Mode.SYMBOLS;
+                if (!editorSession.forcedLayout) rememberKeyboardMode(mode);
+                composingSession.clearInputOnly();
+                refresh();
+                return;
             case "符号":
                 boolean openSymbols = !symbolsShown;
                 hidePanels(); symbolsShown = openSymbols;
                 if (keyboardView != null) { if (symbolsShown) keyboardView.showSymbols(); else refresh(); }
                 return;
             case "返回符号": symbolsShown = false; refresh(); return;
-            case "重输": composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); pathEditor.clear();
-                composingCursor = 0; candidatePage = 0; candidateExpanded = false;
-                lockedPinyinPath = ""; updateComposing(); return;
-            case "26键": mode = Mode.PINYIN; rememberKeyboardMode(mode); layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); lockedPinyinPath = ""; refresh(); return;
-            case "笔画": mode = Mode.STROKE; rememberKeyboardMode(mode); layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); lockedPinyinPath = ""; refresh(); return;
+            case "重输": composingSession.clearAll();
+                candidatePage = 0; candidateExpanded = false;
+                updateComposing(); return;
+            case "26键": mode = Mode.PINYIN; rememberKeyboardMode(mode); layoutChooserShown = false; composingSession.clearInputOnly(); refresh(); return;
+            case "笔画": mode = Mode.STROKE; rememberKeyboardMode(mode); layoutChooserShown = false; composingSession.clearInputOnly(); refresh(); return;
             case "标点": if (!clearComposing(true)) return; modeBeforeSymbols = mode; mode = Mode.SYMBOLS; refresh(); return;
-            case "ABC": modeBeforeEnglish = mode == Mode.ENGLISH ? restoreLastChineseMode() : mode; mode = Mode.ENGLISH; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = ""; refresh(); return;
-            case "字": mode = Mode.PINYIN; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = ""; refresh(); return;
-            case "9键": mode = Mode.NINE; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = ""; refresh(); return;
+            case "ABC": modeBeforeEnglish = mode == Mode.ENGLISH ? restoreLastChineseMode() : mode; mode = Mode.ENGLISH; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composingSession.clearInputOnly(); refresh(); return;
+            case "字": mode = Mode.PINYIN; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composingSession.clearInputOnly(); refresh(); return;
+            case "9键": mode = Mode.NINE; rememberKeyboardMode(mode); toolsShown = false; clipboardShown = false; layoutChooserShown = false; composingSession.clearInputOnly(); refresh(); return;
             case "键盘布局":
                 boolean openLayouts = !layoutChooserShown; hidePanels(); layoutChooserShown = openLayouts;
                 if (keyboardView != null) { if (layoutChooserShown) keyboardView.showLayoutChooser(mode); else refresh(); }
                 return;
             case "手写":
-                boolean openHandwriting = !handwritingShown; hidePanels(); handwritingShown = openHandwriting;
-                if (keyboardView != null) { if (handwritingShown) keyboardView.showHandwriting(); else refresh(); }
+                boolean openHandwriting = !handwritingShown;
+                if (openHandwriting && !wordCreationController.isActive() && !clearComposing(true)) return;
+                hidePanels();
+                if (openHandwriting) {
+                    handwritingShown = true;
+                    updateInputViewLayout();
+                }
+                refresh();
                 return;
-            case "返回手写": handwritingShown = false; refresh(); return;
-            case "撤销笔画": if (keyboardView != null) keyboardView.undoHandwriting(); return;
-            case "清空手写": if (keyboardView != null) keyboardView.clearHandwriting(); return;
+            case "切换手写屏幕":
+                if (handwritingShown && keyboardView != null) {
+                    handwritingFullscreen = !handwritingFullscreen;
+                    updateInputViewLayout();
+                    keyboardView.showHandwriting();
+                    keyboardView.showWordCreationStatus(wordCreationStatus());
+                }
+                return;
+            case "返回手写":
+                closeHandwriting();
+                refresh();
+                return;
+            case "手写删除":
+                HandwritingView erasePad = handwritingInput();
+                if (erasePad != null) {
+                    if (erasePad.hasInk()) erasePad.undoLastStroke();
+                    else if (!wordCreationController.isActive()) delete();
+                }
+                return;
+            case "清空手写":
+                HandwritingView clearPad = handwritingInput();
+                if (clearPad != null) clearPad.clear();
+                return;
             case "😊":
                 boolean openEmoji = !emojiShown; hidePanels(); emojiShown = openEmoji;
-                if (keyboardView != null) { if (emojiShown) keyboardView.showEmoji(); else refresh(); }
+                emojiSearchQuery = "";
+                if (keyboardView != null) { if (emojiShown) keyboardView.showEmojiPanel(emojiSearchQuery); else refresh(); }
+                return;
+            case "搜索表情":
+                if (emojiShown) showPanelSearchDialog(true);
+                return;
+            case "清除表情搜索":
+                emojiSearchQuery = "";
+                if (emojiShown && keyboardView != null) keyboardView.showEmojiPanel(emojiSearchQuery);
                 return;
             case "返回表情": emojiShown = false; refresh(); return;
             case "返回剪贴板":
@@ -1185,8 +1187,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 if (closeTopPanel()) return;
                 if (mode == Mode.SYMBOLS) {
                     mode = modeBeforeSymbols;
-                    rememberKeyboardMode(mode);
-                    composing.setLength(0); touchCorrection.clear(); shuangpin.clear(); lockedPinyinPath = "";
+                    if (!editorSession.forcedLayout) rememberKeyboardMode(mode);
+                    composingSession.clearInputOnly();
                 }
                 refresh(); return;
             case "⇧":
@@ -1207,8 +1209,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                     }
                 }
                 refresh(); return;
-            case "←": if (composing.length() > 0) { composingCursor = Math.max(0, Math.min(composing.length(), composingCursor) - 1); refresh(); } else moveCaretBy(-1); return;
-            case "→": if (composing.length() > 0) { composingCursor = Math.min(composing.length(), composingCursor + 1); refresh(); } else moveCaretBy(1); return;
+            case "←": if (!composingSession.isEmpty()) { composingSession.cursor = Math.max(0, Math.min(composingSession.length(), composingSession.cursor) - 1); refresh(); } else moveCaretBy(-1); return;
+            case "→": if (!composingSession.isEmpty()) { composingSession.cursor = Math.min(composingSession.length(), composingSession.cursor + 1); refresh(); } else moveCaretBy(1); return;
             case "↑": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_DPAD_UP); return;
             case "↓": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_DPAD_DOWN); return;
             case "行首": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_MOVE_HOME); return;
@@ -1219,12 +1221,12 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             case "剪切": contextAction(android.R.id.cut, KeyEvent.KEYCODE_X); return;
             case "全选": contextAction(android.R.id.selectAll, KeyEvent.KEYCODE_A); return;
             case "撤销":
-                if (!editorUndo.apply(getCurrentInputConnection(), wordEditorSession, false))
+                if (!selectionEdit.applyUndo(getCurrentInputConnection(), editorSession.generation, false))
                     modifiedKey(KeyEvent.KEYCODE_Z);
-                else { hostHasComposingText = false; clearComposing(false); previousCommittedWord = previousPreviousCommittedWord = ""; invalidateCandidates(); refresh(); }
+                else { composingSession.hostHasComposingText = false; clearComposing(false); previousCommittedWord = previousPreviousCommittedWord = ""; invalidateCandidates(); refresh(); }
                 return;
             case "重做":
-                if (!editorUndo.apply(getCurrentInputConnection(), wordEditorSession, true)) modifiedKey(KeyEvent.KEYCODE_Y);
+                if (!selectionEdit.applyUndo(getCurrentInputConnection(), editorSession.generation, true)) modifiedKey(KeyEvent.KEYCODE_Y);
                 return;
             case "剪贴板":
                 if (clipboardShown && !"phrases".equals(clipboardFilter)) {
@@ -1256,9 +1258,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 return;
         }
         if (mode == Mode.STROKE && key.length() == 1 && key.charAt(0) >= '1' && key.charAt(0) <= '5') {
-            if (composing.length() >= 30) return;
-            composing.append(key);
-            composingCursor = composing.length();
+            if (composingSession.length() >= 30) return;
+            composingSession.buffer.append(key);
+            composingSession.cursor = composingSession.length();
             candidatePage = 0;
             updateComposing();
         } else if (mode == Mode.NINE && key.length() == 1 && key.charAt(0) == '0') {
@@ -1266,20 +1268,17 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         } else if (mode == Mode.NINE && key.length() == 1 && key.charAt(0) == '1') {
             if (clearComposing(true)) commit("，");
         } else if (mode == Mode.NINE && key.length() == 1 && key.charAt(0) >= '2' && key.charAt(0) <= '9') {
-            if (composing.length() >= 192) return;
-            lockedPinyinPath = "";
-            composingCursor = Math.max(0, Math.min(composing.length(), composingCursor));
-            pathEditor.replace(composing.toString(), composingCursor, composingCursor, key, true);
-            composing.insert(composingCursor, key); composingCursor += key.length();
-            candidatePage = 0;
-            updateComposing();
+            if (composingSession.insertNineDigit(key)) {
+                candidatePage = 0;
+                updateComposing();
+            }
         } else if (mode == Mode.PINYIN && isLetter(key)) {
             insertPinyin(key);
         } else if (mode == Mode.ENGLISH && isLetter(key)) {
             String letter = shift ? key.toUpperCase(Locale.ROOT) : key.toLowerCase(Locale.ROOT);
             if (englishWordMode) {
-                composing.append(letter);
-                composingCursor = composing.length();
+                composingSession.buffer.append(letter);
+                composingSession.cursor = composingSession.length();
             } else {
                 commit(letter);
             }
@@ -1287,54 +1286,34 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             candidatePage = 0;
             if (englishWordMode) updateComposing(); else refresh();
         } else {
-            if (clearComposing(true)) commitPunctuationOrText(key);
+            if (clearComposing(true)) {
+                commitPunctuationOrText(key, false);
+                if (mode == Mode.ENGLISH) refresh();
+            }
         }
     }
 
     private void insertPinyin(String key) {
-        String value = PinyinInput.normalize(key);
-        if ("'".equals(key)) value = "'";
-        if (composing.length() >= 192 || value.isEmpty()) return;
-        composingCursor = Math.max(0, Math.min(composing.length(), composingCursor));
-        if (composing.length() == 0) composingCursor = 0;
-        if ("'".equals(value) && (composingCursor == 0 || composing.charAt(composingCursor - 1) == '\'')) return;
-        touchCorrection.insert(composing.toString(), composingCursor, value, pendingTouch);
-        pathEditor.replace(composing.toString(), composingCursor, composingCursor, value, false);
-        composing.insert(composingCursor, value); composingCursor += value.length();
-        lockedPinyinPath = ""; candidatePage = 0; updateComposing();
+        if (composingSession.insertPinyin(key)) {
+            candidatePage = 0;
+            updateComposing();
+        }
     }
 
     private void insertPinyinSeparator() {
-        if (composing.length() == 0 || composing.length() >= 192 || isShuangpin()) return;
-        int cursor = Math.max(0, Math.min(composing.length(), composingCursor));
-        if (cursor == 0 || composing.charAt(cursor - 1) == '\''
-                || cursor < composing.length() && composing.charAt(cursor) == '\'') return;
-        if (mode == Mode.PINYIN) { insertPinyin("'"); return; }
-        pathEditor.replace(composing.toString(), cursor, cursor, "'", true);
-        composing.insert(cursor, '\''); composingCursor = cursor + 1;
-        lockedPinyinPath = ""; candidatePage = 0; updateComposing();
+        if (composingSession.insertPinyinSeparator(mode, isShuangpin())) {
+            candidatePage = 0;
+            updateComposing();
+        }
     }
 
-    int pinyinCursor() { return Math.min(composing.length(), composingCursor); }
-    String pinyinRawInput() { return composing.toString(); }
+    int pinyinCursor() { return composingSession.clampedCursor(); }
+    String pinyinRawInput() { return composingSession.raw(); }
 
     private void deleteSyllable() {
-        if (composing.length() == 0) return;
-        int end = Math.min(composing.length(), composingCursor);
-        if (end == 0) return;
-        int start = -1;
-        for (PinyinPathEditor.Segment segment : pinyinSegments())
-            if (segment.start < end && segment.end >= end) { start = segment.start; break; }
-        if (start < 0) start = composing.lastIndexOf("'", Math.max(0, end - 2));
-        if (start < 0) {
-            List<List<String>> paths = pinyinPaths(composing.substring(0, end));
-            start = paths.isEmpty() ? end - 1 : end - paths.get(0).get(paths.get(0).size() - 1).length();
+        if (composingSession.deleteSyllable(mode, isShuangpin(), pinyinSegments(), dictionary)) {
+            updateComposing();
         }
-        start = Math.max(0, start);
-        pathEditor.replace(composing.toString(), start, end, "", mode == Mode.NINE);
-        touchCorrection.delete(composing.toString(), start, end);
-        composing.delete(start, end); composingCursor = start;
-        lockedPinyinPath = ""; updateComposing();
     }
 
     @Override public void onCandidate(int index) {
@@ -1344,69 +1323,66 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onCandidateEntry(PinyinDictionary.Entry selected) {
         if (mode == Mode.ENGLISH && !englishWordMode) return;
-        if (wordCreation.saving) return;
-        if (selected == null || getSharedPreferences("blocked_words", MODE_PRIVATE).getBoolean(selected.word, false)) return;
+        if (wordCreationController.isSaving()) return;
+        if (selected == null || isBlocked(getSharedPreferences("blocked_words", MODE_PRIVATE), selected)) return;
         if (!selected.inputVersion.isEmpty() && !selected.inputVersion.equals(currentCandidateKey())) return;
-        if (mode == Mode.PINYIN && !selected.queryText.isEmpty() && !selected.queryText.equals(lockedPinyinPath)
-                && !composing.toString().startsWith(selected.queryText)) return;
-        if (wordCreation.active) { selectWordCreationCandidate(selected); return; }
+        if (mode == Mode.PINYIN && !selected.queryText.isEmpty() && !selected.queryText.equals(composingSession.lockedPinyinPath)
+                && !composingSession.raw().startsWith(selected.queryText)) return;
+        if (wordCreationController.isActive()) { wordCreationController.selectCandidate(selected); return; }
+        selectionEdit.clearTransientState();
         String code = learningCode();
-        int consumed = (mode == Mode.PINYIN || mode == Mode.NINE) && lockedPinyinPath.isEmpty() && selected.consumedLength > 0
-                ? Math.min(composing.length(), selected.consumedLength) : composing.length();
-        boolean emojiCandidate = EmojiSuggestions.isSuggestion(selected.word);
-        if (emojiCandidate) ordinaryWordAssembly.clear();
-        else trackOrdinaryWordSelection(selected, consumed);
+        int consumed = (mode == Mode.PINYIN || mode == Mode.NINE) && composingSession.lockedPinyinPath.isEmpty() && selected.consumedLength > 0
+                ? Math.min(composingSession.length(), selected.consumedLength) : composingSession.length();
+        boolean emojiCandidate = selected.emojiSuggestion;
         InputConnection batch = getCurrentInputConnection();
-        candidateUndoBefore = mayRememberEdit() ? EditorUndo.read(batch) : null;
-        undoCandidateCommit = true;
+        EditorUndo.Snapshot undoBefore = mayRememberEdit() ? EditorUndo.read(batch) : null;
+        String replacedComposition = composingSession.hostHasComposingText ? composingSession.raw() : null;
+        boolean committed = false;
+        selectionEdit.setUndoCandidateCommit(true);
         candidateCommitInProgress = true;
-        if (mode == Mode.NINE && lastEditorSelectionStart >= 0) {
-            int committedSelection = lastEditorSelectionStart + selected.word.length();
-            lastEditorSelectionStart = committedSelection;
-            lastEditorSelectionEnd = committedSelection;
+        if (mode == Mode.NINE && editorSession.selectionStart >= 0) {
+            int committedSelection = editorSession.selectionStart + selected.word.length();
+            editorSession.selectionStart = committedSelection;
+            editorSession.selectionEnd = committedSelection;
         }
         if (batch != null) batch.beginBatchEdit();
         try {
         if (!commit(selected.word)) {
-            if (mode == Mode.NINE && lastEditorSelectionStart >= 0) { lastEditorSelectionStart -= selected.word.length(); lastEditorSelectionEnd = lastEditorSelectionStart; }
+            if (mode == Mode.NINE && editorSession.selectionStart >= 0) { editorSession.selectionStart -= selected.word.length(); editorSession.selectionEnd = editorSession.selectionStart; }
             return;
         }
-        if (emojiCandidate) rememberEmoji(selected.word);
+        committed = true;
+        if (emojiCandidate) { wordCreationController.clearAssembly(); rememberEmoji(selected.word); }
         else {
+            wordCreationController.trackOrdinaryWordSelection(selected, consumed);
             learnConfirmedCandidate(selected, code.substring(0, Math.min(code.length(), consumed)));
-            if (selected.wordSegments.isEmpty()) rememberWord(selected.word);
+            if (selected.wordSegments.isEmpty()) rememberWord(selected.originalWord);
             else for (String part : selected.wordSegments) rememberWord(part);
         }
-        while (consumed < composing.length() && composing.charAt(consumed) == '\'') consumed++;
-        pathEditor.replace(composing.toString(), 0, consumed, "", mode == Mode.NINE);
-        touchCorrection.delete(composing.toString(), 0, consumed);
-        if (isShuangpin()) shuangpin.consumePrefix(composing.toString(), consumed);
-        composing.delete(0, consumed);
-        if (!isShuangpin()) shuangpin.clear();
-        composingCursor = composing.length(); lockedPinyinPath = "";
+        composingSession.consumePrefix(consumed, mode, isShuangpin());
         candidateExpanded = false; candidatePage = 0;
         updateComposing();
         } finally {
             if (batch != null) batch.endBatchEdit();
             candidateCommitInProgress = false;
-            undoCandidateCommit = false;
-            if (candidateUndoBefore != null && composing.length() == 0)
-                editorUndo.record(candidateUndoBefore, batch, wordEditorSession);
-            candidateUndoBefore = null;
+            selectionEdit.setUndoCandidateCommit(false);
+            if (committed && undoBefore != null && composingSession.isEmpty()) {
+                selectionEdit.recordCandidateCommitUndo(undoBefore, batch, selected.word,
+                        replacedComposition, editorSession.generation);
+            }
         }
     }
 
     @Override public void onCandidatePage(int delta) {
-        int size = CandidateRanker.pageSize(getIntPreference(
-                getSharedPreferences("settings", Context.MODE_PRIVATE), "candidate_count", 6));
+        int size = CandidatePaging.pageSize(SettingsRepository.integer(settingsPreferences, "candidate_count", 6));
         List<PinyinDictionary.Entry> values = candidates();
-        int pages = CandidateRanker.pageCount(values.size(), size);
+        int pages = CandidatePaging.pageCount(values.size(), size);
         candidatePage = Math.max(0, Math.min(pages - 1, candidatePage + delta));
         refresh();
     }
 
     @Override public void onDismissNextWordPrediction() {
-        if (composing.length() != 0 || !shouldShowNextWordPredictions(mode)) return;
+        if (!composingSession.isEmpty() || !shouldShowNextWordPredictions(mode)) return;
         lastChineseCommitAt = 0;
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         nextWordPredictionExpiry = null;
@@ -1420,305 +1396,228 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         candidateExpanded = true;
         candidatePage = 0;
         if (keyboardView != null) keyboardView.showCandidatePage(
-                mode, composing.toString(), candidates(), candidatePage);
+                mode, composingSession.raw(), candidates(), candidatePage);
     }
 
     @Override public void onMode(Mode requested) {
-        if (!wordCreation.active && composing.length() > 0 && !clearComposing(true)) return;
-        ordinaryWordAssembly.clear();
-        if (wordCreation.active) { switchWordCreationMode(requested); return; }
+        if (!wordCreationController.isActive() && !composingSession.isEmpty() && !clearComposing(true)) return;
+        wordCreationController.clearAssembly();
+        if (wordCreationController.isActive()) { wordCreationController.switchMode(requested); return; }
         hidePanels();
         if (requested == Mode.ENGLISH && mode != Mode.ENGLISH) modeBeforeEnglish = mode;
         mode = requested;
-        nameMode = false; touchCorrection.clear();
+        wordCreationController.clearNameMode();
         rememberKeyboardMode(mode);
-        composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = "";
+        composingSession.clearInputOnly();
         refresh();
     }
 
     private void updateComposing() {
         updateDictionaryPrewarmForInput();
-        InputConnection connection = getCurrentInputConnection();
-        // InputConnection may consume this asynchronously. Never share the mutable buffer.
-        String text = composing.toString();
         // T9 digits and five-stroke codes are internal lookup paths. Keep them out of the host
         // field; only the candidate row should expose the result.
-        if (connection != null) {
-            connection.beginBatchEdit();
-            try {
-                if (wordCreation.active || mode == Mode.NINE || mode == Mode.STROKE || text.isEmpty()) {
-                    if (hostHasComposingText) connection.commitText("", 1);
-                    connection.finishComposingText();
-                    hostHasComposingText = false;
-                } else {
-                    connection.setComposingText(text, 1);
-                    hostHasComposingText = true;
-                }
-            } finally {
-                connection.endBatchEdit();
-            }
-        }
+        composingSession.syncHostComposing(getCurrentInputConnection(),
+                wordCreationController.isActive() || mode == Mode.NINE || mode == Mode.STROKE);
         refresh();
     }
 
     private List<PinyinDictionary.Entry> candidates() {
-        if (destroyed || dictionary == null || secureEditor
+        if (destroyed || dictionary == null || editorSession.sensitive
                 || mode == Mode.ENGLISH && !englishWordMode) return java.util.Collections.emptyList();
         final boolean creatingWord = isChoosingWordParts();
-        final boolean expanded = candidateExpanded;
-        final String creationStrokePrefix = wordCreation.strokePrefix;
+        final String creationStrokePrefix = wordCreationController.session.strokePrefix;
         if (lastChineseCommitAt > 0 && System.currentTimeMillis() - lastChineseCommitAt > NEXT_WORD_PREDICTION_WINDOW_MS)
             clearWordContext();
         final Mode queryMode = mode;
-        final String rawInput = composing.toString();
-        final String key = currentCandidateKey();
-        if (!key.equals(measuredCandidateKey)) {
-            measuredCandidateKey = key; measuredCandidateAt = ImePerformanceMonitor.start(); measuredCandidateDrawn = false;
+        final String rawInput = composingSession.raw();
+        final CandidateInputSnapshot inputSnapshot = candidateInputSnapshot();
+        final String key = inputSnapshot.key;
+        if (!key.equals(candidateSession.measuredCandidateKey)) {
+            candidateSession.measuredCandidateKey = key; candidateSession.measuredCandidateAt = ImePerformanceMonitor.start(); candidateSession.measuredCandidateDrawn = false;
         }
         // Repaints and repeated readiness checks must not redo parsing or launch another generation.
-        if (key.equals(candidatePendingKey)
-                || key.equals(candidateResultKey) && key.equals(candidateCompleteKey)) return candidateResults;
-        touchCorrection.sync(rawInput);
-        final List<TouchCorrectionModel.Variant> touchVariants = settingsPreferences.getBoolean("touch_correction", true)
-                ? touchCorrection.variants(rawInput) : java.util.Collections.emptyList();
-        if (isShuangpin()) shuangpin.sync(rawInput);
-        final boolean useNames = nameMode;
-        final List<ShuangpinInput.Path> doublePaths = isShuangpin()
-                ? shuangpin.paths(rawInput) : null;
-        final PinyinPathEditor.Query constraint = pathQuery();
-        final boolean locked = (queryMode == Mode.PINYIN || queryMode == Mode.NINE)
-                && (constraint != null || !lockedPinyinPath.isEmpty());
-        final boolean emptyQuery = composing.length() == 0;
-        final String query = constraint != null ? constraint.key : locked
-                ? lockedPinyinPath : composing.toString();
+        if (key.equals(candidateSession.candidatePendingKey)
+                || key.equals(candidateSession.candidateResultKey) && key.equals(candidateSession.candidateCompleteKey)) return candidateSession.candidateResults;
+        composingSession.touchCorrection.sync(rawInput);
+        if (isShuangpin()) composingSession.shuangpin.sync(rawInput);
+        final PinyinPathEditor.Query constraint = inputSnapshot.constraint;
+        final boolean emptyQuery = composingSession.isEmpty();
         final boolean nextWordPrediction = !creatingWord && emptyQuery && shouldShowNextWordPredictions(queryMode);
-        final String lookupCode = learningCode();
-        final String usageKey = personalUsageKey(queryMode);
-        final String previous = previousCommittedWord;
-        final String previousPrevious = previousPreviousCommittedWord;
-        final boolean preferSingleCharacter = creatingWord
-                || preferSingleCandidate(queryMode, rawInput, constraint, lockedPinyinPath);
-        if (key.equals(candidateResultKey)
-                && (key.equals(candidatePendingKey) || key.equals(candidateCompleteKey))) {
-            return candidateResults;
-        }
 
         if (nextWordPrediction) {
             cancelCandidateWork();
-            List<PinyinDictionary.Entry> predictions = contextModel == null
-                    ? java.util.Collections.emptyList()
-                    : contextModel.predict(previousPrevious, previous, 3);
-            candidateResults = bindCandidateVersion(displayCandidates(queryMode,
-                    filterBlocked(filterChinesePredictions(predictions)), query), key);
-            candidateResultKey = candidateCompleteKey = candidateSelectableKey = key;
-            candidatePendingKey = "";
-            candidateDisplayMode = queryMode;
-            candidateDisplayInput = rawInput;
-            return candidateResults;
+            List<PinyinDictionary.Entry> predictions = dictionary.predict(
+                    previousPreviousCommittedWord, previousCommittedWord, 3);
+            candidateSession.candidateResults = bindCandidateVersion(displayCandidates(queryMode,
+                    filterBlocked(filterChinesePredictions(predictions)), rawInput), key);
+            candidateSession.candidateResultKey = candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = key;
+            candidateSession.candidatePendingKey = "";
+            candidateSession.candidateDisplayMode = queryMode;
+            candidateSession.candidateDisplayInput = rawInput;
+            return candidateSession.candidateResults;
         }
 
         if (emptyQuery) {
             cancelCandidateWork();
-            candidateResultKey = candidateCompleteKey = candidateSelectableKey = key;
-            candidatePendingKey = "";
-            candidateResults = java.util.Collections.emptyList();
-            candidateDisplayMode = queryMode;
-            candidateDisplayInput = rawInput;
-            return candidateResults;
+            candidateSession.candidateResultKey = candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = key;
+            candidateSession.candidatePendingKey = "";
+            candidateSession.candidateResults = java.util.Collections.emptyList();
+            candidateSession.candidateDisplayMode = queryMode;
+            candidateSession.candidateDisplayInput = rawInput;
+            return candidateSession.candidateResults;
         }
 
-        CandidateFrame cachedFrame = candidateCache.get(key);
-        List<PinyinDictionary.Entry> cached = cachedFrame == null ? null : cachedFrame.entries;
-        if (cached != null) {
+        CandidateSession.Frame cachedFrame = candidateSession.candidateCache.get(key);
+        if (cachedFrame != null) {
             cancelCandidateWork();
-            candidateResults = cached;
-            candidateResultKey = candidateCompleteKey = candidateSelectableKey = key;
-            candidatePendingKey = "";
-            candidateDisplayMode = queryMode;
-            candidateDisplayInput = rawInput;
-            return cached;
+            candidateSession.candidateResults = cachedFrame.entries;
+            candidateSession.candidateResultKey = candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = key;
+            candidateSession.candidatePendingKey = "";
+            candidateSession.candidateDisplayMode = queryMode;
+            candidateSession.candidateDisplayInput = rawInput;
+            return cachedFrame.entries;
         }
 
         // The reading path already follows the new input. Never display words
         // from the previous query beside it while this query is still pending.
-        candidateResults = java.util.Collections.emptyList();
-        candidateResultKey = "";
-        candidateDisplayMode = queryMode;
-        candidateDisplayInput = rawInput;
-        candidateCompleteKey = candidateSelectableKey = "";
-        if (!dictionary.isLoaded()) {
-            if (candidateQueries != null && !creatingWord && doublePaths == null
-                    && (queryMode == Mode.PINYIN || queryMode == Mode.NINE)
-                    && constraint == null && !locked && !key.equals(candidatePendingKey)) {
-                cancelCandidateWork();
-                candidatePendingKey = key;
-                CandidateQueryCoordinator.Ticket ticket = candidateQueries.next();
-                long requestedAt = measuredCandidateAt;
-                candidateQueries.submit(ticket, () -> {
-                    QueryWork.begin(ticket.cancellation, ticket.stages);
-                    try {
-                        List<PinyinDictionary.Entry> common = withMixedEnglishCandidates(
-                                dictionary.suggestBootstrap(rawInput, queryMode == Mode.NINE),
-                                queryMode, rawInput, null, false);
-                        QueryWork.check();
-                        if (!common.isEmpty()) {
-                            List<PinyinDictionary.Entry> ready = bindCandidateVersion(
-                                    displayCandidates(queryMode, filterBlocked(common), query), key);
-                            if (!ready.isEmpty()) publishCandidateFrame(
-                                    ticket, key, rawInput, queryMode, ready, false, requestedAt);
-                        }
-                    } catch (android.os.OperationCanceledException ignored) {
-                        // A newer key or the fully loaded lexicon superseded this frame.
-                    } finally { QueryWork.end(); }
-                });
-            }
-            return candidateResults;
+        candidateSession.candidateResults = java.util.Collections.emptyList();
+        candidateSession.candidateResultKey = "";
+        candidateSession.candidateFirstFrameKey = "";
+        candidateSession.candidateDisplayMode = queryMode;
+        candidateSession.candidateDisplayInput = rawInput;
+        candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = "";
+        // The engine maps its lexicon within milliseconds; onDictionaryReady refreshes.
+        if (!dictionary.isLoaded()) return candidateSession.candidateResults;
+
+        final CandidateLookup lookup = candidateLookup(queryMode, rawInput, constraint, creatingWord, wordCreationController.isNameMode());
+        if (candidateSession.queries == null) {
+            candidateSession.candidateResults = bindCandidateVersion(
+                    displayCandidates(queryMode, runLookup(lookup, creationStrokePrefix), rawInput), key);
+            candidateSession.candidateResultKey = candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = key;
+            candidateSession.candidatePendingKey = "";
+            return candidateSession.candidateResults;
         }
 
-        if (candidateQueries == null) {
-            List<PinyinDictionary.Entry> full = creatingWord
-                    ? dictionary.creationCandidates(rawInput, queryMode == Mode.NINE, constraint, doublePaths)
-                    : lookupCandidates(queryMode, constraint, locked, query, false);
-            if (creatingWord) full = filterCreationStrokes(full, creationStrokePrefix);
-            List<PinyinDictionary.Entry> ranked = creatingWord
-                    ? CandidateRanker.rankTop(filterBlocked(full), true, 512) : rankForContext(
-                    filterBlocked(full), lookupCode, usageKey, previousPrevious, previous,
-                    preferSingleCharacter, queryMode, rawInput, constraint, doublePaths != null);
-            candidateResults = bindCandidateVersion(displayCandidates(queryMode, ranked, query), key);
-            candidateResultKey = candidateCompleteKey = candidateSelectableKey = key;
-            candidatePendingKey = "";
-            candidateDisplayMode = queryMode;
-            candidateDisplayInput = rawInput;
-            return candidateResults;
-        }
-
-        if (!key.equals(candidatePendingKey)) {
+        if (!key.equals(candidateSession.candidatePendingKey)) {
             cancelCandidateWork();
-            candidatePendingKey = key;
-            CandidateQueryCoordinator.Ticket ticket = candidateQueries.next();
+            candidateSession.candidatePendingKey = key;
+            CandidateQueryCoordinator.Ticket ticket = candidateSession.queries.next();
             android.os.CancellationSignal cancellation = ticket.cancellation;
-            long requestedAt = measuredCandidateAt;
-            candidateQueries.submit(ticket, () -> {
+            long requestedAt = candidateSession.measuredCandidateAt;
+            candidateSession.queries.submit(ticket, () -> {
                 QueryWork.begin(cancellation, ticket.stages);
                 try {
-                QueryWork.firstScreen(true);
-                QueryWork.check();
-                ImePerformanceMonitor.stage(this, "queue_wait", requestedAt, 0, queryMode == Mode.NINE);
-                // A changed/deleted personal dictionary must be reloaded before any frame becomes selectable.
-                if (dictionary.isUserDataReady()) {
-                    long fastStarted = ImePerformanceMonitor.start();
-                    List<PinyinDictionary.Entry> screen = creatingWord
-                            ? dictionary.creationCandidates(rawInput, queryMode == Mode.NINE, constraint, doublePaths, true)
-                            : doublePaths == null ? lookupCandidates(queryMode, constraint, locked, query, false)
-                            : lookupShuangpin(doublePaths, rawInput, false);
-                    if (creatingWord) screen = filterCreationStrokes(screen, creationStrokePrefix);
-                    List<PinyinDictionary.Entry> ranked = creatingWord
-                            ? filterBlocked(screen)
-                            : rankForContext(filterBlocked(screen), lookupCode, usageKey,
-                                    previousPrevious, previous, preferSingleCharacter,
-                                    queryMode, rawInput, constraint, doublePaths != null);
-                    final List<PinyinDictionary.Entry> ready = bindCandidateVersion(displayCandidates(queryMode, ranked, query), key);
-                    ImePerformanceMonitor.fastCandidates(this, fastStarted, ready.size(), queryMode == Mode.NINE);
-                    if (!ready.isEmpty()) publishCandidateFrame(ticket, key, rawInput, queryMode, ready, false, requestedAt);
-                }
-                QueryWork.check();
-                candidateQueries.submitSupplement(ticket, () -> {
-                QueryWork.begin(cancellation, ticket.stages);
-                try {
-                QueryWork.firstScreen(creatingWord && !expanded, false);
-                dictionary.reloadManagedWords();
-                QueryWork.check();
-                long started = ImePerformanceMonitor.start();
-                List<PinyinDictionary.Entry> full;
-                full = creatingWord ? dictionary.creationCandidates(rawInput, queryMode == Mode.NINE, constraint, doublePaths)
-                        : doublePaths == null ? lookupCandidates(queryMode, constraint, locked, query, false)
-                        : lookupShuangpin(doublePaths, rawInput, useNames);
-                if (!creatingWord && !secureEditor && !locked && doublePaths == null
-                        && (queryMode == Mode.PINYIN || queryMode == Mode.NINE))
-                    full = addContextRecall(full, rawInput, previousPrevious, previous);
-                if (!creatingWord && !secureEditor && !locked && doublePaths == null && queryMode == Mode.PINYIN)
-                    full = dictionary.supplementCorrections(rawInput, full, touchVariants);
-                if (!creatingWord && useNames && doublePaths == null && (queryMode == Mode.PINYIN || queryMode == Mode.NINE))
-                    full = NameCandidateEngine.suggest(full, constraint, rawInput, settingsPreferences);
-                if (creatingWord) full = filterCreationStrokes(full, creationStrokePrefix);
-                ImePerformanceMonitor.stage(this, "lookup", started, full.size(), queryMode == Mode.NINE);
-                QueryWork.check();
-                long rankingStarted = ImePerformanceMonitor.start();
-                List<PinyinDictionary.Entry> ranked = creatingWord
-                        ? filterBlocked(full) : rankForContext(
-                        filterBlocked(full), lookupCode, usageKey, previousPrevious, previous,
-                        preferSingleCharacter, queryMode, rawInput, constraint, doublePaths != null);
-                ImePerformanceMonitor.stage(this, "ranking", rankingStarted, ranked.size(), queryMode == Mode.NINE);
-                QueryWork.check();
-                final List<PinyinDictionary.Entry> filtered = bindCandidateVersion(
-                        displayCandidates(queryMode, ranked, query), key);
-                ImePerformanceMonitor.query(this, started, filtered.size(), queryMode == Mode.NINE);
-                QueryWork.publishTimings(this, filtered.size(), queryMode == Mode.NINE);
-                // Publish before optional path preparation: keys and selected readings already identify this frame.
-                publishCandidateFrame(ticket, key, rawInput, queryMode, filtered, true, requestedAt);
-                if (queryMode == Mode.NINE) {
-                    dictionary.t9Paths(rawInput);
-                    if (constraint != null) for (PinyinPathEditor.Part part : constraint.parts) {
-                        QueryWork.check();
-                        if (!part.locked) dictionary.t9Paths(part.text);
-                    }
-                }
-                QueryWork.check();
-                mainHandler.post(() -> {
-                    if (destroyed || cancellation.isCanceled() || !candidateQueries.isCurrent(ticket)
-                            || !key.equals(currentCandidateKey())) return;
-                    segmentsCacheKey = ""; refresh();
-                });
+                    ImePerformanceMonitor.stage(this, "queue_wait", requestedAt, 0, queryMode == Mode.NINE);
+                    // A changed/deleted personal dictionary must be reloaded before any frame becomes selectable.
+                    dictionary.reloadManagedWords();
+                    QueryWork.check();
+                    long started = ImePerformanceMonitor.start();
+                    List<PinyinDictionary.Entry> found = runLookup(lookup, creationStrokePrefix);
+                    ImePerformanceMonitor.stage(this, "lookup", started, found.size(), queryMode == Mode.NINE);
+                    QueryWork.check();
+                    final List<PinyinDictionary.Entry> ready = bindCandidateVersion(
+                            displayCandidates(queryMode, found, rawInput), key);
+                    ImePerformanceMonitor.query(this, started, ready.size(), queryMode == Mode.NINE);
+                    QueryWork.publishTimings(this, ready.size(), queryMode == Mode.NINE);
+                    publishCandidateFrame(ticket, key, rawInput, queryMode, ready, true, requestedAt);
+                    mainHandler.post(() -> {
+                        if (destroyed || cancellation.isCanceled() || !candidateSession.queries.isCurrent(ticket)
+                                || !key.equals(currentCandidateKey())) return;
+                        composingSession.clearSegmentsCache(); refresh();
+                    });
                 } catch (android.os.OperationCanceledException ignored) {
-                    // Superseded input intentionally abandons every remaining stage.
-                } finally { QueryWork.end(); }
-                });
-                } catch (android.os.OperationCanceledException ignored) {
-                    // The next key supersedes both the quick and supplementary work.
+                    // The next key supersedes this query.
                 } finally { QueryWork.end(); }
             });
         }
-        return candidateResults;
+        return candidateSession.candidateResults;
+    }
+
+    /** Everything one native lookup needs, captured on the main thread. */
+    private static final class CandidateLookup {
+        final Mode mode;
+        final String raw, constraint, previous2, previous;
+        final int flags;
+        final boolean creating, unavailable;
+        final String[] touches;
+        CandidateLookup(Mode mode, String raw, String constraint, String previous2, String previous,
+                        int flags, boolean creating, boolean unavailable, String[] touches) {
+            this.mode = mode; this.raw = raw; this.constraint = constraint;
+            this.previous2 = previous2; this.previous = previous; this.flags = flags;
+            this.creating = creating; this.unavailable = unavailable;
+            this.touches = touches;
+        }
+    }
+
+    private CandidateLookup candidateLookup(Mode queryMode, String rawInput,
+            PinyinPathEditor.Query constraint, boolean creatingWord, boolean names) {
+        String encoded = "";
+        boolean unavailable = false;
+        if (queryMode == Mode.PINYIN && isShuangpin()) {
+            encoded = composingSession.shuangpin.constraint(rawInput);
+            unavailable = encoded.isEmpty();
+        } else if (constraint != null && (queryMode == Mode.PINYIN || queryMode == Mode.NINE)) {
+            encoded = constraint.encoded();
+        }
+        boolean context = !editorSession.sensitive && (queryMode == Mode.PINYIN || queryMode == Mode.NINE);
+        int flags = dictionary.flags(queryMode, creatingWord, names);
+        String[] touches = null;
+        if (context && queryMode == Mode.PINYIN && !isShuangpin() && !creatingWord && constraint == null) {
+            if (settingsPreferences.getBoolean("spelling_correction", false))
+                flags |= NativeEngine.FLAG_SPELLING_CORRECTION;
+            if (settingsPreferences.getBoolean("touch_correction", true)) {
+                List<TouchCorrectionModel.Variant> variants = composingSession.touchCorrection.variants(rawInput);
+                if (!variants.isEmpty()) {
+                    touches = new String[variants.size()];
+                    for (int i = 0; i < variants.size(); i++) {
+                        TouchCorrectionModel.Variant variant = variants.get(i);
+                        touches[i] = variant.penalty + ":" + variant.input;
+                    }
+                }
+            }
+        }
+        return new CandidateLookup(queryMode, rawInput, encoded,
+                context ? previousPreviousCommittedWord : "", context ? previousCommittedWord : "",
+                flags, creatingWord, unavailable, touches);
+    }
+
+    /** Runs on a candidate worker lane or, without one, synchronously. */
+    private List<PinyinDictionary.Entry> runLookup(CandidateLookup lookup, String creationStrokes) {
+        if (lookup.mode == Mode.STROKE)
+            return filterBlocked(StrokeInputDictionary.get(this).suggest(this, lookup.raw, 256));
+        if (lookup.unavailable || lookup.mode == Mode.SYMBOLS) return java.util.Collections.emptyList();
+        List<PinyinDictionary.Entry> found = dictionary.lookup(lookup.mode, lookup.raw, lookup.constraint,
+                lookup.previous2, lookup.previous, lookup.flags, lookup.creating ? 512 : 256, lookup.touches);
+        found = filterBlocked(found);
+        if (lookup.creating) return wordCreationController.filterCreationStrokes(found, creationStrokes);
+        // Nine-key alias matches have no reading and can expand to any saved text.
+        if (lookup.mode == Mode.NINE) found.removeIf(entry -> !entry.pronunciation.isEmpty() && !containsHan(entry.word));
+        return found;
     }
 
     private void publishCandidateFrame(CandidateQueryCoordinator.Ticket ticket, String key, String raw,
             Mode queryMode, List<PinyinDictionary.Entry> entries, boolean complete, long requestedAt) {
         mainHandler.post(() -> {
-            if (destroyed || ticket.cancellation.isCanceled() || !candidateQueries.isCurrent(ticket)
+            if (destroyed || ticket.cancellation.isCanceled() || !candidateSession.queries.isCurrent(ticket)
                     || !key.equals(currentCandidateKey())) return;
-            if (!complete && key.equals(candidateCompleteKey)) return;
+            if (!complete && key.equals(candidateSession.candidateCompleteKey)) return;
+            boolean firstSelectable = !key.equals(candidateSession.candidateSelectableKey);
             List<PinyinDictionary.Entry> published = entries;
-            if (complete && key.equals(candidateFirstFrameKey) && !candidateResults.isEmpty()
-                    && !entries.isEmpty()) {
-                if (!raw.isEmpty() && !isChoosingWordParts()
-                        && (queryMode == Mode.PINYIN || queryMode == Mode.NINE)) {
-                    boolean preferSingle = preferSingleCandidate(queryMode, raw, pathQuery(), lockedPinyinPath);
-                    published = CandidateRanker.stabilizeTop(candidateResults, entries, preferSingle, raw);
-                }
-                boolean changed = !candidateResults.get(0).word.equals(published.get(0).word);
-                long age = android.os.SystemClock.uptimeMillis() - candidateFirstFrameAt;
-                if (changed && age < 120) {
-                    mainHandler.postDelayed(() -> publishCandidateFrame(ticket, key, raw,
-                            queryMode, entries, true, requestedAt), 120 - Math.max(0, age));
-                    return;
-                }
-                ImePerformanceMonitor.candidateTopChange(this, changed, queryMode == Mode.NINE);
-                candidateFirstFrameKey = "";
-            }
-            candidateResults = published; candidateResultKey = candidateSelectableKey = key;
-            candidateDisplayMode = queryMode; candidateDisplayInput = raw;
-            if (!complete && !entries.isEmpty()) {
-                candidateFirstFrameKey = key;
-                candidateFirstFrameAt = android.os.SystemClock.uptimeMillis();
+            candidateSession.candidateResults = published; candidateSession.candidateResultKey = candidateSession.candidateSelectableKey = key;
+            candidateSession.candidateDisplayMode = queryMode; candidateSession.candidateDisplayInput = raw;
+            if (!complete && firstSelectable && !entries.isEmpty()) {
+                candidateSession.candidateFirstFrameKey = key;
+                candidateSession.candidateFirstFrameAt = android.os.SystemClock.uptimeMillis();
             }
             if (complete) {
-                candidateCompleteKey = key; candidatePendingKey = "";
-                candidateCache.put(key, new CandidateFrame(raw, isShuangpin(), published));
+                candidateSession.candidateCompleteKey = key; candidateSession.candidatePendingKey = "";
+                candidateSession.candidateCache.put(key, new CandidateSession.Frame(raw, isShuangpin(), published));
                 ImePerformanceMonitor.candidateFrameCompleted(raw);
             }
             refresh();
-            ImePerformanceMonitor.stage(this, complete ? "candidate_ready" : "first_selectable", requestedAt, entries.size(), queryMode == Mode.NINE);
+            if (complete || firstSelectable)
+                ImePerformanceMonitor.stage(this, complete ? "candidate_ready" : "first_selectable",
+                        requestedAt, entries.size(), queryMode == Mode.NINE);
             if (key.equals(deferredCommitKey)) {
                 String action = deferredCommitAction; deferredCommitKey = ""; deferredCommitAction = "";
                 if ("space".equals(action)) space(); else if ("enter".equals(action)) enter();
@@ -1726,34 +1625,96 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         });
     }
     void onCandidateFrameDrawn(List<PinyinDictionary.Entry> entries) {
-        if (measuredCandidateDrawn || entries == null || entries.isEmpty() || measuredCandidateAt == 0) return;
+        if (candidateSession.measuredCandidateDrawn || entries == null || entries.isEmpty() || candidateSession.measuredCandidateAt == 0) return;
         String version = entries.get(0).inputVersion;
-        if (!version.equals(measuredCandidateKey) || !version.equals(candidateSelectableKey)) return;
-        measuredCandidateDrawn = true;
-        ImePerformanceMonitor.stage(this, "first_visible", measuredCandidateAt, entries.size(), mode == Mode.NINE);
+        if (!version.equals(candidateSession.measuredCandidateKey) || !version.equals(candidateSession.candidateSelectableKey)) return;
+        candidateSession.measuredCandidateDrawn = true;
+        ImePerformanceMonitor.stage(this, "first_visible", candidateSession.measuredCandidateAt, entries.size(), mode == Mode.NINE);
     }
 
-    private String currentCandidateKey() {
-        touchCorrection.sync(composing.toString());
+    private static final class CandidateInputSnapshot {
+        final long editorGeneration, settingsRevision, pathRevision, touchRevision, doubleRevision;
+        final long lastCommit, draftRevision, assemblyRevision;
+        final int assemblySize;
+        final Mode mode;
+        final String raw, locked, previous, previousPrevious, usageKey, key;
+        final boolean nextPrediction, doublePinyin, names, englishWord, draft, expanded;
+        final PinyinPathEditor.Query constraint;
+
+        CandidateInputSnapshot(OfflineImeService service, String raw,
+                               PinyinPathEditor.Query constraint, String usageKey, String key,
+                               boolean nextPrediction, boolean doublePinyin) {
+            editorGeneration = service.editorSession.generation; settingsRevision = service.settingsRevision;
+            pathRevision = service.composingSession.pathEditor.revision(); touchRevision = service.composingSession.touchCorrection.revision();
+            doubleRevision = service.composingSession.shuangpin.revision(); mode = service.mode;
+            this.raw = raw; this.constraint = constraint; this.usageKey = usageKey; this.key = key;
+            locked = service.composingSession.lockedPinyinPath; previous = service.previousCommittedWord;
+            previousPrevious = service.previousPreviousCommittedWord; lastCommit = service.lastChineseCommitAt;
+            this.nextPrediction = nextPrediction; this.doublePinyin = doublePinyin;
+            names = service.wordCreationController.isNameMode(); englishWord = service.englishWordMode; draft = service.wordCreationController.session.active;
+            draftRevision = service.wordCreationController.session.revision; assemblySize = service.wordCreationController.ordinaryWordAssembly.parts.size();
+            assemblyRevision = service.wordCreationController.ordinaryWordAssembly.revision;
+            expanded = service.isChoosingWordParts() && service.candidateExpanded;
+        }
+
+        boolean matches(OfflineImeService service, boolean next, boolean doubleMode) {
+            return editorGeneration == service.editorSession.generation && settingsRevision == service.settingsRevision
+                    && pathRevision == service.composingSession.pathEditor.revision() && touchRevision == service.composingSession.touchCorrection.revision()
+                    && doubleRevision == service.composingSession.shuangpin.revision() && mode == service.mode
+                    && raw.contentEquals(service.composingSession.buffer) && locked.equals(service.composingSession.lockedPinyinPath)
+                    && previous.equals(service.previousCommittedWord)
+                    && previousPrevious.equals(service.previousPreviousCommittedWord)
+                    && lastCommit == service.lastChineseCommitAt && nextPrediction == next && doublePinyin == doubleMode
+                    && names == service.wordCreationController.isNameMode() && englishWord == service.englishWordMode
+                    && draft == service.wordCreationController.session.active && draftRevision == service.wordCreationController.session.revision
+                    && assemblySize == service.wordCreationController.ordinaryWordAssembly.parts.size()
+                    && assemblyRevision == service.wordCreationController.ordinaryWordAssembly.revision
+                    && expanded == (service.isChoosingWordParts() && service.candidateExpanded);
+        }
+    }
+
+    private CandidateInputSnapshot candidateInputSnapshot() {
+        boolean nextPrediction = composingSession.isEmpty() && shouldShowNextWordPredictions(mode);
+        boolean doublePinyin = isShuangpin();
+        CandidateInputSnapshot cached = candidateInputSnapshot;
+        if (cached != null && cached.matches(this, nextPrediction, doublePinyin)) return cached;
+        String raw = composingSession.raw();
+        composingSession.touchCorrection.sync(raw);
         PinyinPathEditor.Query constraint = pathQuery();
         String query = constraint != null ? constraint.key
-                : (mode == Mode.PINYIN || mode == Mode.NINE) && !lockedPinyinPath.isEmpty()
-                ? lockedPinyinPath : composing.toString();
-        boolean nextWordPrediction = composing.length() == 0 && shouldShowNextWordPredictions(mode);
-        return wordEditorSession + ":" + settingsRevision + ":" + mode.name() + ':' + composing + ':' + query + ':' + personalUsageKey(mode)
+                : (mode == Mode.PINYIN || mode == Mode.NINE) && !composingSession.lockedPinyinPath.isEmpty()
+                ? composingSession.lockedPinyinPath : raw;
+        String usageKey = personalUsageKey(mode, constraint, raw);
+        String key = editorSession.generation + ":" + settingsRevision + ":" + mode.name() + ':' + raw + ':' + query + ':' + usageKey
                 + ':' + previousPreviousCommittedWord + ':' + previousCommittedWord + ':'
-                + lastChineseCommitAt + ':' + nextWordPrediction + ":names=" + nameMode + ":touch=" + touchCorrection.signature()
-                + ":double=" + (isShuangpin() ? shuangpin.signature(composing.toString()) : "")
-                + ":englishWord=" + englishWordMode + ":draft=" + wordCreation.active + ":" + wordCreation.revision
-                + ":wordParts=" + ordinaryWordAssembly.parts.size() + ":" + ordinaryWordAssembly.revision
+                + lastChineseCommitAt + ':' + nextPrediction + ":names=" + wordCreationController.isNameMode() + ":touch=" + composingSession.touchCorrection.signature()
+                + ":double=" + (doublePinyin ? composingSession.shuangpin.signature(raw) : "")
+                + ":englishWord=" + englishWordMode + ":draft=" + wordCreationController.session.active + ":" + wordCreationController.session.revision
+                + ":wordParts=" + wordCreationController.ordinaryWordAssembly.parts.size() + ":" + wordCreationController.ordinaryWordAssembly.revision
                 + ":expanded=" + (isChoosingWordParts() && candidateExpanded);
+        return candidateInputSnapshot = new CandidateInputSnapshot(this, raw, constraint, usageKey, key,
+                nextPrediction, doublePinyin);
+    }
+
+    private String currentCandidateKey() { return candidateInputSnapshot().key; }
+
+    private static boolean expiredWordPriority(List<PinyinDictionary.Entry> entries, long now) {
+        for (PinyinDictionary.Entry entry : entries)
+            if (entry.newWordPriorityUntil > 0 && entry.newWordPriorityUntil <= now
+                    || entry.recentWordPriorityUntil > 0 && entry.recentWordPriorityUntil <= now) return true;
+        return false;
     }
 
     private List<PinyinDictionary.Entry> filterBlocked(List<PinyinDictionary.Entry> source) {
         java.util.ArrayList<PinyinDictionary.Entry> out = new java.util.ArrayList<>();
         android.content.SharedPreferences blocked = getSharedPreferences("blocked_words", MODE_PRIVATE);
-        for (PinyinDictionary.Entry entry : source) if (!blocked.getBoolean(entry.word, false)) out.add(entry);
+        for (PinyinDictionary.Entry entry : source) if (!isBlocked(blocked, entry)) out.add(entry);
         return out;
+    }
+
+    private static boolean isBlocked(android.content.SharedPreferences blocked, PinyinDictionary.Entry entry) {
+        return blocked.getBoolean(entry.originalWord, false)
+                || (!java.util.Objects.equals(entry.originalWord, entry.word) && blocked.getBoolean(entry.word, false));
     }
 
     private List<PinyinDictionary.Entry> filterChinesePredictions(List<PinyinDictionary.Entry> source) {
@@ -1761,184 +1722,6 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (source == null) return out;
         for (PinyinDictionary.Entry entry : source) if (containsHan(entry.word)) out.add(entry);
         return out;
-    }
-
-    private List<PinyinDictionary.Entry> filterForInputMode(
-            List<PinyinDictionary.Entry> source, Mode queryMode, String rawInput,
-            PinyinPathEditor.Query constraint, boolean shuangpinInput) {
-        ArrayList<PinyinDictionary.Entry> eligible = new ArrayList<>();
-        boolean twoSyllableFull = queryMode == Mode.PINYIN && !shuangpinInput
-                && constraint == null && settingsPreferences.getBoolean("full_pinyin", true)
-                && PinyinInput.hasTwoSyllableFullPath(rawInput);
-        if (source != null) for (PinyinDictionary.Entry entry : source) {
-            if (twoSyllableFull && entry.codePointLength > 2
-                    && (entry.matchTier == PinyinDictionary.TIER_EXACT_SHORT
-                        || entry.matchTier == PinyinDictionary.TIER_MIXED)) continue;
-            if (entry.matchTier == PinyinDictionary.TIER_FUZZY) {
-                if (queryMode == Mode.PINYIN && !shuangpinInput && constraint == null
-                        && rawInput.length() >= 4 && entry.consumedLength == rawInput.length()
-                        && (settingsPreferences.getBoolean("spelling_correction", false)
-                            || settingsPreferences.getBoolean("touch_correction", true)
-                            || settingsPreferences.getBoolean("fuzzy_pinyin", false))) eligible.add(entry);
-                continue;
-            }
-            if (entry.matchTier == PinyinDictionary.TIER_COMPOSED) {
-                boolean enabled = queryMode == Mode.PINYIN
-                        ? settingsPreferences.getBoolean("sentence_prediction", true)
-                        : queryMode == Mode.NINE && settingsPreferences.getBoolean("nine_sentence_prediction", false);
-                PinyinInput.Match aligned = constraint == null
-                        ? PinyinInput.match(rawInput, entry.pronunciation, true, false, false, false, false)
-                        : constraint.match(entry.pronunciation, true, false, false, false, false);
-                if (enabled && !shuangpinInput && aligned != null && entry.consumedLength == rawInput.length()
-                        && entry.codePointLength >= 5 && entry.wordSegments.size() >= 2) eligible.add(entry);
-                continue;
-            }
-            if (queryMode != Mode.PINYIN && queryMode != Mode.NINE
-                    || rawInput.isEmpty() || entry.codePointLength < 3 || entry.codePointLength > 8
-                    || !containsHan(entry.word) || shuangpinInput && queryMode == Mode.PINYIN
-                    || queryMode == Mode.PINYIN && dictionary.isMixedEnglishCandidate(rawInput, entry.word)
-                    || matchesCompleteLongWord(entry, queryMode, rawInput, constraint, shuangpinInput))
-                eligible.add(entry);
-        }
-        if (queryMode == Mode.STROKE)
-            return filterChinesePredictions(eligible);
-        if (queryMode == Mode.NINE) {
-            return filterChinesePredictions(eligible);
-        }
-        if (queryMode == Mode.PINYIN && !getSharedPreferences("settings", MODE_PRIVATE)
-                .getBoolean("mixed_english", true)) return filterChinesePredictions(eligible);
-        return eligible;
-    }
-
-    private boolean matchesCompleteLongWord(PinyinDictionary.Entry entry, Mode queryMode,
-            String rawInput, PinyinPathEditor.Query constraint, boolean shuangpinInput) {
-        if (entry.consumedLength != rawInput.length() || entry.pronunciation.isEmpty()) return false;
-        String[] syllables = entry.pronunciation.toLowerCase(Locale.ROOT).split("[ ']+");
-        if (syllables.length != entry.codePointLength) return false;
-        StringBuilder fullSpelling = new StringBuilder();
-        for (String syllable : syllables) {
-            if (!PinyinPathEditor.isCompleteReading(syllable)) return false;
-            fullSpelling.append(syllable);
-        }
-        if (queryMode == Mode.PINYIN && !shuangpinInput) {
-            // Every complete dictionary/name/user entry has already passed its
-            // source's pronunciation matcher. Rechecking with a different set
-            // of enabled spellings here can discard valid 3/4-character words.
-            return entry.matchTier <= PinyinDictionary.TIER_MIXED
-                    && entry.rankingTier < 35;
-        }
-        if (queryMode != Mode.NINE) return false;
-        // Keep locked readings and explicit boundaries authoritative.
-        boolean fullNumeric = PinyinDictionary.toT9(fullSpelling.toString()).equals(rawInput.replace("'", ""));
-        PinyinInput.Match selected = constraint == null
-                ? PinyinInput.match(rawInput, entry.pronunciation, true, true, true, true, false)
-                : constraint.match(entry.pronunciation, true, true, true, true, false);
-        if (fullNumeric && selected != null) return true;
-        // Complete abbreviation/mixed input accounts for every syllable. Do not
-        // require literal one-key initials: full+initial combinations are valid.
-        if (selected != null && selected.tier != PinyinDictionary.TIER_PREFIX
-                && entry.codePointLength <= 5
-                && settingsPreferences.getBoolean("nine_short_words", true)
-                && settingsPreferences.getBoolean("short_pinyin", true)
-                && (entry.codePointLength <= 4 || CandidateRanker.hasStrongWordSupport(entry))) {
-            boolean mixedEnabled = settingsPreferences.getBoolean("mixed_pinyin", true);
-            PinyinInput.Match allowed = constraint == null
-                    ? PinyinInput.match(rawInput, entry.pronunciation,
-                        settingsPreferences.getBoolean("full_pinyin", true), true, mixedEnabled,
-                        settingsPreferences.getBoolean("double_initials", true), false)
-                    : constraint.match(entry.pronunciation,
-                        settingsPreferences.getBoolean("full_pinyin", true), true, mixedEnabled,
-                        settingsPreferences.getBoolean("double_initials", true), false);
-            if (allowed != null) return true;
-        }
-        if (settingsPreferences.getBoolean("nine_word_completion", true)
-                && settingsPreferences.getBoolean("full_pinyin", true)
-                && NineWordCandidates.isCompletion(entry, rawInput)) {
-            PinyinInput.Match completion = constraint == null
-                    ? PinyinInput.match(rawInput, entry.pronunciation, true, false, false, false, true)
-                    : constraint.match(entry.pronunciation, true, false, false, false, true);
-            if (completion != null && completion.tier == PinyinDictionary.TIER_PREFIX) return true;
-        }
-        if (constraint == null) return false;
-        if (constraint.parts.size() != syllables.length) return false;
-        for (int i = 0; i < syllables.length; i++) {
-            PinyinPathEditor.Part part = constraint.parts.get(i);
-            if (!part.locked || part.prefix || !part.text.equals(syllables[i])) return false;
-        }
-        return true;
-    }
-
-    private List<PinyinDictionary.Entry> lookupCandidates(Mode queryMode,
-            PinyinPathEditor.Query constraint, boolean locked, String query, boolean forCommit) {
-        if (queryMode == Mode.STROKE)
-            return StrokeInputDictionary.get(this).suggest(this, query, 256);
-        List<PinyinDictionary.Entry> values;
-        if (constraint != null) values = dictionary.suggestConstrained(constraint);
-        else if (queryMode == Mode.NINE && !locked) values = dictionary.suggestT9(query);
-        else if (queryMode == Mode.ENGLISH) values = dictionary.suggestEnglish(query);
-        else values = forCommit ? dictionary.suggestForCommit(query, false) : dictionary.suggest(query);
-        return withMixedEnglishCandidates(values, queryMode, query, constraint, locked);
-    }
-
-    private List<PinyinDictionary.Entry> withMixedEnglishCandidates(
-            List<PinyinDictionary.Entry> values, Mode queryMode, String query,
-            PinyinPathEditor.Query constraint, boolean locked) {
-        if (queryMode != Mode.PINYIN
-                || !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("mixed_english", true)
-                || constraint != null || locked) return values;
-        // The small exact-code mixed vocabulary is cheap enough for the first frame.
-        if (query == null || !query.matches("[A-Za-z]{2,24}")) return values;
-        List<PinyinDictionary.Entry> mixed = dictionary.suggestMixedEnglish(query);
-        if (mixed.isEmpty()) return values;
-        ArrayList<PinyinDictionary.Entry> combined = new ArrayList<>(values);
-        java.util.HashSet<String> seen = new java.util.HashSet<>();
-        for (PinyinDictionary.Entry entry : values) seen.add(entry.word.toLowerCase(Locale.ROOT));
-        for (PinyinDictionary.Entry english : mixed) {
-            if (seen.add(english.word.toLowerCase(Locale.ROOT))) {
-                combined.add(english);
-            }
-        }
-        return combined;
-    }
-
-    private List<PinyinDictionary.Entry> lookupShuangpin(List<ShuangpinInput.Path> paths,
-            String raw, boolean names) {
-        java.util.Map<String, PinyinDictionary.Entry> best = new java.util.LinkedHashMap<>();
-        for (ShuangpinInput.Path path : paths) {
-            QueryWork.check();
-            List<PinyinDictionary.Entry> entries = dictionary.suggestShuangpin(path.query);
-            if (names) entries = NameCandidateEngine.suggest(entries, null, path.query, settingsPreferences, true);
-            for (PinyinDictionary.Entry entry : entries) {
-                if (!containsHan(entry.word)) continue;
-                PinyinDictionary.Entry copy = entry.withInput(path.consumed(entry.consumedLength), entry.pronunciation);
-                copy.queryText = raw;
-                PinyinDictionary.Entry previous = best.get(copy.word);
-                if (previous == null || copy.rankingTier < previous.rankingTier
-                        || copy.rankingTier == previous.rankingTier && copy.score > previous.score) best.put(copy.word, copy);
-            }
-        }
-        return new ArrayList<>(best.values());
-    }
-
-    private List<PinyinDictionary.Entry> addContextRecall(List<PinyinDictionary.Entry> source,
-            String input, String previousPrevious, String previous) {
-        if (previous.isEmpty()) return source;
-        java.util.LinkedHashSet<String> retained = new java.util.LinkedHashSet<>();
-        if (contextModel != null) for (PinyinDictionary.Entry entry : contextModel.predict(previousPrevious, previous, 8))
-            retained.add(entry.word);
-        for (String word : dictionary.basicContextScores(previous).keySet()) {
-            if (retained.size() >= 24) break;
-            retained.add(word);
-        }
-        if (retained.isEmpty()) return source;
-        ArrayList<String> words = new ArrayList<>(retained);
-        List<PinyinDictionary.Entry> matched = dictionary.contextMatches(input, words);
-        if (matched.isEmpty()) return source;
-        ArrayList<PinyinDictionary.Entry> combined = new ArrayList<>(source);
-        java.util.HashSet<String> seen = new java.util.HashSet<>();
-        for (PinyinDictionary.Entry entry : source) seen.add(entry.word);
-        for (PinyinDictionary.Entry entry : matched) if (seen.add(entry.word)) combined.add(entry);
-        return combined;
     }
 
     private List<PinyinDictionary.Entry> displayCandidates(
@@ -1949,122 +1732,100 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 .getString("output_script", "simplified"));
         boolean mixedCase = queryMode == Mode.PINYIN && rawQuery != null
                 && !rawQuery.isEmpty() && Character.isUpperCase(rawQuery.charAt(0));
-        if (!traditional && !mixedCase) return withEmojiCandidates(queryMode, rawQuery, cased);
-        ArrayList<PinyinDictionary.Entry> result = new ArrayList<>(cased.size());
-        for (PinyinDictionary.Entry entry : cased) {
-            String word = entry.word;
-            if (traditional && containsHan(word)) word = HanConverter.get(this).toTraditional(word);
-            else if (mixedCase && word.matches("[A-Za-z][A-Za-z'.-]*"))
-                word = word.substring(0, 1).toUpperCase(Locale.ROOT) + word.substring(1);
-            PinyinDictionary.Entry copy = new PinyinDictionary.Entry(word, entry.score,
-                    entry.matchTier, entry.pinned, entry.corpusScore, entry.rankingTier)
-                    .withInput(entry.consumedLength, entry.pronunciation);
-            copy.queryText = entry.queryText;
-            copy.wordSegments = entry.wordSegments;
-            copy.personalBonus = entry.personalBonus; copy.contextBonus = entry.contextBonus;
-            copy.correctionPenalty = entry.correctionPenalty;
-            result.add(copy);
+        PinyinDictionary.Entry leader = entries.isEmpty() ? null : entries.get(0);
+        if (!traditional && !mixedCase) return withEmojiCandidates(queryMode, rawQuery, cased, leader);
+        String[] replacements = null;
+        if (traditional) {
+            ArrayList<String> hanWords = new ArrayList<>();
+            for (PinyinDictionary.Entry entry : cased) {
+                QueryWork.check();
+                if (containsHan(entry.word)) hanWords.add(entry.word);
+            }
+            if (!hanWords.isEmpty()) {
+                replacements = HanConverter.get(this).toTraditionalBatch(hanWords.toArray(new String[0]));
+            }
         }
-        return withEmojiCandidates(queryMode, rawQuery, result);
+        if (replacements == null && !mixedCase) return withEmojiCandidates(queryMode, rawQuery, cased, leader);
+        ArrayList<PinyinDictionary.Entry> result = new ArrayList<>(cased.size());
+        int hanIndex = 0;
+        for (PinyinDictionary.Entry entry : cased) {
+            QueryWork.check();
+            String word = entry.word;
+            if (replacements != null && containsHan(word)) {
+                String replacement = replacements[hanIndex++];
+                if (replacement != null) word = replacement;
+            } else if (mixedCase && word.matches("[A-Za-z][A-Za-z'.-]*")) {
+                word = word.substring(0, 1).toUpperCase(Locale.ROOT) + word.substring(1);
+            }
+            result.add(entry.withDisplayWord(word));
+        }
+        return withEmojiCandidates(queryMode, rawQuery, result, leader);
     }
 
     private List<PinyinDictionary.Entry> withEmojiCandidates(Mode queryMode, String query,
-            List<PinyinDictionary.Entry> words) {
+            List<PinyinDictionary.Entry> words, PinyinDictionary.Entry leader) {
         if ((queryMode != Mode.PINYIN && queryMode != Mode.NINE) || query == null || query.isEmpty()
-                || words.isEmpty()
+                || leader == null || !containsHan(leader.originalWord)
                 || settingsPreferences == null || !settingsPreferences.getBoolean("emoji_candidates", true)
-                || secureEditor || clipboardSearchDialogOpen || wordCreation.active) return words;
-        boolean weChat = EmojiStyleAssets.WECHAT.equals(
-                getSharedPreferences("emoji", MODE_PRIVATE).getString("style", EmojiStyleAssets.SYSTEM));
-        String[] emojis = EmojiSuggestions.forQuery(query, words, weChat);
-        if (emojis.length == 0) return words;
-        ArrayList<PinyinDictionary.Entry> result = new ArrayList<>(words.size() + emojis.length);
-        int insertAt = Math.min(2, words.size());
-        result.addAll(words.subList(0, insertAt));
-        for (String emoji : emojis) {
-            boolean duplicate = false;
-            for (PinyinDictionary.Entry word : words) if (emoji.equals(word.word)) { duplicate = true; break; }
-            if (!duplicate) result.add(new PinyinDictionary.Entry(emoji, 0, PinyinDictionary.TIER_COMPOSED));
+                || editorSession.sensitive || clipboardSearchDialogOpen || wordCreationController.isActive()) return words;
+        String[] offers = dictionary.emojiSuggestions(leader.originalWord);
+        for (int i = leader.wordSegments.size() - 1; (offers == null || offers.length == 0) && i >= 0; i--)
+            offers = dictionary.emojiSuggestions(leader.wordSegments.get(i));
+        if (offers == null || offers.length == 0) return words;
+        EmojiCatalog catalog = EmojiCatalog.get(this);
+        android.content.SharedPreferences prefs = getSharedPreferences("emoji", MODE_PRIVATE);
+        List<String> visible = new ArrayList<>(java.util.Arrays.asList(offers));
+        visible.removeIf(glyph -> !EmojiCatalog.visible(glyph));
+        if (visible.isEmpty()) return words;
+        boolean personalize = mayRememberEdit();
+        if (personalize) {
+            java.util.Map<String, Integer> recent = new java.util.HashMap<>();
+            for (String glyph : EmojiPreferences.recent(prefs))
+                recent.putIfAbsent(catalog.base(glyph), recent.size());
+            visible.sort(java.util.Comparator.comparingInt(glyph -> recent.getOrDefault(glyph, Integer.MAX_VALUE)));
         }
-        result.addAll(words.subList(insertAt, words.size()));
+        ArrayList<PinyinDictionary.Entry> result = new ArrayList<>(words);
+        int first = Math.min(2, words.size()), insert = first;
+        for (String glyph : visible) {
+            String value = personalize ? EmojiPreferences.preferred(prefs, catalog, glyph) : glyph;
+            if (result.stream().anyMatch(entry -> value.equals(entry.word))) continue;
+            PinyinDictionary.Entry item = new PinyinDictionary.Entry(value, 0, PinyinDictionary.TIER_COMPOSED);
+            item.emojiSuggestion = true;
+            result.add(insert++, item);
+            if (insert - first == 2) break;
+        }
         return result;
-    }
-
-    private static boolean preferSingleCandidate(Mode queryMode, String raw,
-            PinyinPathEditor.Query constraint, String lockedPath) {
-        return queryMode == Mode.NINE && !raw.isEmpty() && (constraint != null
-                ? constraint.parts.size() == 1 && constraint.parts.get(0).locked
-                : !lockedPath.isEmpty() ? lockedPath.matches("[a-z]+") : raw.matches("[2-9]"));
-    }
-
-    private List<PinyinDictionary.Entry> rankForContext(List<PinyinDictionary.Entry> source,
-            String lookupCode, String usageKey, String previousPrevious, String previous,
-            boolean preferSingleCharacter, Mode queryMode, String rawInput,
-            PinyinPathEditor.Query constraint, boolean shuangpinInput) {
-        long contextStarted = ImePerformanceMonitor.start();
-        java.util.Map<String, Integer> bonuses = new java.util.HashMap<>();
-        if (!QueryWork.shouldYield(source.size()) && !secureEditor && contextModel != null)
-            bonuses.putAll(contextModel.rankingScores(previousPrevious, previous, source));
-        if (!QueryWork.shouldYield(source.size()) && !secureEditor
-                && (queryMode == Mode.PINYIN || queryMode == Mode.NINE) && !previous.isEmpty()) {
-            java.util.Map<String, Integer> basic = dictionary.basicContextScores(previous);
-            for (PinyinDictionary.Entry entry : source) {
-                String first = entry.wordSegments.isEmpty() ? entry.word : entry.wordSegments.get(0);
-                int combined = Math.min(1550, bonuses.getOrDefault(entry.word, 0) + basic.getOrDefault(first, 0));
-                if (combined > 0) bonuses.put(entry.word, combined);
-            }
-        }
-        ImePerformanceMonitor.stage(this, "context_ranking", contextStarted, source.size(), mode == Mode.NINE);
-        long personalStarted = ImePerformanceMonitor.start();
-        List<PinyinDictionary.Entry> scored = dictionary.personalize(lookupCode, usageKey, source, preferSingleCharacter, bonuses);
-        ImePerformanceMonitor.stage(this, "personalization", personalStarted, scored.size(), mode == Mode.NINE);
-        // Eligibility sees the same personal/context evidence used by ranking,
-        // and is applied before the final display limit.
-        List<PinyinDictionary.Entry> eligible = filterForInputMode(scored, queryMode, rawInput, constraint, shuangpinInput);
-        int limit = QueryWork.firstScreen() ? 24 : 128;
-        if (queryMode == Mode.NINE)
-            return NineWordCandidates.rank(eligible, preferSingleCharacter, limit, rawInput);
-        List<PinyinDictionary.Entry> ranked = CandidateRanker.rankTop(
-                eligible, preferSingleCharacter, limit, lookupCode);
-        if (queryMode == Mode.PINYIN) {
-            List<PinyinDictionary.Entry> exactTwo = new ArrayList<>();
-            for (PinyinDictionary.Entry entry : eligible)
-                if (CandidateRanker.isExactTwoSyllableWord(entry, rawInput)) exactTwo.add(entry);
-            if (!exactTwo.isEmpty()) {
-                PinyinDictionary.Entry preferred = CandidateRanker.rankTop(
-                        exactTwo, false, 1, rawInput).get(0);
-                ranked.remove(preferred);
-                ranked.add(0, preferred);
-                if (ranked.size() > limit) ranked.remove(ranked.size() - 1);
-            }
-        }
-        return ranked;
     }
 
     private String learningCode() {
         if (isShuangpin()) {
-            List<ShuangpinInput.Path> paths = shuangpin.paths(composing.toString());
+            List<ShuangpinInput.Path> paths = composingSession.shuangpin.paths(composingSession.raw());
             if (!paths.isEmpty()) return paths.get(0).query;
         }
-        if (!lockedPinyinPath.isEmpty()) return lockedPinyinPath;
-        return composing.toString();
+        if (!composingSession.lockedPinyinPath.isEmpty()) return composingSession.lockedPinyinPath;
+        return composingSession.raw();
     }
 
     private String personalUsageKey(Mode forMode) {
         if (forMode == Mode.ENGLISH) return "en";
         if (forMode == Mode.STROKE) return "stroke";
-        PinyinPathEditor.Query constraint = pathQuery();
+        return personalUsageKey(forMode, pathQuery(), composingSession.raw());
+    }
+
+    private String personalUsageKey(Mode forMode, PinyinPathEditor.Query constraint, String raw) {
+        if (forMode == Mode.ENGLISH) return "en";
+        if (forMode == Mode.STROKE) return "stroke";
         if (constraint != null) return (forMode == Mode.NINE ? "9:" : "26:") + "syllables:" + constraint.key;
         if (forMode == Mode.NINE) {
-            return lockedPinyinPath.isEmpty()
-                    ? "9:digits:" + composing.toString()
-                    : "9:path:" + lockedPinyinPath;
+            return composingSession.lockedPinyinPath.isEmpty()
+                    ? "9:digits:" + raw
+                    : "9:path:" + composingSession.lockedPinyinPath;
         }
         if (forMode == Mode.PINYIN) {
             if (isShuangpin()) return "26:xiaohe";
-            return lockedPinyinPath.isEmpty()
-                    ? "26:auto:" + composing.toString()
-                    : "26:path:" + lockedPinyinPath;
+            return composingSession.lockedPinyinPath.isEmpty()
+                    ? "26:auto:" + raw
+                    : "26:path:" + composingSession.lockedPinyinPath;
         }
         return "*";
     }
@@ -2087,13 +1848,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 word = word.substring(0, 1).toUpperCase(Locale.ROOT)
                         + word.substring(1).toLowerCase(Locale.ROOT);
             } else word = word.toLowerCase(Locale.ROOT);
-            PinyinDictionary.Entry copy = new PinyinDictionary.Entry(word, entry.score, entry.matchTier,
-                    entry.pinned, entry.corpusScore, entry.rankingTier)
-                    .withInput(entry.consumedLength, entry.pronunciation);
-            copy.queryText = entry.queryText; copy.wordSegments = entry.wordSegments;
-            copy.personalBonus = entry.personalBonus; copy.contextBonus = entry.contextBonus;
-            copy.correctionPenalty = entry.correctionPenalty;
-            result.add(copy);
+            result.add(entry.withDisplayWord(word));
         }
         return result;
     }
@@ -2101,7 +1856,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private boolean shouldShowNextWordPredictions(Mode forMode) {
         return (forMode == Mode.PINYIN || forMode == Mode.NINE)
                 && getSharedPreferences("settings", MODE_PRIVATE).getBoolean("next_word_prediction", true)
-                && contextModel != null && lastChineseCommitAt > 0
+                && dictionary != null && dictionary.isUserDataReady() && lastChineseCommitAt > 0
                 && System.currentTimeMillis() - lastChineseCommitAt <= NEXT_WORD_PREDICTION_WINDOW_MS
                 && containsHan(previousCommittedWord);
     }
@@ -2120,7 +1875,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (nextWordPredictionExpiry != null) mainHandler.removeCallbacks(nextWordPredictionExpiry);
         nextWordPredictionExpiry = () -> {
             nextWordPredictionExpiry = null;
-            if (!destroyed && composing.length() == 0 && !shouldShowNextWordPredictions(mode)) {
+            if (!destroyed && composingSession.isEmpty() && !shouldShowNextWordPredictions(mode)) {
                 invalidateCandidates();
                 refresh();
             }
@@ -2133,23 +1888,12 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (!word.matches("[\\p{IsHan}]+")) { clearWordContext(); return; }
         if (lastChineseCommitAt > 0 && System.currentTimeMillis() - lastChineseCommitAt > NEXT_WORD_PREDICTION_WINDOW_MS)
             clearWordContext();
-        if (!previousCommittedWord.isEmpty() && contextModel != null)
-            contextModel.learn(previousPreviousCommittedWord, previousCommittedWord, word);
+        if (!previousCommittedWord.isEmpty() && dictionary != null) {
+            dictionary.learnContext(previousPreviousCommittedWord, previousCommittedWord, word);
+            schedulePersonalDataSave();
+        }
         previousPreviousCommittedWord = previousCommittedWord;
         previousCommittedWord = word;
-        // Keep the next first-screen query free of a cold transition-table read.
-        if (dictionary != null && dictionary.isLoaded() && settingsPreferences != null
-                && settingsPreferences.getBoolean("basic_context", true) && loaderExecutor != null
-                && !loaderExecutor.isShutdown()) {
-            try {
-                if (contextPrewarmTask != null) contextPrewarmTask.cancel(true);
-                contextPrewarmTask = loaderExecutor.submit(() -> {
-                    if (!destroyed) dictionary.basicContextScores(word);
-                });
-            } catch (java.util.concurrent.RejectedExecutionException ignored) {
-                // The service is shutting down; the next session loads its own cache.
-            }
-        }
         if (containsHan(word)) {
             lastChineseCommitAt = System.currentTimeMillis();
             scheduleNextWordPredictionExpiry();
@@ -2168,93 +1912,66 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void learnConfirmedCandidate(PinyinDictionary.Entry selected, String fallbackCode) {
-        if (mode == Mode.STROKE || !canLearn() || selected.matchTier == PinyinDictionary.TIER_COMPOSED) return;
+        if (mode == Mode.STROKE || !learningAllowed()) return;
         String reading = selected.pronunciation.isEmpty() ? fallbackCode : selected.pronunciation;
         if (reading.isEmpty() || selected.matchTier == PinyinDictionary.TIER_FUZZY && selected.pronunciation.isEmpty()) return;
-        queueWordLearning(reading, selected.word, personalUsageKey(mode),
-                selected.matchTier == PinyinDictionary.TIER_FUZZY ? PinyinDictionary.TIER_EXACT_FULL : selected.matchTier);
+        boolean assembled = selected.matchTier == PinyinDictionary.TIER_COMPOSED && selected.wordSegments.size() > 1;
+        if (selected.matchTier == PinyinDictionary.TIER_COMPOSED && !assembled) return;
+        if (assembled) {
+            try { reading = CustomWordStore.reading(reading, selected.originalWord); }
+            catch (IllegalArgumentException invalid) { return; }
+        }
+        queueWordLearning(reading, selected.originalWord, personalUsageKey(mode),
+                selected.matchTier == PinyinDictionary.TIER_FUZZY || assembled
+                        ? PinyinDictionary.TIER_EXACT_FULL : selected.matchTier, assembled);
+    }
+
+    KeyButton.DeleteAction beginDeleteRun() {
+        return selectionEdit.beginDeleteRun(() -> editorSession.generation, () -> onKey("⌫"));
     }
 
     private void delete() {
-        if (wordCreation.active && composing.length() == 0) { undoWordCreationSelection(); return; }
-        if (composing.length() > 0) {
-            int cursor = mode == Mode.PINYIN || mode == Mode.NINE
-                    ? Math.min(composing.length(), composingCursor) : composing.length();
-            if (cursor <= 0) return;
-            int start = GraphemeUtils.previousClusterStart(composing, cursor);
-            pathEditor.replace(composing.toString(), start, cursor, "", mode == Mode.NINE);
-            touchCorrection.delete(composing.toString(), start, cursor);
-            composing.delete(start, cursor); composingCursor = start; lockedPinyinPath = "";
-            if (composing.length() == 0) ordinaryWordAssembly.clear();
-            updateComposing();
-        } else {
-            InputConnection connection = getCurrentInputConnection();
-            if (connection == null) return;
-            connection.beginBatchEdit();
-            try {
-                // A host can retain an underline after our local composition was cleared.
-                // Surrounding-text deletion skips that region until composition is finished.
-                connection.finishComposingText();
-                hostHasComposingText = false;
-                CharSequence selected = connection.getSelectedText(0);
-                if (selected != null && selected.length() > 0) {
-                    EditorUndo.Snapshot snapshot = mayRememberEdit() ? EditorUndo.read(connection) : null;
-                    connection.commitText("", 1);
-                    if (snapshot != null) editorUndo.record(snapshot, connection, wordEditorSession);
-                    resetSelectionMode();
-                    return;
-                }
-                deleteEditorText(connection, false);
-            } finally {
-                connection.endBatchEdit();
+        if (wordCreationController.isActive() && composingSession.isEmpty()) {
+            wordCreationController.undoSelection();
+            return;
+        }
+        if (!composingSession.isEmpty()) {
+            if (composingSession.deleteBackward(mode)) {
+                if (composingSession.isEmpty()) wordCreationController.clearAssembly();
+                updateComposing();
             }
+        } else {
+            selectionEdit.deleteFromEditor(getCurrentInputConnection(), mayRememberEdit(),
+                    hasEditorSelection(), editorSession.generation,
+                    () -> composingSession.hostHasComposingText = false,
+                    this::afterEditorDelete);
         }
     }
 
     private void deleteWord() {
-        if (composing.length() > 0) { composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        lockedPinyinPath = ""; updateComposing(); return; }
-        InputConnection c = getCurrentInputConnection();
-        if (c == null) return;
-        c.beginBatchEdit();
-        try {
-            c.finishComposingText();
-            hostHasComposingText = false;
-            CharSequence selected = c.getSelectedText(0);
-            if (selected != null && selected.length() > 0) {
-                // Surrounding text excludes the selection. Replace it instead.
-                EditorUndo.Snapshot snapshot = mayRememberEdit() ? EditorUndo.read(c) : null;
-                c.commitText("", 1);
-                if (snapshot != null) editorUndo.record(snapshot, c, wordEditorSession);
-                resetSelectionMode();
-                return;
-            }
-            deleteEditorText(c, true);
-        } finally {
-            c.endBatchEdit();
+        if (!composingSession.isEmpty()) {
+            composingSession.clearInputOnly();
+            updateComposing();
+            return;
         }
+        selectionEdit.deleteWordFromEditor(getCurrentInputConnection(), mayRememberEdit(),
+                editorSession.generation,
+                () -> composingSession.hostHasComposingText = false,
+                this::afterEditorDelete);
     }
 
-    private boolean mayRememberEdit() {
-        return !secureEditor && !clipboardSearchDialogOpen && !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false);
+    boolean mayRememberEdit() {
+        return !editorSession.sensitive && !clipboardSearchDialogOpen && !privacyMode;
     }
 
-    private void deleteEditorText(InputConnection connection, boolean word) {
-        EditorUndo.Snapshot snapshot = mayRememberEdit() ? EditorUndo.read(connection) : null;
-        CharSequence before = connection.getTextBeforeCursor(256, 0);
-        if (before != null && before.length() > 0) {
-            int tokenLength = WeChatEmojiCatalog.trailingTokenLength(before);
-            int start = tokenLength > 0 ? before.length() - tokenLength
-                    : word ? GraphemeUtils.previousWordStart(before)
-                    : GraphemeUtils.previousClusterStart(before, before.length());
-            connection.deleteSurroundingText(before.length() - start, 0);
-        } else if (!connection.deleteSurroundingTextInCodePoints(1, 0)) {
-            sendKey(KeyEvent.KEYCODE_DEL);
-        }
-        if (snapshot != null) editorUndo.record(snapshot, connection, wordEditorSession);
+    private void afterEditorDelete() {
         previousCommittedWord = previousPreviousCommittedWord = "";
         lastChineseCommitAt = 0;
         invalidateCandidates(); refresh();
+    }
+
+    private boolean finishEnglishText() {
+        return composingSession.isEmpty() || (commit(composingSession.raw()) && clearComposing(false));
     }
 
     private void space() {
@@ -2262,21 +1979,20 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void space(boolean allowLiteralSpace) {
-        if (wordCreation.active && composing.length() == 0) { showWordCreationMenu(); return; }
-        if (composing.length() == 0) { commit(" "); return; }
+        if (wordCreationController.isActive() && composingSession.isEmpty()) { wordCreationController.showCreationMenu(); return; }
+        if (composingSession.isEmpty()) { commit(" "); return; }
         if (deferCandidateCommit(allowLiteralSpace ? "space" : "enter")) return;
         List<PinyinDictionary.Entry> list = candidatesForCommit();
         if (list.isEmpty() && mode == Mode.NINE) { toastWord("暂无候选，请继续输入或修改拼音"); return; }
         if (list.isEmpty()) {
-            if (!commit(composing.toString())) return;
-            composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-            pathEditor.clear(); composingCursor = 0; lockedPinyinPath = ""; refresh();
+            if (!commit(composingSession.raw())) return;
+            composingSession.clearAll(); refresh();
         } else {
-            int pendingLength = composing.length();
+            int pendingLength = composingSession.length();
             onCandidateEntry(list.get(0));
-            if (composing.length() == pendingLength) return;
+            if (composingSession.length() == pendingLength) return;
         }
-        if (allowLiteralSpace && !wordCreation.active
+        if (allowLiteralSpace && !wordCreationController.isActive()
                 && "space".equals(getSharedPreferences("settings", MODE_PRIVATE).getString("space_behavior", "select"))) {
             commit(" "); updateComposing();
         }
@@ -2284,15 +2000,19 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     private void enter() {
         // Confirm the visible composition first. Sending requires a subsequent Enter.
-        if (!wordCreation.active && composing.length() > 0) { space(false); return; }
-        if (wordCreation.active) { if (composing.length() > 0) space(false); else showWordCreationMenu(); return; }
+        if (!wordCreationController.isActive() && !composingSession.isEmpty()) { space(false); return; }
+        if (wordCreationController.isActive()) {
+            if (!composingSession.isEmpty()) space(false);
+            else wordCreationController.showCreationMenu();
+            return;
+        }
         if (!clearComposing(true)) return;
         InputConnection connection = getCurrentInputConnection();
         if (connection == null) return;
-        int action = editorInfo == null ? EditorInfo.IME_ACTION_NONE
-                : (editorInfo.imeOptions & EditorInfo.IME_MASK_ACTION);
+        int action = editorSession.info == null ? EditorInfo.IME_ACTION_NONE
+                : (editorSession.info.imeOptions & EditorInfo.IME_MASK_ACTION);
         if (action != EditorInfo.IME_ACTION_NONE && action != EditorInfo.IME_ACTION_UNSPECIFIED
-                && (editorInfo.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0) {
+                && (editorSession.info.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) == 0) {
             if (!connection.performEditorAction(action)) connection.commitText("\n", 1);
         } else {
             connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_ENTER));
@@ -2301,20 +2021,20 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private boolean deferCandidateCommit(String action) {
-        if (candidateQueries == null || dictionary == null || !dictionary.isLoaded() || secureEditor) return false;
+        if (candidateSession.queries == null || dictionary == null || !dictionary.isLoaded() || editorSession.sensitive) return false;
         String key = currentCandidateKey();
-        if (key.equals(candidateSelectableKey) && key.equals(candidateResultKey)) return false;
+        if (key.equals(candidateSession.candidateSelectableKey) && key.equals(candidateSession.candidateResultKey)) return false;
         candidates();
-        if (key.equals(candidateSelectableKey) && key.equals(candidateResultKey)) return false;
+        if (key.equals(candidateSession.candidateSelectableKey) && key.equals(candidateSession.candidateResultKey)) return false;
         deferredCommitKey = key; deferredCommitAction = action;
         return true;
     }
 
     String editorActionLabel() {
-        if (composing.length() > 0) return "确认";
-        if (editorInfo != null && (editorInfo.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return "换行";
-        int action = editorInfo == null ? EditorInfo.IME_ACTION_NONE
-                : (editorInfo.imeOptions & EditorInfo.IME_MASK_ACTION);
+        if (!composingSession.isEmpty()) return "确认";
+        if (editorSession.info != null && (editorSession.info.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return "换行";
+        int action = editorSession.info == null ? EditorInfo.IME_ACTION_NONE
+                : (editorSession.info.imeOptions & EditorInfo.IME_MASK_ACTION);
         switch (action) {
             case EditorInfo.IME_ACTION_GO: return "前往";
             case EditorInfo.IME_ACTION_SEARCH: return "搜索";
@@ -2327,69 +2047,76 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private boolean clearComposing(boolean commitBest) {
-        ordinaryWordAssembly.clear();
-        if (wordCreation.active && commitBest) { showWordCreationMenu(); return true; }
-        if (composing.length() == 0) return true;
+        wordCreationController.clearAssembly();
+        if (wordCreationController.isActive() && commitBest) { wordCreationController.showCreationMenu(); return true; }
+        if (composingSession.isEmpty()) return true;
         if (commitBest) {
             List<PinyinDictionary.Entry> list = candidatesForCommit();
             if (list.isEmpty() && mode == Mode.NINE) {
                 toastWord("暂无候选，请继续输入或修改拼音");
                 return false;
             }
-            String word = list.isEmpty() ? composing.toString() : list.get(0).word;
-            if (!list.isEmpty() && mode == Mode.PINYIN && lockedPinyinPath.isEmpty()
-                    && list.get(0).consumedLength > 0 && list.get(0).consumedLength < composing.length())
-                word += composing.substring(list.get(0).consumedLength);
+            String word = list.isEmpty() ? composingSession.raw() : list.get(0).word;
+            if (!list.isEmpty() && mode == Mode.PINYIN && composingSession.lockedPinyinPath.isEmpty()
+                    && list.get(0).consumedLength > 0 && list.get(0).consumedLength < composingSession.length())
+                word += composingSession.buffer.substring(list.get(0).consumedLength);
             if (!commit(word)) return false;
             if (!list.isEmpty() && word.equals(list.get(0).word)) {
                 PinyinDictionary.Entry selected = list.get(0);
                 learnConfirmedCandidate(selected, learningCode());
-                if (selected.wordSegments.isEmpty()) rememberWord(word);
+                if (selected.wordSegments.isEmpty()) rememberWord(selected.originalWord);
                 else for (String part : selected.wordSegments) rememberWord(part);
             } else clearWordContext();
         }
         InputConnection connection = getCurrentInputConnection();
         if (connection != null) connection.finishComposingText();
-        hostHasComposingText = false;
-        composing.setLength(0); touchCorrection.clear(); shuangpin.clear();
-        composingCursor = 0;
-        lockedPinyinPath = "";
+        composingSession.hostHasComposingText = false;
+        composingSession.clearInputOnly();
+        composingSession.cursor = 0;
         candidateExpanded = false;
         refresh();
         return true;
     }
 
     private boolean commit(CharSequence text) {
+        return commit(text, 0);
+    }
+
+    private boolean commit(CharSequence text, int trailingPairChars) {
         InputConnection connection = getCurrentInputConnection();
         if (connection != null && text != null && text.length() > 0) {
-            EditorUndo.Snapshot snapshot = !undoCandidateCommit && text.length() > 1 && mayRememberEdit()
+            selectionEdit.clearTransientState();
+            EditorUndo.Snapshot snapshot = !selectionEdit.isUndoCandidateCommit() && text.length() > 1 && mayRememberEdit()
                     ? EditorUndo.read(connection) : null;
             boolean committed = connection.commitText(text.toString(), 1);
-            if (!committed) { editorUndo.clear(); return false; }
+            if (!committed) { selectionEdit.clearUndo(); return false; }
+            if (trailingPairChars > 0) {
+                int position = snapshot == null ? -1
+                        : snapshot.offset + Math.min(snapshot.start, snapshot.end) + text.length() - trailingPairChars;
+                if (position < 0 || !connection.setSelection(position, position)) sendKey(KeyEvent.KEYCODE_DPAD_LEFT);
+            }
             if (!text.toString().matches("[\\p{IsHan}]+")) clearWordContext();
-            if (snapshot != null) editorUndo.record(snapshot, connection, wordEditorSession);
-            hostHasComposingText = false;
+            if (snapshot != null) selectionEdit.recordCommitUndo(snapshot, connection, editorSession.generation);
+            composingSession.hostHasComposingText = false;
             return true;
         }
         return false;
     }
 
-    private void commitPunctuationOrText(String key) {
+    private boolean commitPunctuationOrText(String key, boolean fromSymbolPicker) {
         String value = key;
-        if (mode == Mode.PINYIN) {
-            if ("，".equals(key)) value = "，";
-            else if ("。".equals(key)) value = "。";
-            else if ("?".equals(key)) value = "？";
+        if (!fromSymbolPicker && mode == Mode.PINYIN) {
+            if ("?".equals(key)) value = "？";
             else if ("!".equals(key)) value = "！";
         }
-        if (mode == Mode.ENGLISH || editorForcesKeyboardLayout
-                || !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("paired_punctuation", true)) commit(value);
-        else if ("(".equals(value)) { commit("（"); commit("）"); sendKey(KeyEvent.KEYCODE_DPAD_LEFT); }
-        else if ("[".equals(value)) { commit("【"); commit("】"); sendKey(KeyEvent.KEYCODE_DPAD_LEFT); }
-        else if ("{".equals(value)) { commit("｛"); commit("｝"); sendKey(KeyEvent.KEYCODE_DPAD_LEFT); }
-        else if ("\"".equals(value)) { commit("“"); commit("”"); sendKey(KeyEvent.KEYCODE_DPAD_LEFT); }
-        else commit(value);
-        if (mode == Mode.ENGLISH) refresh();
+        if (!editorSession.sensitive && !editorSession.forcedLayout
+                && settingsPreferences.getBoolean("paired_punctuation", true)
+                && (fromSymbolPicker || !"'".equals(value))) {
+            Mode textMode = mode == Mode.SYMBOLS ? modeBeforeSymbols : mode;
+            String pair = SymbolCatalog.pair(value, !fromSymbolPicker && textMode != Mode.ENGLISH);
+            if (pair != null) return commit(pair, 1);
+        }
+        return commit(value);
     }
 
     private void pasteFromClipboard() {
@@ -2404,7 +2131,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void showClipboard() {
-        if (secureEditor) {
+        if (editorSession.sensitive) {
             android.widget.Toast.makeText(this, "密码输入中不可使用剪贴板", android.widget.Toast.LENGTH_SHORT).show();
             return;
         }
@@ -2425,13 +2152,14 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         hidePanels();
         clipboardShown = true;
         clipboardEnablePromptShown = false;
+        clipboardHistory.retryLoad();
         startClipboardListenerIfNeeded();
         captureClipboardOnDemand();
         refresh();
     }
 
     private void showQuickPhrases() {
-        if (secureEditor) {
+        if (editorSession.sensitive) {
             toastWord("密码输入中不可使用快捷短语");
             return;
         }
@@ -2443,30 +2171,22 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         clipboardFilter = "phrases";
         clipboardShown = true;
         clipboardEnablePromptShown = false;
+        quickPhrases.reload();
         refresh();
     }
 
     private List<PinyinDictionary.Entry> candidatesForCommit() {
         if (isChoosingWordParts()) return candidates();
-        if (dictionary == null || secureEditor
+        if (dictionary == null || editorSession.sensitive
                 || mode == Mode.ENGLISH && !englishWordMode) return java.util.Collections.emptyList();
         String key = currentCandidateKey();
-        if (key.equals(candidateSelectableKey) && key.equals(candidateResultKey)) {
-            return candidateResults;
+        if (key.equals(candidateSession.candidateSelectableKey) && key.equals(candidateSession.candidateResultKey)) {
+            return candidateSession.candidateResults;
         }
-        PinyinPathEditor.Query constraint = pathQuery();
-        boolean locked = (mode == Mode.PINYIN || mode == Mode.NINE)
-                && (constraint != null || !lockedPinyinPath.isEmpty());
-        String query = locked ? lockedPinyinPath : composing.toString();
-        List<PinyinDictionary.Entry> fresh = mode == Mode.NINE && !locked
-                ? dictionary.suggestForCommit(query, true)
-                : lookupCandidates(mode, constraint, locked, query, true);
-        List<PinyinDictionary.Entry> ranked = rankForContext(
-                filterBlocked(fresh), learningCode(),
-                personalUsageKey(mode), previousPreviousCommittedWord, previousCommittedWord,
-                preferSingleCandidate(mode, composing.toString(), constraint, lockedPinyinPath),
-                mode, composing.toString(), constraint, isShuangpin());
-        return displayCandidates(mode, ranked, query);
+        if (!dictionary.isLoaded()) return java.util.Collections.emptyList();
+        String raw = composingSession.raw();
+        CandidateLookup lookup = candidateLookup(mode, raw, pathQuery(), false, wordCreationController.isNameMode());
+        return displayCandidates(mode, runLookup(lookup, ""), raw);
     }
 
     private void captureClipboardOnDemand() {
@@ -2481,7 +2201,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private void captureCurrentClipboard(boolean showSensitiveNotice, boolean newCopy) {
         try {
             ClipboardManager cm = getClipboardManager();
-            if (cm == null || !cm.hasPrimaryClip() || secureEditor || !canUseClipboard()) return;
+            if (cm == null || !cm.hasPrimaryClip() || editorSession.sensitive || !canUseClipboard()) return;
             ClipData clip = cm.getPrimaryClip();
             if (clip == null || clip.getItemCount() == 0) return;
             ClipDescription description = clip.getDescription();
@@ -2524,7 +2244,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         android.content.SharedPreferences settings = getSharedPreferences("settings", Context.MODE_PRIVATE);
         boolean enabled = settings.getBoolean("clipboard_enabled", true)
                 && settings.getBoolean("clipboard_capture_while_typing", true)
-                && !settings.getBoolean("privacy_mode", false) && !secureEditor;
+                && !settings.getBoolean("privacy_mode", false) && !editorSession.sensitive;
         if (!enabled || clipboardListenerRegistered) return;
         ClipboardManager manager = getClipboardManager();
         if (manager == null) return;
@@ -2589,31 +2309,38 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         return filtered;
     }
 
-    private void showClipboardSearchDialog() {
+    private void showClipboardSearchDialog() { showPanelSearchDialog(false); }
+
+    private void showPanelSearchDialog(boolean emoji) {
+        if (clipboardSearchDialogOpen) return;
+        panelSearchRestoresEmoji = emoji;
+        emojiSearchReturnMode = emoji ? mode : null;
         clipboardSearchDialogOpen = true;
-        clipboardSearchRestorePanel = clipboardShown;
+        clipboardSearchRestorePanel = emoji ? emojiShown : clipboardShown;
         clipboardSearchResumePending = false;
-        clipboardSearchReturnEditorInfo = editorInfo;
+        clipboardSearchReturnEditorInfo = editorSession.info;
         EditText input = new EditText(this);
         input.setSingleLine(true);
         input.setPrivateImeOptions("offlineime-panel-search");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
         input.setImeOptions(EditorInfo.IME_ACTION_SEARCH | EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING);
-        input.setHint("输入要查找的文字");
-        input.setText(clipboardSearchQuery);
+        input.setHint(emoji ? "输入中文、英文或表情" : "输入要查找的文字");
+        input.setText(emoji ? emojiSearchQuery : clipboardSearchQuery);
+        if (emoji) input.setFilters(new android.text.InputFilter[]{new android.text.InputFilter.LengthFilter(80)});
         input.setSelection(input.length());
         android.app.AlertDialog dialog = new android.app.AlertDialog.Builder(this)
-                .setTitle("搜索剪贴板")
+                .setTitle(emoji ? "搜索表情" : "搜索剪贴板")
                 .setView(input)
                 .setPositiveButton("搜索", (d, which) -> {
-                    clipboardSearchQuery = input.getText().toString().trim();
-                    clipboardFilter = "all";
-                    if (keyboardView != null) keyboardView.refresh(mode, shift, composing.toString(), candidates());
+                    if (emoji) emojiSearchQuery = input.getText().toString().trim();
+                    else {
+                        clipboardSearchQuery = input.getText().toString().trim();
+                        clipboardFilter = "all";
+                    }
                 })
                 .setNeutralButton("清除搜索", (d, which) -> {
-                    clipboardSearchQuery = "";
-                    clipboardFilter = "all";
-                    if (keyboardView != null) keyboardView.refresh(mode, shift, composing.toString(), candidates());
+                    if (emoji) emojiSearchQuery = "";
+                    else { clipboardSearchQuery = ""; clipboardFilter = "all"; }
                 })
                 .setNegativeButton("取消", null)
                 .create();
@@ -2625,6 +2352,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             clipboardSearchDialogOpen = false;
             clipboardSearchRestorePanel = false;
             clipboardSearchReturnEditorInfo = null;
+            panelSearchRestoresEmoji = false;
             android.util.Log.w("OfflineImeClipboard", "search dialog could not be shown: " + error.getClass().getSimpleName());
             refresh();
             return;
@@ -2633,15 +2361,21 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             dialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE);
             input.requestFocus();
         }
+        input.setOnEditorActionListener((v, action, event) -> {
+            if (action != EditorInfo.IME_ACTION_SEARCH) return false;
+            dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).performClick();
+            return true;
+        });
     }
 
     private void showQuickPhraseEditor(String id, String initialText) {
-        if (id == null || !clipboardShown || secureEditor
+        if (id == null || !clipboardShown || editorSession.sensitive
                 || getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false)) return;
+        panelSearchRestoresEmoji = false;
         clipboardSearchDialogOpen = true;
         clipboardSearchRestorePanel = true;
         clipboardSearchResumePending = false;
-        clipboardSearchReturnEditorInfo = editorInfo;
+        clipboardSearchReturnEditorInfo = editorSession.info;
         EditText input = new EditText(this);
         input.setMinLines(3);
         input.setMaxLines(6);
@@ -2673,17 +2407,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             refresh();
             return;
         }
-        dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            try {
-                if (!quickPhrases.save(id, input.getText().toString())) {
-                    input.setError("保存失败，请重试");
-                    return;
-                }
+        android.widget.Button save = dialog.getButton(android.app.AlertDialog.BUTTON_POSITIVE);
+        save.setOnClickListener(v -> {
+            String value = input.getText().toString(); save.setEnabled(false);
+            quickPhrases.save(id, value, error -> {
+                if (destroyed || !dialog.isShowing()) return;
+                save.setEnabled(true);
+                if (!error.isEmpty()) { input.setError(error); return; }
                 clipboardFilter = "phrases";
                 dialog.dismiss();
-            } catch (IllegalArgumentException invalid) {
-                input.setError(invalid.getMessage());
-            }
+            });
         });
         input.requestFocus();
         // An attached IME dialog can gain window focus after show() returns.
@@ -2724,27 +2457,30 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         clipboardSearchDialogOpen = false;
         if (!clipboardSearchRestorePanel) {
             clipboardSearchReturnEditorInfo = null;
+            panelSearchRestoresEmoji = false;
             startClipboardListenerIfNeeded();
             return;
         }
-        clipboardShown = true; emojiShown = false;
+        clipboardShown = !panelSearchRestoresEmoji; emojiShown = panelSearchRestoresEmoji;
         clipboardEnablePromptShown = false;
         clipboardSearchResumePending = true;
         mainHandler.postDelayed(() -> {
             if (!clipboardSearchResumePending) return;
             clipboardSearchResumePending = false;
             clipboardSearchRestorePanel = false;
+            panelSearchRestoresEmoji = false;
             EditorInfo restoreInfo = clipboardSearchReturnEditorInfo;
             clipboardSearchReturnEditorInfo = null;
-            if (restoreInfo != null && (editorInfo == null || getPackageName().equals(editorInfo.packageName))) {
-                editorInfo = restoreInfo;
-                secureEditor = isSensitiveEditor(restoreInfo);
+            if (restoreInfo != null && (editorSession.info == null || getPackageName().equals(editorSession.info.packageName))) {
+                if (emojiShown && emojiSearchReturnMode != null) mode = emojiSearchReturnMode;
+                editorSession.info = restoreInfo;
+                editorSession.sensitive = isSensitiveEditor(restoreInfo);
                 int cls = restoreInfo.inputType & InputType.TYPE_MASK_CLASS;
-                numericEditor = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE
+                editorSession.numeric = cls == InputType.TYPE_CLASS_NUMBER || cls == InputType.TYPE_CLASS_PHONE
                         || cls == InputType.TYPE_CLASS_DATETIME;
-                editorLayoutKind = classifyEditorLayout(restoreInfo);
-                editorForcesKeyboardLayout = numericEditor || "email".equals(editorLayoutKind)
-                        || "uri".equals(editorLayoutKind);
+                editorSession.layout = classifyEditorLayout(restoreInfo);
+                editorSession.forcedLayout = editorSession.numeric || "email".equals(editorSession.layout)
+                        || "uri".equals(editorSession.layout);
             }
             startClipboardListenerIfNeeded();
             refresh();
@@ -2752,20 +2488,21 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void clearClipboardWithUndo() {
-        clipboardClearBackup = clipboardHistory.snapshot();
-        clipboardHistory.clear();
-        clipboardClearConfirmShown = false;
-        clipboardSearchQuery = "";
-        clipboardFilter = "all";
-        if (clipboardUndoExpiry != null) mainHandler.removeCallbacks(clipboardUndoExpiry);
-        clipboardUndoExpiry = () -> {
-            clipboardClearBackup = null;
-            clipboardUndoExpiry = null;
-            if (clipboardShown) refresh();
-        };
-        mainHandler.postDelayed(clipboardUndoExpiry, 10_000L);
-        android.widget.Toast.makeText(this, "已清空剪贴板，可在键盘上撤销", android.widget.Toast.LENGTH_SHORT).show();
-        refresh();
+        clipboardHistory.clearWithUndo(before -> {
+            if (destroyed) return;
+            clipboardClearBackup = before;
+            clipboardClearConfirmShown = false;
+            clipboardSearchQuery = "";
+            clipboardFilter = "all";
+            if (clipboardUndoExpiry != null) mainHandler.removeCallbacks(clipboardUndoExpiry);
+            clipboardUndoExpiry = () -> {
+                clipboardClearBackup = null; clipboardUndoExpiry = null;
+                if (clipboardShown) refresh();
+            };
+            mainHandler.postDelayed(clipboardUndoExpiry, 10_000L);
+            toastWord("已清空剪贴板，可在键盘上撤销");
+            refresh();
+        });
     }
 
     private void undoClipboardClear() {
@@ -2795,70 +2532,19 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private void toastWord(String message) { android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_SHORT).show(); }
 
     private boolean canSaveExplicitWord() {
-        return !secureEditor && !clipboardSearchDialogOpen && !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false);
-    }
-
-    private List<PinyinDictionary.Entry> filterCreationStrokes(List<PinyinDictionary.Entry> source, String strokes) {
-        if (strokes.isEmpty()) return source;
-        java.util.Set<String> letters = new java.util.HashSet<>(StrokeInputDictionary.get(this).suggestCharacters(this, strokes, 10000));
-        List<PinyinDictionary.Entry> filtered = new ArrayList<>();
-        for (PinyinDictionary.Entry entry : source) {
-            QueryWork.check();
-            if (entry.codePointLength == 1 && letters.contains(entry.word)) filtered.add(entry);
-        }
-        return filtered;
-    }
-
-    private void showCreationStrokeMenu() {
-        RoundedCardPopup menu = RoundedCardPopup.keyboard(this, "按起笔笔画筛选单字", KeyboardTheme.from(this, isDarkMode()));
-        String[] strokes = {"横（一）", "竖（丨）", "撇（丿）", "点／捺（丶）", "折（乙）"};
-        for (int index = 0; index < strokes.length; index++) {
-            String code = String.valueOf(index + 1);
-            menu.item(strokes[index], null, null, false, false, () -> {
-                if (wordCreation.strokePrefix.length() < 16) wordCreation.strokePrefix += code;
-                wordCreation.revision++; invalidateCandidates(); refresh(); showCreationStrokeMenu();
-            });
-        }
-        menu.item("撤销一笔", null, null, false, false, () -> {
-            if (!wordCreation.strokePrefix.isEmpty()) wordCreation.strokePrefix = wordCreation.strokePrefix.substring(0, wordCreation.strokePrefix.length() - 1);
-            wordCreation.revision++; invalidateCandidates(); refresh(); showCreationStrokeMenu();
-        });
-        menu.item("清除筛选", null, null, false, false, () -> {
-            wordCreation.strokePrefix = ""; wordCreation.revision++; invalidateCandidates(); refresh();
-        });
-        menu.item("查看筛选后的候选", "已输入笔画：" + wordCreation.strokePrefix, null, false, false, () -> onCandidateExpand());
-        keyboardView.showWordMenu(menu);
+        return !editorSession.sensitive && !clipboardSearchDialogOpen && !getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false);
     }
 
     boolean isChoosingWordParts() {
-        // Ordinary partial selection still needs normal phrase candidates for
-        // the remaining input; only explicit word creation selects single parts.
-        return (mode == Mode.PINYIN || mode == Mode.NINE) && wordCreation.active;
+        return wordCreationController.isChoosingWordParts();
     }
+
     String wordCreationStatus() {
-        // Ordinary typing must never insert a save/undo row into the keyboard.
-        return wordCreation.active ? wordCreation.label(composing.toString()) : "";
+        return wordCreationController.status(composingSession.raw());
     }
 
     boolean hasWordSaveActions() {
-        return canSaveExplicitWord() && (ordinaryWordOffer != null || lastCustomWordChange != null);
-    }
-
-    private void trackOrdinaryWordSelection(PinyinDictionary.Entry selected, int consumed) {
-        if ((mode != Mode.PINYIN && mode != Mode.NINE) || !canSaveExplicitWord()) { ordinaryWordAssembly.clear(); return; }
-        if (consumed < composing.length() || !ordinaryWordAssembly.parts.isEmpty()) {
-            if (!ordinaryWordAssembly.add(selected.word, selected.pronunciation, "")) { ordinaryWordAssembly.clear(); return; }
-            if (consumed == composing.length() && ordinaryWordAssembly.parts.size() > 1) {
-                try {
-                    ordinaryWordOffer = CustomWordStore.validate(ordinaryWordAssembly.word(), ordinaryWordAssembly.reading(), "", "普通词", false, 0);
-                    lastCustomWordNotice = "记住组合：" + ordinaryWordOffer.text + " · 点击保存";
-                    if (customWordNoticeExpiry != null) mainHandler.removeCallbacks(customWordNoticeExpiry);
-                    customWordNoticeExpiry = () -> { ordinaryWordOffer = null; lastCustomWordNotice = ""; refresh(); };
-                    mainHandler.postDelayed(customWordNoticeExpiry, 10000);
-                } catch (IllegalArgumentException ignored) { ordinaryWordOffer = null; }
-                ordinaryWordAssembly.clear();
-            }
-        }
+        return wordCreationController.hasSaveActions();
     }
 
     private static final class PendingLearning {
@@ -2868,341 +2554,81 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             this.selection = selection; this.epoch = epoch; this.storeRevision = storeRevision;
         }
     }
-    private final java.util.ArrayDeque<PendingLearning> pendingLearning = new java.util.ArrayDeque<>();
-    private boolean learningDrainScheduled;
+    private final java.util.ArrayDeque<PendingLearning> deferredLearning = new java.util.ArrayDeque<>();
+    private long learningSaveEpoch = -1;
+    private boolean personalDataSaveScheduled;
+    private final Runnable personalDataSave = this::flushPersonalDataSave;
 
     private void queueWordLearning(String code, String word, String usage, int tier) {
-        synchronized (pendingLearning) {
-            pendingLearning.addLast(new PendingLearning(new PinyinDictionary.Selection(code, word, usage, null, tier),
-                    userDataEpoch, settingsPreferences.getLong("user_words_revision", 0)));
-            if (learningDrainScheduled) return;
-            learningDrainScheduled = true;
-        }
-        CustomWordStore.IO.execute(this::drainWordLearning);
+        queueWordLearning(code, word, usage, tier, false);
     }
 
-    private void drainWordLearning() {
-        try {
-            long epoch = userDataEpoch;
-            long storeRevision = settingsPreferences.getLong("user_words_revision", 0);
-            List<PinyinDictionary.Selection> batch = new ArrayList<>();
-            synchronized (pendingLearning) {
-                // Bound one turn so explicit word edits can use the same ordered IO lane.
-                for (int i = 0; i < 32 && !pendingLearning.isEmpty(); i++) {
-                    PendingLearning pending = pendingLearning.removeFirst();
-                    if (pending.epoch == epoch && pending.storeRevision == storeRevision) batch.add(pending.selection);
-                }
+    private void queueWordLearning(String code, String word, String usage, int tier, boolean assembled) {
+        queueWordLearning(code, word, usage, tier, assembled, false);
+    }
+
+    private void queueWordLearning(String code, String word, String usage, int tier,
+                                   boolean assembled, boolean previouslyAllowed) {
+        if (!learningEnabled() || !previouslyAllowed && !learningAllowed()) return;
+        long storeRevision = settingsPreferences.getLong("user_words_revision", 0);
+        PinyinDictionary.Selection selection = new PinyinDictionary.Selection(code, word, usage, null, tier, assembled);
+        if (!dictionary.isUserDataReady()) {
+            synchronized (deferredLearning) {
+                if (deferredLearning.size() >= 256) deferredLearning.removeFirst();
+                deferredLearning.addLast(new PendingLearning(selection, userDataEpoch, storeRevision));
             }
-            if (destroyed || epoch != userDataEpoch || batch.isEmpty()
-                    || settingsPreferences.getBoolean("privacy_mode", false)) return;
-            LearningChange change = dictionary.learnSelections(batch, storeRevision);
-            mainHandler.post(() -> {
-                if (destroyed || epoch != userDataEpoch) return;
-                candidateCache.removeIf((key, frame) -> frame.doubleInput || change.affects(frame.input, frame.entries));
-                if (isShuangpin() || wordCreation.active || change.affects(composing.toString(), candidateResults)) {
-                    // Keep the last frame painted; only affected queries lose selectability.
-                    cancelCandidateWork();
-                    candidatePendingKey = candidateCompleteKey = candidateSelectableKey = candidateResultKey = "";
-                    refresh();
-                }
-            });
-        } finally {
-            synchronized (pendingLearning) {
-                learningDrainScheduled = !pendingLearning.isEmpty();
-                if (learningDrainScheduled) CustomWordStore.IO.execute(this::drainWordLearning);
-            }
+            return;
         }
+        if (!dictionary.learn(code, word, "en".equals(usage))) return;
+        // Learned words change ranking for every cached frame.
+        candidateSession.candidateCache.evictAll();
+        cancelCandidateWork();
+        candidateSession.candidatePendingKey = candidateSession.candidateCompleteKey = candidateSession.candidateSelectableKey = candidateSession.candidateResultKey = "";
+        schedulePersonalDataSave();
+        if (previouslyAllowed) refresh();
     }
 
-    private boolean handleWordCreationKey(String key) {
-        if ("造词".equals(key)) {
-            if (!canSaveExplicitWord()) { toastWord("当前输入框或隐私模式不保存词语"); return true; }
-            if (wordCreation.active) { showWordCreationMenu(); return true; }
-            if (mode != Mode.PINYIN && mode != Mode.NINE) {
-                if (!clearComposing(true)) return true;
-                mode = restoreLastChineseMode(); if (mode == Mode.STROKE) mode = Mode.PINYIN;
-                pathEditor.clear(); shuangpin.clear(); composingCursor = 0;
-            }
-            hidePanels(); wordCreation.start(); wordCreationCategory = "普通词"; nameMode = false;
-            InputConnection connection = getCurrentInputConnection();
-            if (connection != null && hostHasComposingText) { connection.setComposingText("", 1); connection.finishComposingText(); }
-            hostHasComposingText = false; invalidateCandidates(); updateComposing(); return true;
-        }
-        if ("造词菜单".equals(key)) { showWordCreationMenu(); return true; }
-        if (!wordCreation.active) return false;
-        if (!canSaveExplicitWord()) { wordCreation.clear(); clearComposing(false); toastWord("造词已结束，当前模式不保存词语"); return true; }
-        if (wordCreation.saving) { toastWord("正在保存词语"); return true; }
-        if ("字".equals(key) || "26键".equals(key) || "9键".equals(key)) {
-            switchWordCreationMode("9键".equals(key) ? Mode.NINE : Mode.PINYIN); return true;
-        }
-        if (key.startsWith("手写字:")) { addHandwrittenCreationWord(key.substring(4)); return true; }
-        if ("重输".equals(key)) { composing.setLength(0); pathEditor.clear(); shuangpin.clear(); touchCorrection.clear(); updateComposing(); return true; }
-        if ("设置".equals(key) || "工具".equals(key) || "剪贴板".equals(key) || "😊".equals(key)
-                || "ABC".equals(key) || "中英".equals(key) || "123".equals(key) || "符".equals(key)
-                || "符号".equals(key) || "笔画".equals(key) || key.startsWith("长按数字:")
-                || key.startsWith("直接输入:") || "标点".equals(key)) {
-            toastWord("请先完成或退出造词"); return true;
-        }
-        // Punctuation must not leak an unfinished draft into the host field.
-        if (key.length() == 1 && !key.matches("[a-zA-Z2-9']")) { toastWord("造词时请输入拼音；点击草稿可完成或退出"); return true; }
-        return false;
+    /** Batch learning during a typing session, with a maximum wait of 20 seconds. */
+    private void schedulePersonalDataSave() {
+        if (personalDataSaveScheduled && learningSaveEpoch == userDataEpoch) return;
+        learningSaveEpoch = userDataEpoch;
+        personalDataSaveScheduled = true;
+        mainHandler.removeCallbacks(personalDataSave);
+        mainHandler.postDelayed(personalDataSave, 20_000L);
     }
 
-    private void selectWordCreationCandidate(PinyinDictionary.Entry selected) {
-        if (selected.pronunciation.isEmpty()) { toastWord("这个候选没有完整读音，请逐字选择"); return; }
-        int consumed = Math.min(composing.length(), selected.consumedLength > 0 ? selected.consumedLength : composing.length());
-        String raw = composing.substring(0, consumed);
-        boolean editing = wordCreation.editing >= 0;
-        if (editing && consumed < composing.length()) { toastWord("请完整选择正在修改的片段"); return; }
-        if (!wordCreation.add(selected.word, selected.pronunciation, raw)) { toastWord("读音未完整，请先选择完整音节"); return; }
-        while (consumed < composing.length() && composing.charAt(consumed) == '\'') consumed++;
-        pathEditor.replace(composing.toString(), 0, consumed, "", mode == Mode.NINE);
-        if (isShuangpin()) shuangpin.consumePrefix(composing.toString(), consumed);
-        touchCorrection.delete(composing.toString(), 0, consumed); composing.delete(0, consumed);
-        if (editing) { composing.setLength(0); composing.append(wordCreation.remaining); wordCreation.remaining = ""; pathEditor.clear(); shuangpin.clear(); restoreRemainingCreationLocks(); }
-        if (!editing && !isShuangpin()) shuangpin.clear(); composingCursor = composing.length(); lockedPinyinPath = "";
-        candidateExpanded = false; candidatePage = 0; invalidateCandidates(); updateComposing();
-    }
-
-    private String encodeCreationReading(String reading, Mode target) {
-        List<String> values = new ArrayList<>();
-        for (String token : reading.split("[ ']+")) {
-            String encoded = target == Mode.NINE ? PinyinDictionary.toT9(token) : isShuangpin() ? ShuangpinInput.encode(token) : token;
-            if (encoded.isEmpty()) return ""; values.add(encoded);
-        }
-        return String.join(target == Mode.NINE || isShuangpin() ? "" : "'", values);
-    }
-
-    private void restoreCreationLocks(String reading) {
-        if (isShuangpin()) {
-            int at = 0; for (String token : reading.split("[ ']+")) { shuangpin.select(composing.toString(), at, at + 2, token); at += 2; }
-        } else {
-            int at = 0; for (String token : reading.split("[ ']+")) {
-                while (at < composing.length() && composing.charAt(at) == '\'') at++;
-                int end = at + (mode == Mode.NINE ? PinyinDictionary.toT9(token).length() : token.length());
-                pathEditor.select(composing.toString(), mode == Mode.NINE, at, end, token); at = end;
-            }
-        }
-    }
-
-    private void restoreRemainingCreationLocks() {
-        for (PinyinPathEditor.Segment segment : wordCreation.remainingLocks) {
-            if (isShuangpin()) shuangpin.select(composing.toString(), segment.start, segment.end, segment.reading);
-            else pathEditor.select(composing.toString(), mode == Mode.NINE, segment.start, segment.end, segment.reading);
-        }
-        wordCreation.remainingLocks.clear();
-    }
-
-    private void editCreationPart(int index, boolean preserveReading) {
-        if (index < 0 || index >= wordCreation.parts.size() || wordCreation.saving) return;
-        if (wordCreation.editing < 0) {
-            wordCreation.remaining = composing.toString(); wordCreation.remainingLocks.clear();
-            for (PinyinPathEditor.Segment segment : pinyinSegments()) if (segment.locked) wordCreation.remainingLocks.add(segment);
-        }
-        wordCreation.strokePrefix = "";
-        wordCreation.editing = index; wordCreation.revision++;
-        WordCreationSession.Part part = wordCreation.parts.get(index);
-        composing.setLength(0); composing.append(encodeCreationReading(part.reading, mode));
-        pathEditor.clear(); shuangpin.clear(); touchCorrection.clear(); lockedPinyinPath = "";
-        if (preserveReading) restoreCreationLocks(part.reading);
-        composingCursor = composing.length(); hidePanels(); invalidateCandidates(); updateComposing();
-    }
-
-    private void undoWordCreationSelection() {
-        if (wordCreation.editing >= 0) {
-            wordCreation.editing = -1; composing.setLength(0); composing.append(wordCreation.remaining); wordCreation.remaining = ""; pathEditor.clear(); shuangpin.clear(); restoreRemainingCreationLocks();
-        } else if (!wordCreation.parts.isEmpty()) {
-            WordCreationSession.Part part = wordCreation.parts.remove(wordCreation.parts.size() - 1);
-            String encoded = encodeCreationReading(part.reading, mode);
-            List<PinyinPathEditor.Segment> tailLocks = new ArrayList<>(pinyinSegments());
-            String remaining = composing.toString(); composing.setLength(0); composing.append(encoded);
-            if (!remaining.isEmpty()) { if (mode == Mode.PINYIN && !isShuangpin()) composing.append('\''); composing.append(remaining); }
-            pathEditor.clear(); shuangpin.clear(); restoreCreationLocks(part.reading);
-            int offset = encoded.length() + (!remaining.isEmpty() && mode == Mode.PINYIN && !isShuangpin() ? 1 : 0);
-            for (PinyinPathEditor.Segment segment : tailLocks) if (segment.locked) {
-                if (isShuangpin()) shuangpin.select(composing.toString(), offset + segment.start, offset + segment.end, segment.reading);
-                else pathEditor.select(composing.toString(), mode == Mode.NINE, offset + segment.start, offset + segment.end, segment.reading);
-            }
-        } else { toastWord("还没有已选的字"); return; }
-        wordCreation.revision++; touchCorrection.clear(); composingCursor = composing.length(); lockedPinyinPath = "";
-        hidePanels(); invalidateCandidates(); updateComposing();
-    }
-
-    private void switchWordCreationMode(Mode target) {
-        if (target != Mode.PINYIN && target != Mode.NINE) { toastWord("造词支持中文 26 键与 9 键"); return; }
-        if (wordCreation.editing >= 0) { toastWord("请先完成当前片段的修改"); return; }
-        List<String> readings = new ArrayList<>();
-        for (PinyinPathEditor.Segment segment : pinyinSegments()) {
-            if (segment.prefix || !PinyinPathEditor.isCompleteReading(segment.reading)) { toastWord("请先补全当前音节，再切换布局"); return; }
-            readings.add(segment.reading);
-        }
-        if (composing.length() > 0 && readings.isEmpty()) { toastWord("请先明确当前拼音路径"); return; }
-        mode = target; composing.setLength(0); composing.append(encodeCreationReading(String.join("'", readings), target));
-        pathEditor.clear(); shuangpin.clear(); restoreCreationLocks(String.join("'", readings));
-        composingCursor = composing.length(); wordCreation.revision++; rememberKeyboardMode(mode);
-        hidePanels(); invalidateCandidates(); updateComposing();
-    }
-
-    private void showWordCreationMenu() {
-        if (keyboardView == null) return;
-        if (wordCreation.active && wordCreation.saving) { toastWord("正在保存词语"); return; }
-        RoundedCardPopup menu = RoundedCardPopup.keyboard(this, wordCreation.active ? "造词草稿" : "保存结果",
-                KeyboardTheme.from(this, isDarkMode()));
-        if (!wordCreation.active) {
-            CustomWordStore.Word offer = ordinaryWordOffer;
-            if (offer != null) menu.item("记住刚输入的整词", offer.text, null, false, false,
-                    () -> showSaveCandidateMenu(offer.text, String.join("'", offer.readings)));
-            if (lastCustomWordChange != null) menu.item("撤销词库修改", "保留已上屏文字", null, false, false, this::undoLastCustomSave);
-            keyboardView.showWordMenu(menu); return;
-        }
-        long revision = wordCreation.revision;
-        for (int index = 0; index < wordCreation.parts.size(); index++) {
-            int chosen = index; WordCreationSession.Part part = wordCreation.parts.get(index);
-            menu.item(part.word, part.reading.replace('\'', ' '), null, wordCreation.editing == index, false, () -> {
-                if (revision != wordCreation.revision) return;
-                RoundedCardPopup edit = RoundedCardPopup.keyboard(this, part.word, KeyboardTheme.from(this, isDarkMode()));
-                edit.item("重新选字", "保留这段读音", null, false, false, () -> editCreationPart(chosen, true));
-                edit.item("修改读音", "可退格重输，仅修改这一段", null, false, false, () -> editCreationPart(chosen, false));
-                edit.item("删除这段", "保留其他已选片段", null, false, true, () -> {
-                    if (revision != wordCreation.revision) return;
-                    if (wordCreation.editing == chosen) { composing.setLength(0); composing.append(wordCreation.remaining); wordCreation.remaining = ""; wordCreation.editing = -1; pathEditor.clear(); shuangpin.clear(); restoreRemainingCreationLocks(); }
-                    else if (wordCreation.editing > chosen) wordCreation.editing--;
-                    wordCreation.parts.remove(chosen); wordCreation.revision++; composingCursor = composing.length(); invalidateCandidates(); updateComposing();
-                });
-                keyboardView.showWordMenu(edit);
-            });
-        }
-        boolean ready = composing.length() == 0 && wordCreation.editing < 0 && !wordCreation.parts.isEmpty();
-        if (ready && !wordCreation.saving) {
-            menu.divider().item("保存并上屏", wordCreation.reading().replace('\'', ' '), null, false, false, () -> saveCreationWord(false));
-            menu.item("保存并固定后上屏", "仅匹配读音或别名时优先", null, false, false, () -> saveCreationWord(true));
-            menu.item("只上屏", "不保存到词库", null, false, false, () -> finishCreationWithoutSaving());
-        } else menu.item("继续输入并选字", "全部选完后可保存整词", null, false, false, () -> { hidePanels(); refresh(); });
-        menu.item("词语分类：" + wordCreationCategory, null, null, false, false, () -> {
-            RoundedCardPopup categories = RoundedCardPopup.keyboard(this, "词语分类", KeyboardTheme.from(this, isDarkMode()));
-            for (String value : new String[]{"普通词", "人名", "地名", "专业术语", "昵称", "短语"})
-                categories.item(value, null, null, value.equals(wordCreationCategory), false, () -> { wordCreationCategory = value; showWordCreationMenu(); });
-            keyboardView.showWordMenu(categories);
-        });
-        menu.item(wordCreation.editing >= 0 ? "取消这段修改" : "撤销上次选字", null, null, false, false, this::undoWordCreationSelection);
-        menu.item("笔画筛选" + (wordCreation.strokePrefix.isEmpty() ? "" : "：" + wordCreation.strokePrefix),
-                "在当前拼音候选中按起笔笔画找字", null, false, false, this::showCreationStrokeMenu);
-        menu.item("手写补字", "选择后确认读音，再回到草稿", null, false, false, () -> onKey("手写"));
-        menu.divider().item("清空草稿", null, null, false, true, () -> {
-            wordCreation.start(); composing.setLength(0); pathEditor.clear(); shuangpin.clear(); updateComposing();
-        });
-        menu.item("退出造词", "放弃本次草稿", null, false, true, () -> {
-            wordCreation.clear(); clearComposing(false); hidePanels(); invalidateCandidates(); refresh();
-        });
-        keyboardView.showWordMenu(menu);
-    }
-
-    private void saveCreationWord(boolean pinned) {
-        if (!wordCreation.active || wordCreation.saving || composing.length() > 0 || wordCreation.editing >= 0 || !canSaveExplicitWord()) return;
-        CustomWordStore.Word value;
-        try { value = CustomWordStore.validate(wordCreation.word(), wordCreation.reading(), "", wordCreationCategory, pinned, 0); }
-        catch (IllegalArgumentException error) { toastWord(error.getMessage()); return; }
-        wordCreation.saving = true; long session = wordEditorSession; long revision = wordCreation.revision; refresh();
+    private void flushPersonalDataSave() {
+        mainHandler.removeCallbacks(personalDataSave);
+        long epoch = learningSaveEpoch;
+        personalDataSaveScheduled = false;
+        if (epoch != userDataEpoch || dictionary == null) return;
+        PinyinDictionary target = dictionary;
         CustomWordStore.IO.execute(() -> {
-            CustomWordStore.Change change = CustomWordStore.merge(getApplicationContext(), value);
-            mainHandler.post(() -> {
-                if (destroyed) return;
-                if (session != wordEditorSession || revision != wordCreation.revision || !wordCreation.active) return;
-                wordCreation.saving = false;
-                if (!change.succeeded()) { toastWord(change.error); refresh(); return; }
-                commit(value.text); rememberWord(value.text); wordCreation.clear(); composing.setLength(0);
-                pathEditor.clear(); shuangpin.clear(); hidePanels(); invalidateCandidates();
-                showCustomWordSaved(change, "已保存：" + value.text + " · " + value.readings.get(0).replace('\'', ' '));
-                updateComposing();
-            });
+            if (epoch == userDataEpoch) target.persistLearnedWords();
         });
     }
 
-    private void finishCreationWithoutSaving() {
-        if (wordCreation.saving || composing.length() > 0 || wordCreation.editing >= 0) return;
-        commit(wordCreation.word()); wordCreation.clear(); pathEditor.clear(); shuangpin.clear(); hidePanels(); updateComposing();
-    }
-
-    private void showCustomWordSaved(CustomWordStore.Change change, String notice) {
-        ordinaryWordOffer = null; lastCustomWordChange = change; lastCustomWordNotice = notice + " · 点击撤销"; toastWord(notice);
-        if (customWordNoticeExpiry != null) mainHandler.removeCallbacks(customWordNoticeExpiry);
-        customWordNoticeExpiry = () -> { lastCustomWordChange = null; lastCustomWordNotice = ""; refresh(); };
-        mainHandler.postDelayed(customWordNoticeExpiry, 10000); refresh();
-    }
-
-    private void undoLastCustomSave() {
-        CustomWordStore.Change change = lastCustomWordChange; if (change == null) return;
-        lastCustomWordChange = null; lastCustomWordNotice = "";
-        CustomWordStore.IO.execute(() -> {
-            boolean undone;
-            try { undone = CustomWordStore.undo(getApplicationContext(), change); } catch (RuntimeException failed) { undone = false; }
-            boolean done = undone; mainHandler.post(() -> { toastWord(done ? "已撤销词库修改" : "词条已改变，未撤销"); invalidateCandidates(); refresh(); });
-        });
+    private void flushDeferredLearning() {
+        if (destroyed || dictionary == null || !dictionary.isUserDataReady()) return;
+        ArrayList<PendingLearning> deferred;
+        synchronized (deferredLearning) {
+            deferred = new ArrayList<>(deferredLearning);
+            deferredLearning.clear();
+        }
+        if (!learningEnabled()) return;
+        for (PendingLearning pending : deferred) {
+            if (pending.epoch != userDataEpoch) continue;
+            PinyinDictionary.Selection selection = pending.selection;
+            queueWordLearning(selection.code, selection.word, selection.usage, selection.tier, selection.assembled, true);
+        }
     }
 
     void offerSaveCandidate(PinyinDictionary.Entry entry) {
-        if (entry == null || !canSaveExplicitWord() || wordCreation.saving) return;
-        if (!entry.inputVersion.isEmpty() && !entry.inputVersion.equals(currentCandidateKey())) return;
-        showSaveCandidateMenu(entry.word, entry.pronunciation);
+        wordCreationController.offerSaveCandidate(entry);
     }
 
     void editCandidateWord(PinyinDictionary.Entry entry) {
-        if (entry == null || !canSaveExplicitWord() || wordCreation.active) return;
-        if (!entry.inputVersion.isEmpty() && !entry.inputVersion.equals(currentCandidateKey())) return;
-        startActivity(new android.content.Intent(this, CustomWordManagerActivity.class)
-                .putExtra("word", entry.word).putExtra("reading", entry.pronunciation)
-                .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
-    }
-
-    private void showSaveCandidateMenu(String word, String reading) {
-        if (!canSaveExplicitWord()) { toastWord("当前模式不保存词语"); return; }
-        if (reading.isEmpty()) { toastWord("请在词库管理中补充完整读音"); return; }
-        RoundedCardPopup menu = RoundedCardPopup.keyboard(this, "保存「" + word + "」", KeyboardTheme.from(this, isDarkMode()));
-        for (boolean pinned : new boolean[]{false, true}) menu.item(pinned ? "保存并固定" : "保存到自定义词库",
-                reading.replace('\'', ' '), null, false, false, () -> {
-                    CustomWordStore.Word value;
-                    try { value = CustomWordStore.validate(word, reading, "", "普通词", pinned, 0); }
-                    catch (IllegalArgumentException error) { toastWord(error.getMessage()); return; }
-                    CustomWordStore.IO.execute(() -> {
-                        CustomWordStore.Change change = CustomWordStore.merge(getApplicationContext(), value);
-                        mainHandler.post(() -> { if (change.succeeded()) { invalidateCandidates(); showCustomWordSaved(change, "已保存：" + word); } else toastWord(change.error); });
-                    });
-                });
-        keyboardView.showWordMenu(menu);
-    }
-
-    private void addHandwrittenCreationWord(String word) {
-        if (dictionary == null) return;
-        long revision = wordCreation.revision; long session = wordEditorSession;
-        CustomWordStore.IO.execute(() -> {
-            List<String> readings = dictionary.wordReadings(word);
-            mainHandler.post(() -> {
-                if (!wordCreation.active || revision != wordCreation.revision || session != wordEditorSession) return;
-                if (readings.isEmpty()) { toastWord("未收录这个字的读音，请用拼音选字或在词库管理中添加"); return; }
-                List<PinyinPathEditor.Segment> segments = pinyinSegments();
-                PinyinPathEditor.Segment first = segments.isEmpty() ? null : segments.get(0);
-                RoundedCardPopup menu = RoundedCardPopup.keyboard(this, "确认「" + word + "」读音", KeyboardTheme.from(this, isDarkMode()));
-                int choices = 0;
-                for (String reading : readings) {
-                    if (reading.indexOf('\'') >= 0 || !PinyinPathEditor.isCompleteReading(reading)) continue;
-                    if (first != null && first.locked && !(first.prefix ? reading.startsWith(first.reading) : reading.equals(first.reading))) continue;
-                    choices++;
-                    menu.item(reading, null, null, false, false, () -> {
-                        if (revision != wordCreation.revision) return;
-                        int consumed = first == null ? 0 : first.end;
-                        if (consumed > 0) {
-                            String raw = composing.substring(0, consumed);
-                            String encoded = mode == Mode.NINE ? PinyinDictionary.toT9(reading) : isShuangpin() ? ShuangpinInput.encode(reading) : reading;
-                            if (!encoded.startsWith(raw.replace("'", ""))) { toastWord("这个读音与当前编码不匹配，请先修改拼音"); return; }
-                        }
-                        PinyinDictionary.Entry selected = new PinyinDictionary.Entry(word, 0).withInput(consumed, reading);
-                        if (first == null) { if (wordCreation.add(word, reading, "")) { hidePanels(); invalidateCandidates(); refresh(); } }
-                        else { handwritingShown = false; selectWordCreationCandidate(selected); }
-                    });
-                }
-                if (choices == 0) toastWord("这个字与当前限定读音不匹配，请先修改拼音"); else keyboardView.showWordMenu(menu);
-            });
-        });
+        wordCreationController.editCandidateWord(entry);
     }
 
     private boolean isOwnWordEditor(EditorInfo info) {
@@ -3210,117 +2636,47 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 && info.privateImeOptions.startsWith("offlineime-word-");
     }
 
-    private boolean canLearn() {
-        // Never persist a partially loaded/rebuilt user-word index.
-        return dictionary != null && dictionary.isUserDataReady() && !secureEditor && !clipboardSearchDialogOpen && !isOwnWordEditor(editorInfo)
-                && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("learn_words", true)
+    private boolean learningEnabled() {
+        return dictionary != null && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("learn_words", true)
                 && !getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false);
     }
-    private boolean canUseClipboard() { return !secureEditor && !clipboardSearchDialogOpen && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("clipboard_enabled", true) && !getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false); }
-
-    static String classifyEditorLayout(EditorInfo info) {
-        return classifyEditorLayout(info == null ? InputType.TYPE_CLASS_TEXT : info.inputType);
+    private boolean learningAllowed() {
+        return learningEnabled() && !editorSession.sensitive && !clipboardSearchDialogOpen && !isOwnWordEditor(editorSession.info);
     }
-
-    static String classifyEditorLayout(int type) {
-        int cls = type & InputType.TYPE_MASK_CLASS;
-        int variation = type & InputType.TYPE_MASK_VARIATION;
-        if (cls == InputType.TYPE_CLASS_PHONE) return "phone";
-        if (cls == InputType.TYPE_CLASS_DATETIME) {
-            if (variation == InputType.TYPE_DATETIME_VARIATION_DATE) return "date";
-            if (variation == InputType.TYPE_DATETIME_VARIATION_TIME) return "time";
-            return "datetime";
-        }
-        if (cls == InputType.TYPE_CLASS_NUMBER) {
-            if ((type & InputType.TYPE_NUMBER_FLAG_DECIMAL) != 0 && (type & InputType.TYPE_NUMBER_FLAG_SIGNED) != 0) return "signed_decimal";
-            if ((type & InputType.TYPE_NUMBER_FLAG_DECIMAL) != 0) return "decimal";
-            if ((type & InputType.TYPE_NUMBER_FLAG_SIGNED) != 0) return "signed";
-            return "number";
-        }
-        if (cls == InputType.TYPE_CLASS_TEXT) {
-            if (variation == InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
-                    || variation == InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS) return "email";
-            if (variation == InputType.TYPE_TEXT_VARIATION_URI) return "uri";
-        }
-        return "text";
+    private boolean canLearn() {
+        // Never persist a partially loaded/rebuilt user-word index.
+        return learningAllowed() && dictionary.isUserDataReady();
     }
+    private boolean canUseClipboard() { return !editorSession.sensitive && !clipboardSearchDialogOpen && getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("clipboard_enabled", true) && !getSharedPreferences("settings", Context.MODE_PRIVATE).getBoolean("privacy_mode", false); }
 
-    static boolean isSensitiveEditor(EditorInfo info) {
-        if (info == null) return false;
-        return isSensitiveInput(info.inputType, info.imeOptions);
-    }
-
-    static boolean isSensitiveInput(int type, int imeOptions) {
-        if ((imeOptions & EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING) != 0) return true;
-        int cls = type & InputType.TYPE_MASK_CLASS;
-        int variation = type & InputType.TYPE_MASK_VARIATION;
-        if (cls == InputType.TYPE_CLASS_NUMBER) {
-            return variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD;
-        }
-        return cls == InputType.TYPE_CLASS_TEXT
-                && (variation == InputType.TYPE_TEXT_VARIATION_PASSWORD
-                || variation == InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
-                || variation == InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD);
-    }
+    static String classifyEditorLayout(EditorInfo info) { return EditorSession.classifyEditorLayout(info); }
+    static String classifyEditorLayout(int type) { return EditorSession.classifyEditorLayout(type); }
+    static boolean isSensitiveEditor(EditorInfo info) { return EditorSession.isSensitiveEditor(info); }
+    static boolean isSensitiveInput(int type, int options) { return EditorSession.isSensitiveInput(type, options); }
 
     private void sendKey(int code) {
-        InputConnection connection = getCurrentInputConnection();
-        if (connection != null) {
-            connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, code));
-            connection.sendKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, code));
-        }
+        selectionEdit.sendKey(getCurrentInputConnection(), code);
     }
 
     private void moveCaretBy(int delta) {
         if (delta == 0) return;
-        if (composing.length() > 0) {
-            composingCursor = Math.max(0, Math.min(composing.length(), composingCursor + delta));
+        if (!composingSession.isEmpty()) {
+            composingSession.cursor = Math.max(0, Math.min(composingSession.length(), composingSession.cursor + delta));
             refresh();
             return;
         }
-        InputConnection connection = getCurrentInputConnection();
-        if (connection == null) return;
-        android.view.inputmethod.ExtractedText extracted = connection.getExtractedText(
-                new android.view.inputmethod.ExtractedTextRequest(), 0);
-        if (extracted == null || extracted.text == null) {
-            int code = delta < 0 ? KeyEvent.KEYCODE_DPAD_LEFT : KeyEvent.KEYCODE_DPAD_RIGHT;
-            for (int i = 0; i < Math.min(20, Math.abs(delta)); i++) sendKey(code);
-            return;
-        }
-        int length = extracted.text.length();
-        int start = Math.max(0, extracted.selectionStart);
-        int end = Math.max(0, extracted.selectionEnd);
-        if (selectionMode) {
-            if (selectionAnchor < 0) selectionAnchor = start + extracted.startOffset;
-            if (selectionExtent < 0) selectionExtent = end + extracted.startOffset;
-            selectionExtent = GraphemeUtils.move(extracted.text, selectionExtent - extracted.startOffset, delta) + extracted.startOffset;
-            connection.setSelection(Math.min(selectionAnchor, selectionExtent), Math.max(selectionAnchor, selectionExtent));
-        } else {
-            int caret = delta < 0 ? Math.min(start, end) : Math.max(start, end);
-            caret = GraphemeUtils.move(extracted.text, caret, delta) + extracted.startOffset;
-            connection.setSelection(caret, caret);
-        }
+        selectionEdit.moveCaretBy(getCurrentInputConnection(), delta, mayRememberEdit(),
+                editorSession.selectionStart, editorSession.selectionEnd);
     }
 
     private void toggleSelectionMode() {
         if (!clearComposing(true)) return;
-        InputConnection connection = getCurrentInputConnection();
-        if (connection == null) return;
-        android.view.inputmethod.ExtractedText extracted = connection.getExtractedText(
-                new android.view.inputmethod.ExtractedTextRequest(), 0);
-        if (extracted == null) return;
-        if (selectionMode) {
-            selectionMode = false;
-            int caret = extracted.startOffset + Math.max(extracted.selectionStart, extracted.selectionEnd);
-            connection.setSelection(caret, caret);
-            selectionAnchor = selectionExtent = -1;
-        } else {
-            selectionMode = true;
-            selectionAnchor = extracted.startOffset + Math.max(0, extracted.selectionStart);
-            selectionExtent = extracted.startOffset + Math.max(0, extracted.selectionEnd);
+        Boolean active = selectionEdit.toggleSelectionMode(getCurrentInputConnection(),
+                editorSession.selectionStart, editorSession.selectionEnd);
+        if (active != null) {
+            android.widget.Toast.makeText(this, active ? "选择模式已开启" : "选择模式已关闭",
+                    android.widget.Toast.LENGTH_SHORT).show();
         }
-        android.widget.Toast.makeText(this, selectionMode ? "选择模式已开启" : "选择模式已关闭",
-                android.widget.Toast.LENGTH_SHORT).show();
     }
 
     private String convertGeneratedText(String value) {
@@ -3329,31 +2685,16 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         return HanConverter.get(this).toTraditional(value);
     }
 
-    boolean isHandwritingWordCreation() { return wordCreation.active; }
+    boolean isHandwritingWordCreation() { return wordCreationController.isActive(); }
 
     private void modifiedKey(int code) {
-        InputConnection c = getCurrentInputConnection();
-        if (c != null) {
-            long now = System.currentTimeMillis();
-            c.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_DOWN, code, 0, KeyEvent.META_CTRL_ON));
-            c.sendKeyEvent(new KeyEvent(now, now, KeyEvent.ACTION_UP, code, 0, KeyEvent.META_CTRL_ON));
-        }
+        selectionEdit.modifiedKey(getCurrentInputConnection(), code);
     }
 
     private void contextAction(int actionId, int fallbackKey) {
         if (!clearComposing(true)) return;
-        InputConnection c = getCurrentInputConnection();
-        if (c == null) return;
-        c.finishComposingText();
-        hostHasComposingText = false;
-        if (!c.performContextMenuAction(actionId)) modifiedKey(fallbackKey);
-        if (actionId == android.R.id.cut || actionId == android.R.id.paste
-                || actionId == android.R.id.selectAll) resetSelectionMode();
-    }
-
-    private void resetSelectionMode() {
-        selectionMode = false;
-        selectionAnchor = selectionExtent = -1;
+        selectionEdit.contextAction(getCurrentInputConnection(), actionId, fallbackKey,
+                () -> composingSession.hostHasComposingText = false);
     }
 
     private boolean isLetter(String value) {
@@ -3391,18 +2732,108 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (clipboardShown && !clipboardSearchQuery.isEmpty()) {
             clipboardSearchQuery = ""; refresh(); return true;
         }
-        if (candidateExpanded || layoutChooserShown || emojiShown || symbolsShown
+        if (candidateExpanded || layoutChooserShown || emojiShown || symbolsShown || voiceShown
                 || clipboardShown || handwritingShown || toolsShown) {
             hidePanels(); refresh(); return true;
         }
         if (mode == Mode.SYMBOLS) {
-            mode = modeBeforeSymbols; rememberKeyboardMode(mode); refresh(); return true;
+            mode = modeBeforeSymbols;
+            if (!editorSession.forcedLayout) rememberKeyboardMode(mode);
+            refresh();
+            return true;
         }
         return false;
     }
 
+    private void beginVoiceInput() {
+        if (voiceShown) { stopVoiceInput(); refresh(); return; }
+        if (editorSession.info == null || getCurrentInputConnection() == null
+                || editorSession.sensitive || editorSession.forcedLayout
+                || clipboardSearchDialogOpen || wordCreationController.isActive()) {
+            toastWord("当前输入框不支持语音输入");
+            return;
+        }
+        if (checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            startActivity(new android.content.Intent(this, VoicePermissionActivity.class)
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK));
+            return;
+        }
+        if (!composingSession.isEmpty() && !clearComposing(true)) return;
+        hidePanels();
+        voiceShown = true;
+        voiceFinishing = false;
+        voiceStatus = "正在准备离线语音识别…";
+        voicePreview = "";
+        voiceEditorGeneration = editorSession.generation;
+        voiceSelectionStart = editorSession.selectionStart;
+        voiceSelectionEnd = editorSession.selectionEnd;
+        if (voiceInput == null) {
+            voiceInput = new VoiceInputController(this, new VoiceInputController.Listener() {
+                @Override public void onVoiceListening() {
+                    if (!voiceShown || voiceFinishing) return;
+                    voiceStatus = "正在听 · 按停顿断句，完成后上屏";
+                    refresh();
+                }
+                @Override public void onVoicePartial(String text) {
+                    if (!voiceShown) return;
+                    voicePreview = text; refresh();
+                }
+                @Override public void onVoiceDraining(String message) {
+                    if (!voiceShown) return;
+                    voiceFinishing = true; voiceStatus = message; refresh();
+                }
+                @Override public void onVoiceComplete(String text, String warning) {
+                    if (!voiceShown || editorSession.generation != voiceEditorGeneration
+                            || editorSession.sensitive || getCurrentInputConnection() == null) {
+                        stopVoiceInput(); refresh(); return;
+                    }
+                    String value = text == null ? "" : text.trim();
+                    stopVoiceInput();
+                    if (value.isEmpty()) toastWord(warning.isEmpty() ? "没有识别到文字，请重试" : warning);
+                    else {
+                        clearWordContext();
+                        if (!commit(convertGeneratedText(value))) toastWord("无法输入识别结果，请重试");
+                        else if (!warning.isEmpty()) toastWord(warning + "，已输入已识别文字");
+                    }
+                    refresh();
+                }
+                @Override public void onVoiceError(String message) {
+                    if (!voiceShown) return;
+                    stopVoiceInput(); toastWord(message); refresh();
+                }
+            });
+        }
+        voiceInput.start();
+        refresh();
+    }
+
+    private void stopVoiceInput() {
+        if (voiceInput != null) voiceInput.cancel();
+        voiceShown = false;
+        voiceFinishing = false;
+        voiceStatus = voicePreview = "";
+        voiceSelectionStart = voiceSelectionEnd = -1;
+    }
+
+    private HandwritingView handwritingInput() {
+        return handwritingShown && keyboardView != null ? keyboardView.handwritingInput() : null;
+    }
+
+    private void closeHandwriting() {
+        if (!handwritingShown) return;
+        handwritingShown = false;
+        handwritingFullscreen = false;
+        if (keyboardView != null) {
+            keyboardView.closeHandwritingPanel();
+            updateInputViewLayout();
+        }
+    }
+
     private void hidePanels() {
-        toolsShown = clipboardShown = handwritingShown = emojiShown = symbolsShown
+        stopVoiceInput();
+        closeHandwriting();
+        toolsShown = clipboardShown = emojiShown = symbolsShown
                 = layoutChooserShown = candidateExpanded = false;
         clipboardEnablePromptShown = false;
         clipboardClearConfirmShown = false;
@@ -3411,18 +2842,12 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void invalidateCandidates() {
-        candidateCache.evictAll();
-        segmentsCacheKey = "";
-        cancelCandidateWork();
-        candidateResultKey = candidatePendingKey = candidateCompleteKey = candidateSelectableKey = "";
-        candidateResults = java.util.Collections.emptyList();
-        candidateDisplayMode = null;
-        candidateDisplayInput = "";
+        composingSession.clearSegmentsCache();
+        candidateInputSnapshot = null;
+        candidateSession.invalidate();
     }
 
-    private void cancelCandidateWork() {
-        if (candidateQueries != null) candidateQueries.cancel();
-    }
+    private void cancelCandidateWork() { candidateSession.cancel(); }
 
     private List<PinyinDictionary.Entry> bindCandidateVersion(List<PinyinDictionary.Entry> source, String key) {
         List<PinyinDictionary.Entry> bound = new ArrayList<>(source.size());
@@ -3441,7 +2866,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         // Start the latest query immediately, then coalesce all visual work into
         // one traversal for the next display frame.
         if (clipboardSearchDialogOpen || (!toolsShown && !clipboardShown
-                && !handwritingShown && !emojiShown && !symbolsShown && !layoutChooserShown)) {
+                && !handwritingShown && !voiceShown && !emojiShown && !symbolsShown && !layoutChooserShown)) {
             candidates();
         }
         if (refreshScheduled) return;
@@ -3459,49 +2884,48 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             android.content.SharedPreferences placementPrefs = getSharedPreferences("settings", MODE_PRIVATE);
             String placementGeometry = KeyboardPlacement.width(this, placementPrefs) + ":"
                     + KeyboardPlacement.side(this, placementPrefs) + ":" + KeyboardPlacement.floating(this, placementPrefs)
-                    + ":" + KeyboardPlacement.height(this, placementPrefs);
+                    + ":" + KeyboardPlacement.height(this, placementPrefs)
+                    + ":" + handwritingShown + ":" + handwritingFullscreen;
             if (!placementGeometry.equals(lastPlacementGeometry)) {
                 lastPlacementGeometry = placementGeometry;
                 updateInputViewLayout();
             }
-            if (clipboardSearchDialogOpen) keyboardView.refresh(mode, shift, composing.toString(), candidates());
+            if (clipboardSearchDialogOpen) keyboardView.refresh(mode, shift, composingSession.raw(), candidates());
             else if (toolsShown) keyboardView.showTools();
             else if (clipboardShown && clipboardEnablePromptShown) keyboardView.showClipboardEnablePrompt();
-            else if (clipboardShown && "phrases".equals(clipboardFilter)) keyboardView.showQuickPhrases(quickPhrases.list());
+            else if (clipboardShown && "phrases".equals(clipboardFilter)) keyboardView.showQuickPhrases(quickPhrases.list(), quickPhrases.status());
             else if (clipboardShown) keyboardView.showClipboardHistory(readClipboardHistory(), clipboardFilter,
                     clipboardSearchQuery, clipboardClearConfirmShown, clipboardClearBackup != null,
                     clipboardMultiSelect, new java.util.LinkedHashSet<>(clipboardSelection));
             else if (handwritingShown) keyboardView.showHandwriting();
-            // Candidate completions must not rebuild a scrolling/touched emoji page.
+            else if (voiceShown) keyboardView.showVoice(voiceStatus, voicePreview, voiceFinishing);
+            // The emoji view retains its rows and scroll position across candidate refreshes.
             // Category changes render explicitly through onKey.
-            else if (emojiShown) return;
+            else if (emojiShown) keyboardView.showEmojiPanel(emojiSearchQuery);
             else if (symbolsShown) return;
             else if (layoutChooserShown) keyboardView.showLayoutChooser(mode);
             else if (candidateExpanded) {
                 List<PinyinDictionary.Entry> values = candidates();
                 // Keep the expanded surface intact until candidates and paths
                 // for the same input can be presented in one frame.
-                if (composing.length() == 0 || candidateSurfaceReady())
-                    keyboardView.showCandidatePage(mode, composing.toString(), values, candidatePage);
+                if (composingSession.isEmpty() || candidateSurfaceReady())
+                    keyboardView.showCandidatePage(mode, composingSession.raw(), values, candidatePage);
             } else {
                 List<PinyinDictionary.Entry> values = candidates();
                 keyboardView.setCandidatePage(candidatePage);
-                keyboardView.refresh(mode, shift, composing.toString(), values);
+                keyboardView.refresh(mode, shift, composingSession.raw(), values);
             }
             keyboardView.showWordCreationStatus(wordCreationStatus());
         }
         } finally {
-            ImePerformanceMonitor.stage(this, "ui_bind", renderStarted, candidateResults.size(), mode == Mode.NINE);
+            ImePerformanceMonitor.stage(this, "ui_bind", renderStarted, candidateSession.candidateResults.size(), mode == Mode.NINE);
         }
     }
 
     private void rememberEmoji(String emoji) {
-        if (emoji == null || emoji.isEmpty()) return;
-        android.content.SharedPreferences p = getSharedPreferences("emoji", MODE_PRIVATE);
-        java.util.ArrayList<String> list = new java.util.ArrayList<>();
-        for (String s : EmojiCatalog.recent(p)) if (!s.isEmpty() && !s.equals(emoji)) list.add(s);
-        list.add(0, emoji); while (list.size() > 32) list.remove(list.size() - 1);
-        p.edit().putString("recent_v2", new org.json.JSONArray(list).toString()).apply();
+        if (!mayRememberEdit() || emoji == null || emoji.isEmpty()) return;
+        EmojiPreferences.remember(getSharedPreferences("emoji", MODE_PRIVATE), emoji);
+        candidateSession.candidateCache.evictAll();
     }
 
     private boolean isDarkMode() {
@@ -3550,17 +2974,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (beforeNumeric != Mode.SYMBOLS) editor.putString("before_numeric_mode", beforeNumeric.name());
         if (selected == Mode.PINYIN || selected == Mode.NINE || selected == Mode.STROKE)
             editor.putString(LAST_CHINESE_MODE, selected.name());
-        // Layout changes are infrequent. A synchronous commit guarantees the
-        // value reaches disk before requestHideSelf can end the IME lifecycle.
-        editor.commit();
-    }
-
-    private static int getIntPreference(android.content.SharedPreferences prefs, String key, int fallback) {
-        try { return prefs.getInt(key, fallback); }
-        catch (ClassCastException ignored) {
-            String value = prefs.getString(key, null);
-            if (value != null) try { return Integer.parseInt(value); } catch (NumberFormatException ignoredNumber) { }
-            return fallback;
-        }
+        // Update memory immediately; Android drains pending preference writes
+        // during component lifecycle transitions without blocking this callback.
+        editor.apply();
     }
 }

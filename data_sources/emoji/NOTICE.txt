@@ -1,0 +1,8 @@
+Emoji 序列及分类来自 Unicode Emoji 17.0。
+https://www.unicode.org/Public/17.0.0/emoji/emoji-test.txt
+
+名称及关键词来自 Unicode CLDR 48.2 的简体中文注释、派生注释和英文注释。
+https://github.com/unicode-org/cldr/tree/release-48-2/common
+
+Unicode 数据按 Unicode License v3 提供，见 LICENSE.txt。
+aliases.tsv 含本项目补充的常用词，不来自 Unicode。

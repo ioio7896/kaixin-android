@@ -10,8 +10,26 @@ final class EditorUndo {
         final String text;
         final int offset, start, end;
         Snapshot(ExtractedText value) {
-            text = value.text.toString(); offset = value.startOffset;
-            start = value.selectionStart; end = value.selectionEnd;
+            this(value.text.toString(), value.startOffset, value.selectionStart, value.selectionEnd);
+        }
+        private Snapshot(String text, int offset, int start, int end) {
+            this.text = text;
+            this.offset = offset;
+            this.start = start;
+            this.end = end;
+        }
+        Snapshot replace(int from, int to, String replacement) {
+            int caret = from + replacement.length();
+            return new Snapshot(text.substring(0, from) + replacement + text.substring(to), offset, caret, caret);
+        }
+        Snapshot afterCommit(String replacement, String composingText) {
+            int from = Math.min(start, end);
+            int to = Math.max(start, end);
+            if (composingText != null) {
+                from = to - composingText.length();
+                if (start != end || from < 0 || !text.startsWith(composingText, from)) return null;
+            }
+            return replace(from, to, replacement);
         }
     }
     private Snapshot before, after;
@@ -30,7 +48,9 @@ final class EditorUndo {
         return new Snapshot(value);
     }
     void record(Snapshot previous, InputConnection connection, long currentSession) {
-        Snapshot next = read(connection);
+        record(previous, read(connection), currentSession);
+    }
+    void record(Snapshot previous, Snapshot next, long currentSession) {
         clear();
         if (previous == null || next == null || previous.offset != next.offset
                 || previous.text.equals(next.text)) return;

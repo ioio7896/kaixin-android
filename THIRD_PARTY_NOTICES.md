@@ -15,7 +15,10 @@ assets. In particular:
   and character dictionary (Apache-2.0), converted to NCNN by nihui's reference
   Android project. Pinned sources, checksums and license are in
   `app/src/main/assets/handwriting/extended/`.
-
+- Offline speech: sherpa-ncnn 2.1.10 and kaldi-native-fbank 1.18.7
+  (Apache-2.0); Zipformer Chinese 14M model (Apache-2.0), with the Ooura FFT
+  notice. Sources, local changes, licenses, model provenance and checksums are
+  documented under `third_party/sherpa-ncnn/` and `app/src/main/assets/speech/`.
 - OpenCC dictionaries/configuration: Apache License 2.0, under
   `app/src/main/assets/opencc/`.
 - English word-frequency data: Apache License 2.0, documented in
@@ -24,10 +27,9 @@ assets. In particular:
   `app/src/main/assets/lexicon-notices/LICENSE.pinyin-data.md`. The reading
   index is derived from the desktop project's pinned pinyin data; the bundled
   word corpus mirrors the desktop project's `lexicon/` directory.
-- Emoji artwork: Twemoji (CC BY 4.0), OpenMoji (CC BY-SA 4.0), Microsoft Fluent
-  Emoji (MIT), and the Fluent Emoji subset from LobeHub (MIT). See
-  `app/src/main/assets/emoji_styles/NOTICE.txt` and the license texts in its
-  `licenses/` directory.
+- Emoji sequences and categories come from Unicode Emoji 17.0, with names
+  and search keywords from Unicode CLDR 48.2 (Unicode License v3). The
+  source notice and license in `data_sources/emoji/` are included in the APK.
 Check the notices in the asset and data directories before redistributing those
 materials or including them in a commercial build.
 

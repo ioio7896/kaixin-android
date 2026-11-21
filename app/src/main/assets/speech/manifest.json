@@ -1,0 +1,12 @@
+{
+  "model": "sherpa-ncnn-streaming-zipformer-zh-14M-2023-02-23",
+  "sha256": {
+    "decoder_jit_trace-pnnx.ncnn.bin": "efe0670c3303ddb5988885b9004c0dc7df1a7c77dad0aad4ee2bc00b904fe4fd",
+    "decoder_jit_trace-pnnx.ncnn.param": "2e72cd5dfd2299150b3e7389c5a97ecd8dee6f937e77162294646ae3d91c0b17",
+    "encoder_jit_trace-pnnx.ncnn.bin": "ab6627f0bad28738e3a4a7ea0c6dbb7c231f18e1f16c7454465dae22557eb6ce",
+    "encoder_jit_trace-pnnx.ncnn.param": "461946e4d609c50ad56e05997e8b0574b85c5a054c97078f9774ba2f288d1515",
+    "joiner_jit_trace-pnnx.ncnn.bin": "837f13b40a01ff8af10bbe33d32fb0273d46f7470ac9fc6e242980c80d8d86dc",
+    "joiner_jit_trace-pnnx.ncnn.param": "8f01409278f72e8ab5c5fe3c94ffe1c7c533ceaa25965887cb56bb9314b2b8ea",
+    "tokens.txt": "8b294db9045d6e5f94647f4c1eec1af4da143a75053c399611444b378ff966ac"
+  }
+}

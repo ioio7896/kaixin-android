@@ -8,12 +8,7 @@ final class KeyboardSizing {
     static final int MIN_HEIGHT = 240;
     static final int MAX_HEIGHT = 560;
     static int height(SharedPreferences preferences) {
-        int value = DEFAULT_HEIGHT;
-        try { value = preferences.getInt("key_height", DEFAULT_HEIGHT); }
-        catch (ClassCastException ignored) {
-            try { value = Integer.parseInt(preferences.getString("key_height", String.valueOf(DEFAULT_HEIGHT))); }
-            catch (NumberFormatException invalid) { }
-        }
+        int value = SettingsRepository.integer(preferences, "key_height", DEFAULT_HEIGHT);
         return Math.max(MIN_HEIGHT, Math.min(MAX_HEIGHT, value));
     }
 }

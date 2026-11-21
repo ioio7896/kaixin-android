@@ -37,6 +37,11 @@ final class ClipboardPanel extends LinearLayout {
     private final boolean dark;
     private final android.content.SharedPreferences renderSettings;
     private final java.util.function.BiConsumer<View, RoundedCardPopup> menus;
+    public ClipboardPanel(Context context) {
+        this(context, KeyboardView.requireService(context), KeyboardTheme.from(context, false),
+                KeyboardTheme.resolveDark(context), (anchor, menu) -> menu.show(anchor));
+    }
+
     ClipboardPanel(Context context, KeyboardView.Callback callback, KeyboardTheme theme,
                    boolean dark, java.util.function.BiConsumer<View, RoundedCardPopup> menus) {
         super(context); setOrientation(VERTICAL);
@@ -91,7 +96,7 @@ final class ClipboardPanel extends LinearLayout {
         addView(scroll, new LayoutParams(-1, 0, 1f));
     }
 
-    public void showQuickPhrases(List<QuickPhraseStore.Entry> phrases) {
+    public void showQuickPhrases(List<QuickPhraseStore.Entry> phrases, String status) {
         removeAllViews();
         LinearLayout header = clipboardHeader("快捷短语");
         addView(header, new LayoutParams(-1, dp(48)));
@@ -104,7 +109,7 @@ final class ClipboardPanel extends LinearLayout {
         list.setPadding(dp(10), dp(2), dp(10), dp(2));
         if (phrases == null || phrases.isEmpty()) {
             list.setGravity(Gravity.CENTER);
-            addClipboardEmptyState(list, "暂无快捷短语", "请在设置首页的“快捷短语”中添加；点按短语输入，长按可编辑或删除",
+            addClipboardEmptyState(list, status.isEmpty() ? "暂无快捷短语" : status, "请在设置首页的“快捷短语”中添加；点按短语输入，长按可编辑或删除",
                     R.drawable.ic_toolbar_phrases);
         } else for (QuickPhraseStore.Entry phrase : phrases) addQuickPhraseRow(list, phrase);
         scroll.addView(list, new ScrollView.LayoutParams(-1, -2));
@@ -255,8 +260,9 @@ final class ClipboardPanel extends LinearLayout {
         TextView privacy = new TextView(getContext());
         int limit = getIntPreference(renderSettings, "clipboard_limit", 10);
         int days = getIntPreference(renderSettings, "clipboard_retention_days", 7);
-        privacy.setText("仅在本机加密保存，打开面板时读取当前文字。密码、隐私模式和敏感内容会跳过。普通记录最多保留 "
-                + limit + " 条、" + (days == 0 ? "永久" : days + " 天") + "，固定内容持续保留。");
+        String retention = days == 0 ? getContext().getString(R.string.clipboard_retention_forever)
+                : getContext().getString(R.string.clipboard_retention_days, days);
+        privacy.setText(getContext().getString(R.string.clipboard_privacy_summary, limit, retention));
         privacy.setTextSize(11);
         privacy.setTextColor(blendColor(theme.text, theme.background, 0.25f));
         privacy.setGravity(Gravity.CENTER);
@@ -295,9 +301,13 @@ final class ClipboardPanel extends LinearLayout {
         content.setEllipsize(android.text.TextUtils.TruncateAt.END);
         TextView metadata = new TextView(getContext());
         int retention = getIntPreference(renderSettings, "clipboard_retention_days", 7);
-        String expiry = entry.pinned ? " · 固定保留" : retention == 0 ? " · 永久保留"
-                : " · 剩余" + Math.max(1, (int) Math.ceil((entry.timestamp + retention * 86400000L - System.currentTimeMillis()) / 86400000.0)) + "天";
-        metadata.setText(clipboardTime(entry.timestamp) + expiry + " · " + entry.text.codePointCount(0, entry.text.length()) + "字");
+        String expiry = entry.pinned ? getContext().getString(R.string.clipboard_expiry_pinned)
+                : retention == 0 ? getContext().getString(R.string.clipboard_expiry_forever)
+                : getContext().getString(R.string.clipboard_expiry_days, Math.max(1,
+                        (int) Math.ceil((entry.timestamp + retention * 86400000L
+                                - System.currentTimeMillis()) / 86400000.0)));
+        metadata.setText(getContext().getString(R.string.clipboard_entry_metadata,
+                clipboardTime(entry.timestamp), expiry, entry.text.codePointCount(0, entry.text.length())));
         metadata.setTextSize(11);
         metadata.setTextColor(blendColor(theme.text, rowColor, 0.28f));
         preview.addView(content, new LayoutParams(-1, -2));

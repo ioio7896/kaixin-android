@@ -1,3 +1,10 @@
 # 用户反馈补充的日常词。权重是本地候选排序值，不代表语料频次。
 # 格式：词语<TAB>完整拼音<TAB>排序值
 瑞士卷	rui shi juan	5200
+很急	hen ji	8700
+急着	ji zhe	8100
+时间紧急	shi jian jin ji	7200
+很忙	hen mang	7900
+很饿	hen e	7900
+不急	bu ji	7400
+等着	deng zhe	7600

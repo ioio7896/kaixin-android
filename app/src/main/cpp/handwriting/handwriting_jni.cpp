@@ -23,6 +23,10 @@ Java_com_example_offlineime_NeuralHandwritingModel_nativeCreate(
         session->net.opt.use_vulkan_compute = false;
         session->net.opt.num_threads = 2;
         session->net.opt.use_fp16_arithmetic = false;
+#if defined(__aarch64__)
+        session->net.opt.use_fp16_storage = true;
+        session->net.opt.use_fp16_packed = true;
+#endif
         // The asset loader owns/copies the weights; no dangling temporary model buffer.
         if (session->net.load_param(manager, "handwriting/model.ncnn.param") != 0 ||
             session->net.load_model(manager, "handwriting/model.ncnn.bin") != 0) return 0;
@@ -57,18 +61,29 @@ Java_com_example_offlineime_NeuralHandwritingModel_nativeRecognize(
             if (!std::isfinite(logits[i])) return 0;
             maximum = std::max(maximum, logits[i]);
         }
-        std::vector<float> scores(kClasses);
+        jint top_ids[32];
+        float top_scores[32];
+        int filled = 0;
         double total = 0;
-        for (int i = 0; i < kClasses; ++i) total += (scores[i] = std::exp(logits[i] - maximum));
+        for (int i = 0; i < kClasses; ++i) {
+            const float score = std::exp(logits[i] - maximum);
+            total += score;
+            if (filled < k || score > top_scores[filled - 1]) {
+                int pos = filled < k ? filled++ : k - 1;
+                while (pos > 0 && score > top_scores[pos - 1]) {
+                    top_scores[pos] = top_scores[pos - 1];
+                    top_ids[pos] = top_ids[pos - 1];
+                    --pos;
+                }
+                top_scores[pos] = score;
+                top_ids[pos] = i;
+            }
+        }
         if (!std::isfinite(total) || total <= 0) return 0;
-        std::vector<jint> order(kClasses);
-        std::iota(order.begin(), order.end(), 0);
-        std::partial_sort(order.begin(), order.begin() + k, order.end(),
-                [&scores](int a, int b) { return scores[a] == scores[b] ? a < b : scores[a] > scores[b]; });
-        std::vector<jfloat> top(k);
-        for (int i = 0; i < k; ++i) top[i] = static_cast<float>(scores[order[i]] / total);
-        env->SetIntArrayRegion(indices, 0, k, order.data());
-        env->SetFloatArrayRegion(probabilities, 0, k, top.data());
+        jfloat top[32];
+        for (int i = 0; i < k; ++i) top[i] = static_cast<float>(top_scores[i] / total);
+        env->SetIntArrayRegion(indices, 0, k, top_ids);
+        env->SetFloatArrayRegion(probabilities, 0, k, top);
         return env->ExceptionCheck() ? 0 : k;
     } catch (const std::exception&) { return 0; }
 }
@@ -100,7 +115,7 @@ Java_com_example_offlineime_ExtendedHandwritingModel_nativePredict(
         JNIEnv* env, jclass, jlong handle, jbyteArray gray, jint width,
         jintArray indices, jfloatArray probabilities) {
     auto* session = reinterpret_cast<Session*>(handle);
-    constexpr int height = 48, classes = 18385, choices = 7;
+    constexpr int height = 48, classes = 18385, choices = 7, non_blank = choices - 1;
     if (!session || !gray || !indices || !probabilities || width < 48 || width > 768 ||
         env->GetArrayLength(gray) != width * height) return 0;
     try {
@@ -111,33 +126,50 @@ Java_com_example_offlineime_ExtendedHandwritingModel_nativePredict(
         if (input.empty()) return 0;
         // The official recognizer uses BGR channels normalized to [-1, 1].
         // Black/white handwriting has identical values in all three channels.
-        for (int c = 0; c < 3; ++c) {
-            float* channel = input.channel(c);
-            for (int i = 0; i < width * height; ++i) channel[i] = pixels[i] / 127.5f - 1.f;
-        }
+        const int pixel_count = width * height;
+        float* c0 = input.channel(0);
+        float* c1 = input.channel(1);
+        float* c2 = input.channel(2);
+        for (int i = 0; i < pixel_count; ++i) c0[i] = pixels[i] / 127.5f - 1.f;
+        std::copy_n(c0, pixel_count, c1);
+        std::copy_n(c0, pixel_count, c2);
         auto extractor = session->net.create_extractor();
         if (extractor.input("in0", input)) return 0;
         ncnn::Mat output;
         if (extractor.extract("out0", output) || output.empty() || output.dims != 2 ||
             output.w != classes || output.h <= 0 || output.h > 192 ||
             output.elempack != 1 || output.elemsize != sizeof(float)) return 0;
-        int size = output.h * choices;
+        const int size = output.h * choices;
         if (env->GetArrayLength(indices) < size || env->GetArrayLength(probabilities) < size) return 0;
         std::vector<jint> ids(size);
         std::vector<jfloat> scores(size);
         for (int t = 0; t < output.h; ++t) {
             const float* row = output.row(t);
-            std::vector<int> order(classes - 1);
-            std::iota(order.begin(), order.end(), 1);
-            for (int i = 0; i < classes; ++i)
-                if (!std::isfinite(row[i]) || row[i] < 0 || row[i] > 1.001f) return 0;
-            std::partial_sort(order.begin(), order.begin() + choices - 1, order.end(),
-                    [row](int a, int b) { return row[a] == row[b] ? a < b : row[a] > row[b]; });
-            ids[t * choices] = 0;
-            scores[t * choices] = row[0];
-            for (int j = 1; j < choices; ++j) {
-                ids[t * choices + j] = order[j - 1];
-                scores[t * choices + j] = row[order[j - 1]];
+            const float blank = row[0];
+            if (!std::isfinite(blank) || blank < 0.f || blank > 1.001f) return 0;
+            int top_id[non_blank];
+            float top_score[non_blank];
+            int filled = 0;
+            for (int i = 1; i < classes; ++i) {
+                const float value = row[i];
+                if (!std::isfinite(value) || value < 0.f || value > 1.001f) return 0;
+                if (filled < non_blank || value > top_score[filled - 1]) {
+                    int pos = filled < non_blank ? filled++ : non_blank - 1;
+                    while (pos > 0 && value > top_score[pos - 1]) {
+                        top_score[pos] = top_score[pos - 1];
+                        top_id[pos] = top_id[pos - 1];
+                        --pos;
+                    }
+                    top_score[pos] = value;
+                    top_id[pos] = i;
+                }
+            }
+            const int base = t * choices;
+            ids[base] = 0;
+            scores[base] = blank;
+            for (int j = 0; j < non_blank; ++j) {
+                ids[base + 1 + j] = top_id[j];
+                scores[base + 1 + j] = top_score[j];
             }
         }
         env->SetIntArrayRegion(indices, 0, size, ids.data());

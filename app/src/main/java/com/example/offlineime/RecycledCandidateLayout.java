@@ -18,29 +18,36 @@ final class RecycledCandidateLayout extends ViewGroup {
     private final List<String> words;
     private final Binder binder;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private final Paint firstPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final ArrayList<Rect> bounds = new ArrayList<>();
     private final ArrayList<Integer> rowStarts = new ArrayList<>();
     private final SparseArray<TextView> attached = new SparseArray<>();
     private final ArrayDeque<TextView> pool = new ArrayDeque<>();
     private final int minimumWidth, cellHeight, horizontalPadding, gap;
+    private final boolean numbered;
     private int geometryWidth = -1, totalHeight, viewportTop, viewportHeight, rows;
-    private int focusPosition = -1;
 
     String focusedWord() {
         for (int i = 0; i < attached.size(); i++) if (attached.valueAt(i).isAccessibilityFocused())
             return words.get(attached.keyAt(i));
         return "";
     }
-    int focusWord(String word) {
+    int wordTop(String word) {
         int position = words.indexOf(word);
-        if (position < 0) position = 0;
-        if (bounds.isEmpty()) return 0;
-        focusPosition = position;
-        requestLayout();
+        if (position < 0 || bounds.isEmpty()) return -1;
         return bounds.get(position).top;
     }
 
-    RecycledCandidateLayout(Context context, List<String> words, float textSp,
+    public RecycledCandidateLayout(Context context) {
+        this(context, java.util.Collections.emptyList(),
+                17 * context.getResources().getDisplayMetrics().scaledDensity, null, null, false,
+                Math.round(48 * context.getResources().getDisplayMetrics().density),
+                Math.round(48 * context.getResources().getDisplayMetrics().density), 0, null);
+    }
+
+    /** {@code textPx} 与 {@code typeface} 必须和单元格实际字体一致，避免加粗或序号导致截断。 */
+    RecycledCandidateLayout(Context context, List<String> words, float textPx,
+                            android.graphics.Typeface typeface, android.graphics.Typeface firstTypeface, boolean numbered,
                             int minimumWidth, int cellHeight, int padding, Binder binder) {
         super(context);
         this.words = new ArrayList<>(words);
@@ -48,8 +55,12 @@ final class RecycledCandidateLayout extends ViewGroup {
         this.minimumWidth = minimumWidth;
         this.cellHeight = cellHeight;
         this.horizontalPadding = padding;
+        this.numbered = numbered;
         gap = 0;
-        paint.setTextSize(textSp * getResources().getDisplayMetrics().scaledDensity);
+        paint.setTextSize(textPx);
+        if (typeface != null) paint.setTypeface(typeface);
+        firstPaint.setTextSize(textPx);
+        firstPaint.setTypeface(firstTypeface != null ? firstTypeface : paint.getTypeface());
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         setClipChildren(false);
     }
@@ -65,7 +76,10 @@ final class RecycledCandidateLayout extends ViewGroup {
         if (!words.isEmpty()) rowStarts.add(0);
         int left = 0, top = 0, first = 0;
         for (int i = 0; i < words.size(); i++) {
-            int desired = Math.max(minimumWidth, (int) Math.ceil(paint.measureText(words.get(i))) + horizontalPadding * 2);
+            Paint measure = i == 0 ? firstPaint : paint;
+            float textWidth = measure.measureText(words.get(i));
+            if (numbered) textWidth += measure.measureText((i + 1) + " ") * CandidateTextStyle.NUMBER_SCALE;
+            int desired = Math.max(minimumWidth, (int) Math.ceil(textWidth) + horizontalPadding * 2);
             int cellWidth = Math.min(width, desired);
             if (left > 0 && left + cellWidth > width) {
                 fillRow(first, i, width - (left - gap));
@@ -116,7 +130,8 @@ final class RecycledCandidateLayout extends ViewGroup {
                     view = new TextView(getContext());
                     view.setId(View.generateViewId());
                 }
-                binder.bind(view, position);
+                if (binder == null) view.setText(words.get(position));
+                else binder.bind(view, position);
                 attached.put(position, view);
                 addViewInLayout(view, -1, new LayoutParams(rect.width(), cellHeight), true);
             }
@@ -137,14 +152,6 @@ final class RecycledCandidateLayout extends ViewGroup {
             view.setAccessibilityTraversalAfter(previousId);
             previousId = view.getId();
             view.layout(rect.left, rect.top, rect.right, rect.bottom);
-        }
-        TextView focused = attached.get(focusPosition);
-        if (focused != null) {
-            focusPosition = -1;
-            focused.post(() -> {
-                if (focused.isAttachedToWindow()) focused.performAccessibilityAction(
-                        AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null);
-            });
         }
     }
     @Override public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {

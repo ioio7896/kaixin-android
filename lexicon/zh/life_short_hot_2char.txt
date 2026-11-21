@@ -1,4 +1,4 @@
-# 开心输入法：生活场景二字高频精选（597 条）
+# 开心输入法：生活场景二字高频精选（598 条）
 # 人工精选行保留原权重，其余按完整词库频率补齐；由 scripts/build_short_hot_lexicons.py 生成。
 # 格式：词语<TAB>全拼<TAB>领域热度
 好的	hao de	8500
@@ -7,6 +7,7 @@
 房子	fang zi	8500
 生日	sheng ri	8500
 上班	shang ban	8500
+社保	she bao	9000
 宝宝	bao bao	8500
 购物	gou wu	8500
 再见	zai jian	8500

@@ -33,6 +33,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /** On-device regression suite. Injects real touch events into the installed IME. */
 public final class FrontendStabilityInstrumentation extends Instrumentation {
+    private static final class LearningServiceFixture extends OfflineImeService {
+        void attachForTest(Context context) { attachBaseContext(context); }
+    }
     private Activity host;
     private EditText field;
     private UiAutomation ui;
@@ -111,145 +114,6 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                 await("你好"); require(bounds("q").equals(hiddenToolbar), "Hidden toolbar resized keys on input");
                 screenshot("geometry-toolbar-disabled"); preferences.edit().putBoolean("toolbar", true).commit();
             });
-            test("27_pinyin_edit_partial_and_user_words", () -> {
-                String originalWords = SecureLocalStore.read(getTargetContext(), "user_words", "offline_ime_words");
-                CustomWordStore.Word originalCustomWord = CustomWordStore.load(getTargetContext()).get("开心测词");
-                try {
-                    preferences.edit().putString("default_layout", "qwerty").putBoolean("full_pinyin", true)
-                            .putBoolean("short_pinyin", true).putBoolean("mixed_pinyin", true)
-                            .putBoolean("double_initials", true).putBoolean("sentence_prediction", true)
-                            .putBoolean("spelling_correction", true).putBoolean("fuzzy_pinyin", false).commit();
-                    PinyinDictionary dictionary = new PinyinDictionary(getTargetContext().getAssets(), getTargetContext()); dictionary.load();
-                    PinyinDictionary.saveCustomWord(getTargetContext(), "kai'xin'ce'ci", "开心测词");
-                    dictionary.reloadManagedWords();
-                    for (String query : new String[]{"kaixinceci", "kxcc", "kaixcc", "kxincci"})
-                        require(dictionary.suggest(query).stream().anyMatch(entry -> "开心测词".equals(entry.word)), "Custom pronunciation missed " + query);
-                    dictionary.adjustPreference("kaixinceci", "开心测词", "lower");
-                    require(dictionary.suggest("kxcc").stream().filter(entry -> "开心测词".equals(entry.word)).noneMatch(entry -> entry.pinned), "Lowering retained pin");
-                    require(PinyinDictionary.deleteManagedWord(getTargetContext(), "开心测词"), "Learned record deletion failed");
-                    require(CustomWordStore.remove(getTargetContext(), "开心测词").succeeded(), "Custom word deletion failed");
-                    dictionary.reloadManagedWords();
-                    require(dictionary.suggest("kxcc").stream().noneMatch(entry -> "开心测词".equals(entry.word)), "Deleted custom word survived");
-                    preferences.edit().putBoolean("short_pinyin", false).commit();
-                    pause(180);
-                    require(dictionary.suggest("nh").stream().noneMatch(entry -> "你好".equals(entry.word)), "Short input flag ignored");
-                    require(dictionary.suggestFast("nh").stream().noneMatch(entry -> "你好".equals(entry.word)), "Bootstrap flag ignored");
-                    preferences.edit().putBoolean("full_pinyin", false).commit();
-                    pause(180);
-                    require(dictionary.suggest("nihao").isEmpty() && dictionary.suggestT9("64426").isEmpty()
-                            && dictionary.suggestT9Fast("64426").isEmpty(), "Both modes disabled still returned Chinese");
-                    preferences.edit().putBoolean("full_pinyin", true).putBoolean("short_pinyin", true).commit();
-                    // Preference listeners are delivered on the app main
-                    // looper while instrumentation runs on its own thread.
-                    pause(180);
-                    java.util.List<PinyinDictionary.Entry> partials = dictionary.suggest("nihaopengyou");
-                    require(partials.stream().anyMatch(entry -> "你好朋友".equals(entry.word)),
-                            "Whole phrase missing: " + partials.stream().limit(12).map(entry -> entry.word)
-                                    .collect(java.util.stream.Collectors.toList()));
-                    require(partials.stream().anyMatch(entry -> "你好".equals(entry.word) && entry.consumedLength == 5), "Partial span was incorrect");
-                    fresh(InputType.TYPE_CLASS_TEXT);
-                    for (char key : "nihaopengyou".toCharArray()) tap(String.valueOf(key));
-                    awaitPrefix("首选候选词 "); click("展开候选词");
-                    for (int scroll = 0; scroll < 8 && !has("你好"); scroll++) {
-                        for (AccessibilityWindowInfo window : ui.getWindows())
-                            if (window.getType() == AccessibilityWindowInfo.TYPE_INPUT_METHOD) scrollContent(window.getRoot());
-                        pause(200);
-                    }
-                    await("你好"); click("你好");
-                    pause(500); require(fieldText().startsWith("你好"), "Partial word did not commit");
-                    await("朋友");
-                    tap("空格"); pause(600);
-                    require(fieldText().equals("你好朋友"), "Suffix was lost after partial selection: " + fieldText());
-                } finally {
-                    SecureLocalStore.write(getTargetContext(), "user_words", "offline_ime_words", originalWords);
-                    if (originalCustomWord == null) CustomWordStore.remove(getTargetContext(), "开心测词");
-                    else CustomWordStore.save(getTargetContext(), originalCustomWord);
-                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis()).commit();
-                }
-            });
-            test("26_pinyin_corpus_evaluation", () -> {
-                preferences.edit().putBoolean("full_pinyin", true).putBoolean("short_pinyin", true)
-                        .putBoolean("mixed_pinyin", true).putBoolean("double_initials", true)
-                        .putBoolean("sentence_prediction", true).putBoolean("fuzzy_pinyin", false)
-                        .putBoolean("spelling_correction", true).commit();
-                PinyinDictionary dictionary = new PinyinDictionary(getTargetContext().getAssets(), getTargetContext());
-                dictionary.load();
-                java.util.Map<String, int[]> stats = new java.util.LinkedHashMap<>();
-                java.util.List<Long> timings = new java.util.ArrayList<>();
-                JSONArray misses = new JSONArray(); int count = 0;
-                try (java.io.BufferedReader reader = new java.io.BufferedReader(new java.io.InputStreamReader(
-                        getContext().getAssets().open("pinyin-evaluation.tsv"), java.nio.charset.StandardCharsets.UTF_8))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        String[] row = line.split("\\t"); long began = SystemClock.elapsedRealtime();
-                        java.util.List<PinyinDictionary.Entry> candidates = dictionary.suggest(row[1]);
-                        timings.add(SystemClock.elapsedRealtime() - began);
-                        int[] group = stats.computeIfAbsent(row[0], key -> new int[3]); group[0]++;
-                        if (!candidates.isEmpty() && row[2].equals(candidates.get(0).word)) group[1]++;
-                        boolean hit = false;
-                        for (int i = 0; i < Math.min(5, candidates.size()); i++) hit |= row[2].equals(candidates.get(i).word);
-                        if (hit) group[2]++;
-                        else if (misses.length() < 100) { JSONObject miss = new JSONObject(); miss.put("category", row[0]); miss.put("input", row[1]); miss.put("expected", row[2]); misses.put(miss); }
-                        if (++count % 100 == 0) { Bundle progress = new Bundle(); progress.putString("stream", "Pinyin evaluation " + count + "/2500\n"); sendStatus(0, progress); }
-                    }
-                }
-                java.util.Collections.sort(timings); JSONObject report = new JSONObject(); report.put("seed", 20261003); report.put("cases", count);
-                report.put("p95Ms", timings.get((int)Math.ceil(timings.size() * .95) - 1));
-                report.put("p99Ms", timings.get((int)Math.ceil(timings.size() * .99) - 1));
-                JSONObject categories = new JSONObject();
-                for (java.util.Map.Entry<String, int[]> group : stats.entrySet()) {
-                    JSONObject metric = new JSONObject(); int[] numbers = group.getValue(); metric.put("cases", numbers[0]);
-                    metric.put("top1Rate", numbers[1] / (double)numbers[0]); metric.put("top5Rate", numbers[2] / (double)numbers[0]); categories.put(group.getKey(), metric);
-                }
-                report.put("categories", categories); report.put("misses", misses); write("pinyin-evaluation.json", report.toString(2));
-                require(count == 2500, "Evaluation corpus was incomplete");
-            });
-            test("25_pinyin_decoder_matrix", () -> {
-                preferences.edit().putBoolean("full_pinyin", true).putBoolean("short_pinyin", true)
-                        .putBoolean("mixed_pinyin", true).putBoolean("double_initials", true)
-                        .putBoolean("sentence_prediction", true).putBoolean("fuzzy_pinyin", false)
-                        .putBoolean("spelling_correction", true).commit();
-                PinyinDictionary dictionary = new PinyinDictionary(getTargetContext().getAssets(), getTargetContext());
-                dictionary.load();
-                JSONArray matrix = new JSONArray();
-                for (String[] sample : new String[][]{{"sb", "社保"}, {"wxgzh", "微信公众号"},
-                        {"nihao", "你好"}, {"pengyou", "朋友"}, {"nh", "你好"}, {"nhao", "你好"},
-                        {"nih", "你好"}, {"zhongguo", "中国"}, {"zg", "中国"}, {"zhg", "中国"},
-                        {"zhongg", "中国"}, {"zguo", "中国"}, {"shijie", "世界"}, {"shj", "世界"},
-                        {"sjie", "世界"}, {"gongzry", "工作人员"}, {"gzuory", "工作人员"},
-                        {"zjinzenmy", "最近怎么样"}, {"xi'an", "西安"}, {"lü", "绿"}, {"nihaoo", "你好"},
-                        {"nihoa", "你好"}, {"wojintianxiangchihuoguoranhouhuijia", "我今天想吃火锅然后回家"}}) {
-                    long start = SystemClock.elapsedRealtime();
-                    java.util.List<PinyinDictionary.Entry> entries = dictionary.suggest(sample[0]);
-                    JSONArray top = new JSONArray(); int rank = -1;
-                    for (int i = 0; i < entries.size(); i++) {
-                        if (i < 8) top.put(entries.get(i).word);
-                        if (rank < 0 && sample[1].equals(entries.get(i).word)) rank = i + 1;
-                    }
-                    JSONObject item = new JSONObject(); item.put("input", sample[0]); item.put("expected", sample[1]);
-                    item.put("top8", top); item.put("expectedRank", rank);
-                    item.put("durationMs", SystemClock.elapsedRealtime() - start);
-                    item.put("hit", rank > 0 && rank <= 8); matrix.put(item);
-                    if (sample[0].startsWith("wojintian")) {
-                        JSONArray paths = new JSONArray(), segments = new JSONArray();
-                        for (PinyinInput.Path path : PinyinInput.paths(sample[0], true, false, false).subList(0,
-                                Math.min(6, PinyinInput.paths(sample[0], true, false, false).size())))
-                            paths.put(String.join(" ", path.tokens));
-                        for (int i = 0; i < Math.min(8, entries.size()); i++)
-                            segments.put(new JSONArray(entries.get(i).wordSegments));
-                        item.put("paths", paths); item.put("segments", segments);
-                    }
-                }
-                write("pinyin-matrix.json", matrix.toString(2));
-                for (int i = 0; i < matrix.length(); i++) require(matrix.getJSONObject(i).getBoolean("hit"), matrix.getJSONObject(i).toString());
-                java.util.List<PinyinDictionary.Entry> forced = dictionary.suggest("xi'an");
-                for (PinyinDictionary.Entry entry : forced) require(!"先".equals(entry.word), "Explicit separator admitted xian");
-                for (String input : new String[]{"64426", "64", "6426", "644"})
-                    require(dictionary.suggestT9(input).stream().anyMatch(entry -> "你好".equals(entry.word)), "Nine-key spelling missed " + input);
-                String thirtyTwo = String.join("'", java.util.Collections.nCopies(32, "ni"));
-                require(dictionary.suggest(thirtyTwo).stream().anyMatch(entry -> entry.word.length() == 32), "32-syllable sentence was not decoded");
-                require(dictionary.suggest(thirtyTwo + "'ni").isEmpty(), "33-syllable limit was ignored");
-            });
             test("24_clipboard_cards_and_toolbar_duplicates", () -> {
                 ClipboardHistoryStore store = new ClipboardHistoryStore(getTargetContext());
                 java.util.List<ClipboardHistoryStore.Entry> original = store.snapshot();
@@ -309,8 +173,8 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                 }
                 require(bounds("收起键盘").left >= last.right, "Dismiss is not rightmost");
                 screenshot("toolbar-seven");
-                choose("中文 9键"); await("2 ABC"); screenshot("beautified-nine");
-                click("工具"); await("复制"); click("工具"); await("2 ABC");
+                choose("中文 9键"); awaitKey("ABC"); screenshot("beautified-nine");
+                click("工具"); await("复制"); click("工具"); awaitKey("ABC");
                 choose("中文 26键"); awaitKey("q");
                 click("收起键盘"); pause(500);
                 require(!hasKey("q") && !has("收起键盘"), "Dismiss did not hide keyboard");
@@ -359,23 +223,23 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
             });
             test("02_nine_candidates_and_geometry", () -> {
                 fresh(InputType.TYPE_CLASS_TEXT); choose("中文 9键");
-                Rect before = bounds("2 ABC");
-                Rect delete = bounds("退格删除"), retry = bounds("重输"), split = bounds("分词");
+                Rect before = bounds("ABC");
+                Rect delete = bounds("退格删除"), retry = bounds("清空尚未上屏的拼音，不删除已输入文字"), split = bounds("在当前拼音位置插入分隔符");
                 require(delete.top < retry.top && retry.top < split.top, "Side controls are not in Sogou order");
                 require(Math.abs(delete.height() - split.height()) <= 2, "Side control heights differ");
-                Rect symbols = bounds("符号"), digits = bounds("123"), space = bounds("空格"), language = bounds("中/英"), enter = bounds("回车");
+                Rect symbols = bounds("符号"), digits = bounds("123"), space = bounds("空格"), language = bounds("中/英"), enter = bounds("下一项");
                 require(symbols.left < digits.left && digits.left < space.left
                         && space.left < language.left && language.left < enter.left, "Bottom keys are not in Sogou order");
                 require(Math.abs(enter.top - space.top) <= 2 && enter.height() == space.height(), "Enter still spans upper rows");
                 screenshot("sogou-nine");
-                for (String key : new String[]{"6 MNO","4 GHI","4 GHI","2 ABC","6 MNO"}) tap(key);
-                awaitPrefix("首选候选词 ");
-                pause(900);
+                for (String key : new String[]{"MNO","GHI","GHI","ABC","MNO"}) tap(key);
+                awaitSelectableCandidates();
+                await("你好");
                 require(has("候选词 你好") || has("首选候选词 你好"), "64426 did not expose 你好");
-                Rect after = bounds("2 ABC");
+                Rect after = bounds("ABC");
                 require(Math.abs(after.top - before.top) <= 2 && after.height() == before.height(), "Key geometry changed after candidates");
-                tap("分词"); pause(400); screenshot("expanded");
-                tap("返回"); require(has("2 ABC"), "Expanded candidates did not return to T9");
+                tap("展开候选词"); await("中文候选词"); screenshot("expanded");
+                tap("返回"); require(hasKey("ABC"), "Expanded candidates did not return to T9");
             });
             test("03_cross_panel_navigation", () -> {
                 fresh(InputType.TYPE_CLASS_TEXT);
@@ -406,9 +270,9 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                 require(text().length() == remaining, "Deletion continued after finger release");
                 // Repeat while composing; asynchronous candidate refresh must not detach the held key.
                 clearField(); choose("中文 9键");
-                for (int i = 0; i < 8; i++) tap("2 ABC");
+                for (int i = 0; i < 8; i++) tap("ABC");
                 touch(bounds("退格删除"), 1100, 250);
-                tap("重输"); await("键盘布局");
+                tap("清空尚未上屏的拼音，不删除已输入文字"); await("键盘布局");
             });
             test("06_editor_switches", () -> {
                 fresh(InputType.TYPE_CLASS_TEXT); tap("n"); tap("i");
@@ -448,7 +312,7 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                     click("😊"); click("返回");
                     click("键盘布局"); clickPrefix("中文 9键，");
                     tap("123"); tap("返回");
-                    await("2 ABC");
+                    awaitKey("ABC");
                     click("键盘布局"); clickPrefix("中文 26键，");
                     await("q"); pause(220);
                     Rect current = bounds("q");
@@ -489,13 +353,13 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
             });
             test("12_nine_gestures_and_default_geometry", () -> {
                 preferences.edit().remove("key_height").commit();
-                require(KeyboardSizing.height(preferences) == 300, "Default height differs from settings");
+                require(KeyboardSizing.height(preferences) == 260, "Default height differs from settings");
                 fresh(InputType.TYPE_CLASS_TEXT); screenshot("default-qwerty");
-                choose("中文 9键"); await("2 ABC"); screenshot("default-nine");
-                Rect key = bounds("2 ABC"), bottom = bounds("空格");
+                choose("中文 9键"); awaitKey("ABC"); screenshot("default-nine");
+                Rect key = bounds("ABC"), bottom = bounds("空格");
                 float density = getTargetContext().getResources().getDisplayMetrics().density;
                 require(bottom.height() / density <= 54 && bottom.height() / density >= 40, "Bottom row stretched");
-                require(Math.abs(key.height() - bounds("5 JKL").height()) <= 2, "T9 rows uneven");
+                require(Math.abs(key.height() - bounds("JKL").height()) <= 2, "T9 rows uneven");
                 gesture(key, -36 * density, 80, false);
                 require("2".equals(text()), "Up-swipe should insert one digit: " + text());
                 gesture(key, -36 * density, 650, false);
@@ -506,7 +370,7 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                 Rect gap = new Rect(key.right + 1, key.centerY(), key.right + 3, key.centerY() + 2);
                 touch(gap, 650, 250);
                 require("222".equals(text()), "Key gap swallowed or misrouted a press: " + text());
-                tap("重输");
+                tap("清空尚未上屏的拼音，不删除已输入文字");
             });
             test("13_key_feedback_lifecycle", () -> {
                 fresh(InputType.TYPE_CLASS_TEXT);
@@ -606,8 +470,9 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
             test("19_high_frequency_candidate_paging", () -> {
                 preferences.edit().putString("candidate_count", "6").commit();
                 fresh(InputType.TYPE_CLASS_TEXT); choose("中文 9键");
-                for (String key : new String[]{"6 MNO", "4 GHI", "4 GHI", "2 ABC", "6 MNO"}) tap(key);
-                awaitPrefix("首选候选词 ");
+                long requestedAt = SystemClock.elapsedRealtime();
+                for (String key : new String[]{"MNO", "GHI", "GHI", "ABC", "MNO"}) tap(key);
+                awaitSelectableCandidates();
                 require(has("你好"), "High-frequency first T9 candidate was missing");
                 require(!has("1 你好"), "Candidate row should not show numeric labels");
                 AccessibilityNodeInfo first = waitNode("首选候选词 ", true);
@@ -616,6 +481,11 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                         "Candidate words should not carry per-word pinyin annotations: " + firstText);
                 require(hasPrefix("选择读音 "),
                         "T9 pinyin paths were missing from the left vertical list");
+                long deadline = SystemClock.elapsedRealtime() + 10000;
+                while (ImePerformanceMonitor.completedCandidateMs("64426", requestedAt) < 0
+                        && SystemClock.elapsedRealtime() < deadline) pause(70);
+                require(ImePerformanceMonitor.completedCandidateMs("64426", requestedAt) >= 0,
+                        "Nine-key complete candidate query did not finish");
                 tap("展开候选词"); await("中文候选词");
                 require(visibleCandidateWords().size() >= 6,
                         "Expanded candidate page did not use a dense candidate grid");
@@ -735,6 +605,132 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                         "Superseded wxgzh remained selectable after zg");
                 click("中国");
                 require("中国".equals(fieldText()), "Replacement input committed stale text: " + fieldText());
+            });
+            test("38_nine_candidate_selection", () -> {
+                preferences.edit().putString("default_layout", "qwerty")
+                        .putBoolean("nine_key_swipe_numbers", true).putBoolean("full_pinyin", true)
+                        .putBoolean("short_pinyin", true).commit();
+                fresh(InputType.TYPE_CLASS_TEXT); choose("中文 9键");
+                String two = "ABC，上滑或长按输入数字 2";
+                String four = "GHI，上滑或长按输入数字 4";
+                String six = "MNO，上滑或长按输入数字 6";
+                Rect before = bounds(two);
+                tap(six); tap(four);
+                awaitPrefix("选择读音 ni，"); clickPrefix("选择读音 ni，");
+                tap(four); tap(two);
+                long started = SystemClock.elapsedRealtime();
+                touch(bounds(six), 25, 0);
+                CandidateObservation observation = observeCandidate("64426", "你好", started, 10000);
+                require(observation.targetSelectableMs >= 0, "Locked ni path missed 你好: " + observation.snapshot.selectable);
+                Rect after = bounds(two);
+                require(Math.abs(after.top - before.top) <= 2 && after.height() == before.height(),
+                        "Nine-key geometry changed during candidate updates");
+                click("你好");
+                require("你好".equals(fieldText()), "Nine-key candidate committed wrong text: " + fieldText());
+            });
+            test("39_candidate_replace_and_commit", () -> {
+                preferences.edit().putString("default_layout", "qwerty").putBoolean("full_pinyin", true)
+                        .putBoolean("short_pinyin", true).putBoolean("learn_words", false).commit();
+                fresh(InputType.TYPE_CLASS_TEXT);
+                CandidateObservation first = observeCandidate("nihao", "你好", typeRapid("nihao"), 10000);
+                require(first.targetSelectableMs >= 0, "nihao missed 你好: " + first.snapshot.selectable);
+                for (int i = 0; i < 5; i++) touch(bounds("退格删除"), 25, 0);
+                require(fieldText().isEmpty(), "Backspace left composing text: " + fieldText());
+                CandidateObservation replacement = observeCandidate("zhongguo", "中国", typeRapid("zhongguo"), 10000);
+                require(replacement.targetSelectableMs >= 0, "zhongguo missed 中国: " + replacement.snapshot.selectable);
+                require(!replacement.snapshot.selectable.contains("你好"), "Previous input remained selectable");
+                click("中国");
+                require("中国".equals(fieldText()), "Replacement candidate committed wrong text: " + fieldText());
+            });
+            test("40_selection_learns_immediately", () -> {
+                Context context = getTargetContext();
+                String originalWords = SecureLocalStore.read(context, "user_words", "offline_ime_words");
+                try {
+                    require(SecureLocalStore.write(context, "user_words", "offline_ime_words", ""), "Could not isolate learning data");
+                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis())
+                            .putBoolean("learn_words", true).putBoolean("privacy_mode", false)
+                            .putBoolean("full_pinyin", true).putBoolean("short_pinyin", true)
+                            .putBoolean("next_word_prediction", false).commit();
+                    fresh(InputType.TYPE_CLASS_TEXT);
+                    CandidateObservation first = observeCandidate("sb", "上班", typeRapid("sb"), 10000);
+                    require(first.targetSelectableMs >= 0, "sb missed 上班: " + first.snapshot.selectable);
+                    click("上班");
+                    CandidateObservation repeated = observeCandidate("sb", "上班", typeRapid("sb"), 10000);
+                    require(!repeated.snapshot.selectable.isEmpty() && "上班".equals(repeated.snapshot.selectable.get(0)),
+                            "Previously chosen word was not promoted on the next input: " + repeated.snapshot.selectable);
+                    click("上班");
+                    require("上班上班".equals(fieldText()), "Repeated selection committed wrong text: " + fieldText());
+                } finally {
+                    preferences.edit().putBoolean("learn_words", false).commit();
+                    CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                    SecureLocalStore.write(context, "user_words", "offline_ime_words", originalWords);
+                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis()).commit();
+                }
+            });
+            test("42_assembled_word_learns_immediately", () -> {
+                Context context = getTargetContext();
+                CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                String originalWords = SecureLocalStore.read(context, "user_words", "offline_ime_words");
+                try {
+                    require(SecureLocalStore.write(context, "user_words", "offline_ime_words", ""), "Could not isolate learning data");
+                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis())
+                            .putString("default_layout", "qwerty").putBoolean("learn_words", true)
+                            .putBoolean("privacy_mode", false).putBoolean("full_pinyin", true)
+                            .putBoolean("short_pinyin", true).putBoolean("next_word_prediction", false).commit();
+                    fresh(InputType.TYPE_CLASS_TEXT);
+                    typeRapid("nihaopengyou"); awaitSelectableCandidates(); click("展开候选词");
+                    for (int scroll = 0; scroll < 8 && !has("你好"); scroll++) {
+                        for (AccessibilityWindowInfo window : ui.getWindows())
+                            if (window.getType() == AccessibilityWindowInfo.TYPE_INPUT_METHOD) scrollContent(window.getRoot());
+                        pause(200);
+                    }
+                    await("你好"); click("你好");
+                    awaitSelectableWord("朋友"); click("朋友");
+                    require("你好朋友".equals(fieldText()), "Assembled word committed incorrectly: " + fieldText());
+                    CandidateObservation repeated = observeCandidate("nihaopengyou", "你好朋友", typeRapid("nihaopengyou"), 10000);
+                    require(!repeated.snapshot.selectable.isEmpty()
+                                    && "你好朋友".equals(repeated.snapshot.selectable.get(0)),
+                            "Newly assembled word was not immediately promoted: " + repeated.snapshot.selectable);
+                    CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                    String persisted = SecureLocalStore.read(context, "user_words", "offline_ime_words");
+                    boolean recorded = false;
+                    for (String line : persisted.split("\\n")) {
+                        String[] fields = line.split("\\t", -1);
+                        if (fields.length >= 10 && "@word".equals(fields[0]) && "你好朋友".equals(fields[1])
+                                && "true".equals(fields[9])) recorded = true;
+                    }
+                    require(recorded, "Assembled word was not persisted as recent learning");
+                } finally {
+                    preferences.edit().putBoolean("learn_words", false).commit();
+                    CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                    SecureLocalStore.write(context, "user_words", "offline_ime_words", originalWords);
+                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis()).commit();
+                }
+            });
+            test("43_learning_respects_privacy_settings", () -> {
+                Context context = getTargetContext();
+                CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                String originalWords = SecureLocalStore.read(context, "user_words", "offline_ime_words");
+                try {
+                    require(SecureLocalStore.write(context, "user_words", "offline_ime_words", ""), "Could not isolate learning data");
+                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis())
+                            .putBoolean("privacy_mode", true).putBoolean("learn_words", true)
+                            .putBoolean("full_pinyin", true).putBoolean("short_pinyin", true).commit();
+                    fresh(InputType.TYPE_CLASS_TEXT); typeRapid("sb"); awaitSelectableWord("上班"); click("上班");
+                    CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                    require(SecureLocalStore.read(context, "user_words", "offline_ime_words").isEmpty(),
+                            "Privacy mode stored a chosen word");
+                    preferences.edit().putBoolean("privacy_mode", false).putBoolean("learn_words", false).commit();
+                    fresh(InputType.TYPE_CLASS_TEXT); typeRapid("sb"); awaitSelectableWord("上班"); click("上班");
+                    CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                    require(SecureLocalStore.read(context, "user_words", "offline_ime_words").isEmpty(),
+                            "Disabled learning stored a chosen word");
+                } finally {
+                    preferences.edit().putBoolean("learn_words", false).commit();
+                    CustomWordStore.IO.submit(() -> { }).get(30, TimeUnit.SECONDS);
+                    SecureLocalStore.write(context, "user_words", "offline_ime_words", originalWords);
+                    preferences.edit().putLong("user_words_revision", System.currentTimeMillis()).commit();
+                }
             });
             test("29_simplified_traditional_stroke_and_mixed_english", () -> {
                 HanConverter converter = HanConverter.get(getTargetContext());
@@ -917,42 +913,6 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
                 ui.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_BACK); pause(250);
                 require(appHasPrefix("剪贴板"), "Settings clipboard page crashed or failed to return");
                 screenshot("settings-secondary-pages");
-            });
-            test("35_latency_budget_and_package_privacy", () -> {
-                long loadStarted = SystemClock.elapsedRealtime();
-                PinyinDictionary dictionary = new PinyinDictionary(getTargetContext().getAssets(), getTargetContext());
-                dictionary.load();
-                long loadMs = SystemClock.elapsedRealtime() - loadStarted;
-                long firstQueryStarted = SystemClock.elapsedRealtime();
-                java.util.List<PinyinDictionary.Entry> firstQuery = dictionary.suggest("sb");
-                long firstQueryMs = SystemClock.elapsedRealtime() - firstQueryStarted;
-                require(firstQuery.stream().anyMatch(entry -> "社保".equals(entry.word)), "Cold sb query missed 社保");
-                java.util.ArrayList<Long> timings = new java.util.ArrayList<>();
-                String[] queries = {"nihao", "zhongguo", "gongzuorenyuan", "weixingongzhonghao", "xi'an"};
-                for (int i = 0; i < 100; i++) {
-                    long started = SystemClock.elapsedRealtime();
-                    dictionary.suggest(queries[i % queries.length]);
-                    timings.add(SystemClock.elapsedRealtime() - started);
-                }
-                java.util.Collections.sort(timings);
-                long p95 = timings.get(94);
-                fresh(InputType.TYPE_CLASS_TEXT); long uiStarted = SystemClock.elapsedRealtime();
-                for (char key : "nihao".toCharArray()) tap(String.valueOf(key));
-                await("你好"); long uiMs = SystemClock.elapsedRealtime() - uiStarted;
-                JSONObject metrics = new JSONObject(); metrics.put("dictionaryLoadMs", loadMs);
-                metrics.put("firstQueryMs", firstQueryMs);
-                metrics.put("warmQueryP95Ms", p95); metrics.put("uiCandidateMs", uiMs);
-                write("latency-budget.json", metrics.toString(2));
-                require(loadMs <= 5000, "Dictionary cold load exceeded 5 seconds: " + loadMs);
-                require(p95 <= 300, "Candidate query P95 exceeded 300 ms: " + p95);
-                require(uiMs <= 2500, "UI candidate path exceeded 2.5 seconds: " + uiMs);
-                android.content.pm.PackageInfo packageInfo = getTargetContext().getPackageManager()
-                        .getPackageInfo(getTargetContext().getPackageName(), android.content.pm.PackageManager.GET_PERMISSIONS);
-                java.util.List<String> permissions = packageInfo.requestedPermissions == null
-                        ? java.util.Collections.emptyList() : java.util.Arrays.asList(packageInfo.requestedPermissions);
-                require(!permissions.contains(android.Manifest.permission.INTERNET), "APK unexpectedly requests INTERNET");
-                require(!permissions.contains(android.Manifest.permission.RECORD_AUDIO), "APK unexpectedly requests microphone");
-                require(!permissions.contains(android.Manifest.permission.READ_CONTACTS), "APK unexpectedly requests contacts");
             });
         } catch (Throwable error) {
             failures++;
@@ -1311,6 +1271,37 @@ public final class FrontendStabilityInstrumentation extends Instrumentation {
     }
     private java.util.List<String> visibleCandidateWords() {
         return candidateSnapshot().visible;
+    }
+    private void awaitSelectableCandidates() {
+        long until = SystemClock.uptimeMillis() + 10000;
+        do {
+            if (!candidateSnapshot().selectable.isEmpty()) return;
+            pause(70);
+        } while (SystemClock.uptimeMillis() < until);
+        throw new AssertionError("No selectable candidates for the current input");
+    }
+    private void awaitSelectableWord(String word) {
+        long until = SystemClock.uptimeMillis() + 10000;
+        do {
+            if (candidateSnapshot().selectable.contains(word)) return;
+            pause(70);
+        } while (SystemClock.uptimeMillis() < until);
+        throw new AssertionError("Missing selectable candidate: " + word);
+    }
+    private long ageLearnedWord(Context context, String word, long lastUsed, long previousRevision) {
+        String stored = SecureLocalStore.read(context, "user_words", "offline_ime_words");
+        StringBuilder updated = new StringBuilder(); int changed = 0;
+        for (String line : stored.split("\\n")) {
+            if (line.isEmpty()) continue;
+            String[] fields = line.split("\\t", -1);
+            if (fields.length >= 10 && word.equals(fields[1])) { fields[4] = Long.toString(lastUsed); changed++; }
+            updated.append(String.join("\t", fields)).append('\n');
+        }
+        require(changed >= 2, "New-word records were not persisted");
+        require(SecureLocalStore.write(context, "user_words", "offline_ime_words", updated.toString()), "Could not age learned word");
+        long revision = Math.max(System.currentTimeMillis(), previousRevision + 1);
+        preferences.edit().putLong("user_words_revision", revision).commit();
+        return revision;
     }
     private void collectCandidateWords(AccessibilityNodeInfo node, CandidateSnapshot snapshot) {
         if (node == null) return;

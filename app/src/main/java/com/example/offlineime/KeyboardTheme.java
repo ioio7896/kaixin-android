@@ -109,13 +109,13 @@ public final class KeyboardTheme {
         candidatePressedText = readableText(text, function);
     }
     public static KeyboardTheme from(Context c, boolean dark) {
-        SharedPreferences p = c.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        SharedPreferences p = SettingsRepository.preferences(c);
         dark = resolveDark(c);
         return forSkin(c, p.getString("theme", "system"), dark, p.getBoolean("high_contrast", false));
     }
 
     static boolean resolveDark(Context c) {
-        SharedPreferences p = c.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        SharedPreferences p = SettingsRepository.preferences(c);
         String mode = p.getString("appearance_mode", p.contains("dark") ? (p.getBoolean("dark", false) ? "dark" : "light") : "system");
         return "dark".equals(mode) || "system".equals(mode)
                 && (c.getResources().getConfiguration().uiMode & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
@@ -123,14 +123,15 @@ public final class KeyboardTheme {
     }
 
     static KeyboardTheme forSkin(Context c, String id, boolean dark, boolean highContrast) {
-        SharedPreferences p = c.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        SharedPreferences p = SettingsRepository.preferences(c);
         int[] colors = dark ? skin(id).dark : skin(id).light;
         if (highContrast) {
             colors = dark ? new int[]{0xff000000, 0xff202020, 0xff555555, 0xff8dbbff, 0xffffffff}
                     : new int[]{0xffffffff, 0xffffffff, 0xffdddddd, 0xff005fcc, 0xff000000};
         }
         return new KeyboardTheme(colors[0], colors[1], colors[2], colors[3], colors[4],
-                p.getInt("key_radius", 12), p.getInt("key_font", 20), p.getInt("key_gap", 2), dark);
+                SettingsRepository.integer(p, "key_radius", 12), SettingsRepository.integer(p, "key_font", 20),
+                SettingsRepository.integer(p, "key_gap", 2), dark);
     }
 
     int emphasizedBackground() {

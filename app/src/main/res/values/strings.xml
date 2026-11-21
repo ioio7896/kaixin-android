@@ -3,5 +3,270 @@
     <string name="app_name">开心离线输入法</string>
     <string name="ime_name">开心离线输入法</string>
     <string name="settings_title">输入法设置</string>
+    <string name="settings_app_title">开心输入法</string>
+    <string name="settings_keyboard_group">键盘设置</string>
+    <string name="settings_data_group">数据与应用</string>
+    <string name="settings_back">返回</string>
+    <string name="settings_offline">完全离线</string>
+    <string name="settings_local_storage">输入内容保存在本机</string>
+    <string name="settings_setup">启用输入法</string>
+    <string name="settings_setup_entry">启用与切换输入法</string>
+    <string name="settings_appearance">外观反馈</string>
+    <string name="settings_appearance_summary">皮肤、声音与键盘尺寸</string>
+    <string name="settings_candidate">候选显示</string>
+    <string name="settings_candidate_summary">候选栏与展开候选页的字体和排版</string>
+    <string name="settings_input">输入体验</string>
+    <string name="settings_input_summary">拼音、纠错与候选词</string>
+    <string name="settings_layout">键盘布局</string>
+    <string name="settings_layout_summary">工具栏与显示选项</string>
+    <string name="settings_dictionary">词库管理</string>
+    <string name="settings_dictionary_summary">自定义词与学习记录</string>
+    <string name="settings_privacy">隐私安全</string>
+    <string name="settings_privacy_summary">本地数据与隐私模式</string>
+    <string name="settings_clipboard">剪贴板</string>
+    <string name="settings_clipboard_summary">历史记录与隐私选项</string>
+    <string name="settings_phrases">快捷短语</string>
+    <string name="settings_phrases_summary">添加与管理常用文字</string>
+    <string name="settings_phrases_list">短语列表</string>
+    <string name="settings_about">关于</string>
+    <string name="settings_about_summary">版本与词库来源</string>
+    <string name="settings_reset_section">恢复本页默认设置</string>
+    <string name="settings_reset_all">恢复所有默认设置</string>
+    <string name="settings_reset_all_title">恢复所有默认设置？</string>
+    <string name="settings_reset_title">恢复默认设置？</string>
+    <string name="settings_reset_message">将「%1$s」中的选项恢复为默认值。</string>
+    <string name="settings_reset_confirm">恢复</string>
+    <string name="settings_decrease">减小%1$s</string>
+    <string name="settings_increase">增大%1$s</string>
+    <string name="settings_label_value">%1$s，当前%2$s</string>
+    <string name="settings_label_summary">%1$s，%2$s</string>
+    <string name="settings_help_expand">了解详情</string>
+    <string name="settings_help_collapse">收起说明</string>
+    <string name="settings_keyboard_preview_landscape">横屏键盘预览，高度 %1$d dp</string>
+    <string name="settings_keyboard_preview_portrait">竖屏键盘预览，高度 %1$d dp</string>
+    <string name="settings_keyboard_preview_nine">9 键键盘预览</string>
+    <string name="settings_keyboard_preview_qwerty">26 键键盘预览</string>
+    <string name="settings_keyboard_mode_nine">9 键拼音</string>
+    <string name="settings_keyboard_mode_qwerty">26 键拼音</string>
     <string name="about_version_text">开心离线输入法\n版本：%1$s\n所有候选和用户数据均在本机处理。</string>
+    <string name="clipboard_privacy_summary">仅在本机加密保存，打开面板时读取当前文字。密码、隐私模式和敏感内容会跳过。普通记录最多保留 %1$d 条、%2$s，固定内容持续保留。</string>
+    <string name="clipboard_retention_forever">永久</string>
+    <string name="clipboard_retention_days">%1$d 天</string>
+    <string name="clipboard_expiry_pinned">固定保留</string>
+    <string name="clipboard_expiry_forever">永久保留</string>
+    <string name="clipboard_expiry_days">剩余%1$d天</string>
+    <string name="clipboard_entry_metadata">%1$s · %2$s · %3$d字</string>
+    <string name="custom_words_summary">主动保存 %1$d 个词 · 当前找到 %2$d 个词</string>
+    <string name="custom_words_show_more">再显示 %1$d 个词</string>
+    <string name="candidate_count">%1$d 个</string>
+    <string name="candidate_title_with_reading">%1$s · %2$s</string>
+    <string name="candidate_bar_heading">候选栏</string>
+    <string name="candidate_page_heading">展开候选页</string>
+    <string name="candidate_bar_preview">候选栏预览</string>
+    <string name="candidate_page_preview">展开候选页预览</string>
+    <string name="candidate_font_size">候选字号</string>
+    <string name="candidate_bar_height">候选栏高度</string>
+    <string name="candidate_font_family">字体风格</string>
+    <string name="candidate_font_weight">字体粗细</string>
+    <string name="candidate_first_style">首选词强调</string>
+    <string name="candidate_follow_font_scale">随系统字体大小缩放</string>
+    <string name="candidate_numbers">显示候选序号</string>
+    <string name="candidate_spacing">候选词间距</string>
+    <string name="candidate_page_size_follow">字号跟随候选栏</string>
+    <string name="candidate_page_style_follow">字体样式跟随候选栏</string>
+    <string name="candidate_page_style_follow_summary">沿用候选栏的字体、粗细、首选词强调和系统缩放设置</string>
+    <string name="candidate_density">候选排列密度</string>
+    <string name="candidate_ellipsize">长候选省略位置</string>
+    <string name="candidate_font_help_title">系统字体如何显示中文候选？</string>
+    <string name="candidate_font_help_detail">如果所选字体没有对应的中文字形，系统会使用可用的中文字体。序号和英文仍使用所选字体。大字号时，候选栏和候选页的行高会随文字增高。</string>
+    <string-array name="candidate_font_families">
+        <item>系统默认</item><item>衬线</item><item>等宽</item><item>窄体</item>
+    </string-array>
+    <string-array name="candidate_font_weights">
+        <item>细体</item><item>常规</item><item>中等</item><item>粗体</item>
+    </string-array>
+    <string-array name="candidate_first_styles">
+        <item>强调色并加粗</item><item>仅强调色</item><item>仅加粗</item><item>与其他候选相同</item>
+    </string-array>
+    <string-array name="candidate_spacing_options">
+        <item>紧凑</item><item>标准</item><item>宽松</item>
+    </string-array>
+    <string-array name="candidate_ellipsize_options">
+        <item>末尾省略</item><item>中间省略</item>
+    </string-array>
+    <string-array name="candidate_preview_words">
+        <item>你好</item><item>开心</item><item>输入法</item><item>Hello</item>
+        <item>这是一条用于查看长句省略效果的候选词</item>
+    </string-array>
+    <string name="setting_choice_value">%1$s\u0020\u0020›</string>
+    <string name="setting_numeric_value">%1$d%2$s</string>
+    <string name="settings_pref_output_script">中文输出</string>
+    <string name="settings_pref_default_layout">默认中文键盘</string>
+    <string name="settings_pref_mixed_english">中文键盘显示英文候选</string>
+    <string name="settings_pref_paired_punctuation">符号自动配对</string>
+    <string name="settings_pref_gesture_hints">显示操作提示</string>
+    <string name="settings_pref_pinyin_scheme">26键拼音方案</string>
+    <string name="settings_pref_nine_key_swipe_numbers">9键上滑输入数字</string>
+    <string name="settings_pref_nine_key_labels">9键键帽显示</string>
+    <string name="settings_pref_nine_short_words">九键简拼与混拼长词</string>
+    <string name="settings_pref_nine_word_completion">九键三四字词提前补全</string>
+    <string name="settings_pref_full_pinyin">全拼输入</string>
+    <string name="settings_pref_short_pinyin">简拼输入</string>
+    <string name="settings_pref_mixed_pinyin">全拼简拼混合输入</string>
+    <string name="settings_pref_double_initials">双字母声母简拼（zh/ch/sh）</string>
+    <string name="settings_pref_next_word_prediction">下一词联想</string>
+    <string name="settings_pref_emoji_candidates">拼音候选推荐表情</string>
+    <string name="settings_pref_emoji_legacy_markers">显示黄脸文字标记</string>
+    <string name="settings_pref_basic_context">常用搭配辅助选词</string>
+    <string name="settings_pref_sentence_prediction">26键完整拼音组句</string>
+    <string name="settings_pref_nine_sentence_prediction">9键完整读音组句</string>
+    <string name="settings_pref_spelling_correction">拼写纠错</string>
+    <string name="settings_pref_touch_correction">按键触点纠错</string>
+    <string name="settings_pref_fuzzy_pinyin">模糊音（26键全拼）</string>
+    <string name="settings_pref_handwriting_delay">手写停笔等待</string>
+    <string name="settings_pref_handwriting_continuous">默认使用连续多字手写</string>
+    <string name="settings_pref_handwriting_line_delay">多字手写停笔等待</string>
+    <string name="settings_pref_auto_commit">自动提交首选词</string>
+    <string name="settings_pref_space_behavior">空格键行为</string>
+    <string name="settings_pref_candidate_count">候选词数量</string>
+    <string name="settings_pref_toolbar">显示工具栏</string>
+    <string name="settings_pref_show_mode">显示模式文字</string>
+    <string name="settings_pref_show_composing">显示拼音组合区</string>
+    <string name="settings_input_language_scheme">语言与方案</string>
+    <string name="settings_input_nine_key">9键输入</string>
+    <string name="settings_input_pinyin">拼音输入</string>
+    <string name="settings_input_prediction">联想与候选</string>
+    <string name="settings_input_correction">26键全拼纠错</string>
+    <string name="settings_input_handwriting">手写与确认</string>
+    <string name="settings_layout_display">显示选项</string>
+    <string name="settings_layout_toolbar">工具栏入口</string>
+    <string name="settings_help_nine_swipe">上滑输入数字；点击仍输入拼音或标点。</string>
+    <string name="settings_help_nine_swipe_detail">开启后，在九键按键上向上滑动可输入对应数字 1–9；点击仍输入拼音或打开标点。关闭后仍可长按输入数字。仅显示字母时隐藏数字提示，标点键保留，也可通过底部数字、符号键输入。</string>
+    <string name="settings_help_nine_completion">按拼音完整度逐步出词，无需先选择左侧读音。</string>
+    <string name="settings_help_nine_completion_detail">输入时会显示匹配的字和词；未选择读音时，结合完整匹配、词频和近期使用排序。左侧读音用于消除歧义，已选读音始终有效。简拼与混拼长词默认开启，完整匹配的长词会保留候选位置；混拼还需开启全拼简拼混合输入。提前补全默认关闭：开启后，输入至少两个完整音节可补出高可信三四字词，每次最多两个，排在当前输入的匹配结果之后。</string>
+    <string name="settings_help_sentence_prediction">组句用于至少五个完整读音的长输入。</string>
+    <string name="settings_help_sentence_prediction_detail">组句用于至少五个完整读音的长输入。九键需输入完整编码，或逐个选定全部读音；已有词库词优先。关闭后仍可输入词库中已有的长词。</string>
+    <string name="settings_help_spelling_correction">完整词不足时，补充可能的纠错候选。</string>
+    <string name="settings_help_spelling_correction_detail">输入至少四个字母、没有可靠的完整词时，补充可能的正确词；触点纠错仅在靠近按键边缘时尝试。不会改写拼音，选中候选后才上屏。双拼和九键不使用这两项纠错。</string>
+    <string name="settings_help_fuzzy_pinyin">开启后，选择需要混用的音组。</string>
+    <string name="settings_help_fuzzy_pinyin_detail">开启模糊音后，再选择需要混用的音组。至少四个字母的多字词可补充模糊音候选，正常匹配词优先。</string>
+    <string name="settings_pref_appearance_mode">明暗模式</string>
+    <string name="settings_pref_high_contrast">高对比度</string>
+    <string name="settings_pref_one_hand_side">单手键盘</string>
+    <string name="settings_pref_one_hand_width">单手宽度</string>
+    <string name="settings_pref_split_keyboard">大屏分离式键盘（宽屏时生效）</string>
+    <string name="settings_pref_split_gap">分离键盘中间间距</string>
+    <string name="settings_pref_floating">浮动键盘（可拖动、调节尺寸）</string>
+    <string name="settings_pref_floating_width">浮动宽度</string>
+    <string name="settings_pref_floating_height">浮动高度</string>
+    <string name="settings_pref_key_preview">按键气泡</string>
+    <string name="settings_pref_haptic_strength">按键震动强度</string>
+    <string name="settings_pref_sound_volume">按键音量</string>
+    <string name="settings_pref_key_height_landscape">横屏统一高度</string>
+    <string name="settings_pref_key_height">竖屏统一高度</string>
+    <string name="settings_pref_key_font">按键字号</string>
+    <string name="settings_pref_key_radius">按键圆角</string>
+    <string name="settings_pref_key_gap">按键间距</string>
+    <string name="settings_appearance_keyboard_style">键盘样式</string>
+    <string name="settings_appearance_sizing">尺寸与按键</string>
+    <string name="settings_appearance_feedback">声音与震动</string>
+    <string name="settings_appearance_skin">键盘皮肤</string>
+    <string name="settings_appearance_skin_summary">配色、字形与间距实时预览；支持系统明暗模式。单手模式保持原字号。</string>
+    <string name="settings_help_keyboard_height">输入键盘共用高度，手写可单独切换半屏和全屏。</string>
+    <string name="settings_help_keyboard_height_detail">9键、26键、数字键盘和普通面板使用同一高度。横屏和竖屏分别设置，浮动键盘使用浮动高度。手写面板内可切换半屏和全屏。</string>
+    <string name="settings_pref_learn_words">用户词库学习</string>
+    <string name="settings_pref_learn_long_press">允许长按加入词库</string>
+    <string name="settings_pref_blocked_words">屏蔽词过滤</string>
+    <string name="settings_pref_privacy_mode">隐私模式</string>
+    <string name="settings_pref_privacy_mode_detail">停止学习和记录剪贴板</string>
+    <string name="settings_pref_sensitive_filter">敏感内容过滤</string>
+    <string name="settings_pref_sensitive_filter_detail">避免保存敏感输入</string>
+    <string name="settings_pref_performance_logging">性能日志</string>
+    <string name="settings_pref_performance_logging_detail">仅记录耗时，不记录文本</string>
+    <string name="settings_pref_clipboard_enabled">剪贴板历史</string>
+    <string name="settings_pref_clipboard_capture_while_typing">后台自动记录新复制文本</string>
+    <string name="settings_pref_clipboard_limit">普通历史数量</string>
+    <string name="settings_pref_clipboard_retention_days">普通历史保留时间</string>
+    <string name="settings_dictionary_learning">词库学习</string>
+    <string name="settings_dictionary_custom_words">自定义词</string>
+    <string name="settings_privacy_protection">隐私保护</string>
+    <string name="settings_privacy_reset">重置与清除</string>
+    <string name="settings_clipboard_history">历史记录</string>
+    <string name="settings_clipboard_description">记录说明</string>
+    <string name="settings_about_version">版本信息</string>
+    <string name="settings_about_privacy">隐私说明</string>
+    <string name="settings_help_clipboard_history">默认在输入法服务运行时记录新复制的纯文本。</string>
+    <string name="settings_help_clipboard_history_detail">本输入法作为默认输入法且服务正在运行时，默认监听新复制的纯文本；即使键盘隐藏也可记录。关闭上方开关后，只在打开剪贴板面板时补录尚未保存的当前文本。隐私模式、密码输入和系统敏感标记会阻止保存。单条最多 8192 字、16 KB；固定内容最多 30 条，全部历史最多 256 KB。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。</string>
+    <string-array name="settings_pref_output_script_options">
+        <item>简体中文</item>
+        <item>繁体中文</item>
+    </string-array>
+    <string-array name="settings_pref_default_layout_options">
+        <item>26键拼音</item>
+        <item>9键拼音</item>
+    </string-array>
+    <string-array name="settings_pref_pinyin_scheme_options">
+        <item>全拼 / 简拼</item>
+        <item>小鹤双拼</item>
+    </string-array>
+    <string-array name="settings_pref_nine_key_labels_options">
+        <item>字母和数字</item>
+        <item>仅显示字母</item>
+    </string-array>
+    <string-array name="settings_pref_handwriting_delay_options">
+        <item>快速 250ms</item>
+        <item>标准 400ms</item>
+        <item>从容 650ms</item>
+        <item>慢速 900ms</item>
+    </string-array>
+    <string-array name="settings_pref_handwriting_line_delay_options">
+        <item>快速 650ms</item>
+        <item>标准 900ms</item>
+        <item>从容 1300ms</item>
+        <item>慢速 1800ms</item>
+    </string-array>
+    <string-array name="settings_pref_space_behavior_options">
+        <item>选择首选词</item>
+        <item>输入空格</item>
+    </string-array>
+    <string-array name="settings_pref_candidate_count_options">
+        <item>6</item>
+        <item>9</item>
+        <item>12</item>
+        <item>15</item>
+    </string-array>
+    <string-array name="settings_pref_appearance_mode_options">
+        <item>跟随系统</item>
+        <item>浅色</item>
+        <item>深色</item>
+    </string-array>
+    <string-array name="settings_pref_one_hand_side_options">
+        <item>关闭</item>
+        <item>左侧</item>
+        <item>右侧</item>
+    </string-array>
+    <string-array name="settings_pref_haptic_strength_options">
+        <item>关闭</item>
+        <item>轻</item>
+        <item>标准</item>
+        <item>强</item>
+    </string-array>
+    <string-array name="settings_pref_sound_volume_options">
+        <item>关闭</item>
+        <item>低</item>
+        <item>中</item>
+        <item>高</item>
+    </string-array>
+    <string-array name="settings_pref_clipboard_limit_options">
+        <item>10 条</item>
+        <item>20 条</item>
+        <item>50 条</item>
+        <item>100 条</item>
+    </string-array>
+    <string-array name="settings_pref_clipboard_retention_days_options">
+        <item>1 天</item>
+        <item>7 天</item>
+        <item>30 天</item>
+        <item>永久</item>
+    </string-array>
 </resources>

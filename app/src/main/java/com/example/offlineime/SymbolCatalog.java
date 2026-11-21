@@ -9,6 +9,42 @@ final class SymbolCatalog {
 
     private SymbolCatalog() { }
 
+    /** Pair only opening symbols. Each closing symbol occupies one UTF-16 code unit. */
+    static String pair(String opening, boolean chineseKeyboard) {
+        return switch (opening) {
+            case "(" -> chineseKeyboard ? "（）" : "()";
+            case "[" -> chineseKeyboard ? "【】" : "[]";
+            case "{" -> chineseKeyboard ? "｛｝" : "{}";
+            case "\"" -> chineseKeyboard ? "“”" : "\"\"";
+            case "'" -> "''";
+            case "（" -> "（）";
+            case "［" -> "［］";
+            case "｛" -> "｛｝";
+            case "【" -> "【】";
+            case "〔" -> "〔〕";
+            case "〖" -> "〖〗";
+            case "〈" -> "〈〉";
+            case "《" -> "《》";
+            case "「" -> "「」";
+            case "『" -> "『』";
+            case "“" -> "“”";
+            case "‘" -> "‘’";
+            case "〝" -> "〝〞";
+            case "﹙" -> "﹙﹚";
+            case "﹛" -> "﹛﹜";
+            case "﹝" -> "﹝﹞";
+            case "﹃" -> "﹃﹄";
+            case "﹁" -> "﹁﹂";
+            case "⟨" -> "⟨⟩";
+            case "⌈" -> "⌈⌉";
+            case "⌊" -> "⌊⌋";
+            case "⦃" -> "⦃⦄";
+            case "⦅" -> "⦅⦆";
+            case "⦇" -> "⦇⦈";
+            default -> null;
+        };
+    }
+
     static String[] values(String category) {
         String symbols;
         switch (category) {

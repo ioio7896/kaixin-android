@@ -18,12 +18,22 @@ final class DenseCandidateLayout extends ViewGroup {
         gap = Math.round(2 * getResources().getDisplayMetrics().density);
     }
 
+    @Override public void onViewAdded(View child) {
+        super.onViewAdded(child);
+        cells.add(indexOfChild(child), new Rect());
+    }
+
+    @Override public void onViewRemoved(View child) {
+        super.onViewRemoved(child);
+        // Geometry is recalculated for every child during the next measure pass.
+        if (!cells.isEmpty()) cells.remove(cells.size() - 1);
+    }
+
     @Override protected void onMeasure(int widthSpec, int heightSpec) {
         int width = MeasureSpec.getSize(widthSpec);
         if (MeasureSpec.getMode(widthSpec) == MeasureSpec.UNSPECIFIED)
             width = getResources().getDisplayMetrics().widthPixels;
         int available = Math.max(1, width - getPaddingLeft() - getPaddingRight());
-        while (cells.size() < getChildCount()) cells.add(new Rect());
         int first = -1, used = 0, rowHeight = 0, top = getPaddingTop();
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);

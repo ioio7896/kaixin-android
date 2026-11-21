@@ -1,0 +1,27 @@
+[package]
+name = "kaixin-engine"
+version = "0.1.0"
+edition = "2021"
+description = "Offline pinyin engine for the Kaixin Android IME"
+license = "MIT"
+publish = false
+
+[lib]
+name = "kaixin_engine"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "dictgen"
+path = "src/bin/dictgen.rs"
+
+[dependencies]
+jni = { version = "0.21", default-features = false }
+memmap2 = "0.9"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+# JNI entry points catch panics; unwinding must stay enabled for that.
+panic = "unwind"

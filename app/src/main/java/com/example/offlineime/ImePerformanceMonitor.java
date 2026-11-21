@@ -8,7 +8,7 @@ import android.util.Log;
 final class ImePerformanceMonitor {
     private static final String TAG = "OfflineImePerf";
     private static final int WINDOW_SIZE = 100;
-    private static final String[] METRICS = {"fast_candidates", "first_selectable", "first_visible", "full_query", "candidate_ready", "queue_wait",
+    private static final String[] METRICS = {"memory_candidates", "fast_candidates", "first_selectable", "first_visible", "full_query", "candidate_ready", "queue_wait",
             "lookup", "database_cursor", "sentence", "ranking", "personalization", "context_ranking",
             "ui_bind", "candidate_measure", "ui_draw", "input_view_ready"};
     private static final long[][][] samples = new long[4][METRICS.length][WINDOW_SIZE];
@@ -75,7 +75,8 @@ final class ImePerformanceMonitor {
     private static int budgetMs(String metric) {
         if (metric.startsWith("ui_") || metric.equals("candidate_measure")) return 8;
         if (metric.equals("queue_wait")) return 16;
-        if (metric.equals("first_selectable") || metric.equals("first_visible") || metric.equals("fast_candidates")) return 50;
+        if (metric.equals("first_selectable") || metric.equals("first_visible")
+                || metric.equals("memory_candidates") || metric.equals("fast_candidates")) return 50;
         if (metric.equals("input_view_ready")) return 200;
         return 150;
     }

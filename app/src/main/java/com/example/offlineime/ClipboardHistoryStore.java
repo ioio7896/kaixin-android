@@ -31,22 +31,27 @@ final class ClipboardHistoryStore {
     private static volatile ClipboardHistoryStore active;
     private final Context context;
     private List<Item> cachedItems;
-    private final ScheduledExecutorService writer = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread thread = new Thread(r, "offline-clipboard-writer");
-        thread.setDaemon(true);
-        return thread;
-    });
+    private final ScheduledExecutorService writer = PersonalDataIO.EXECUTOR;
     private ScheduledFuture<?> pendingWrite;
+    private boolean dirty;
+    private boolean legacyCleanupPending;
+    private long writeRevision;
     private boolean suspended;
     synchronized void releaseMemory() {
-        if (pendingWrite == null || pendingWrite.isDone()) cachedItems = null;
+        if (!dirty) cachedItems = null;
     }
     static void flushBeforeGlobalClear() {
         ClipboardHistoryStore store = active;
         if (store != null) {
             synchronized (store) {
                 store.suspended = true;
-                store.flushPendingWrites();
+                // Explicit deletion supersedes pending writes. This runs on the same IO lane.
+                if (store.pendingWrite != null) store.pendingWrite.cancel(false);
+                store.pendingWrite = null;
+                store.dirty = false;
+                store.legacyCleanupPending = false;
+                store.writeRevision++;
+                store.cachedItems = null;
             }
         }
     }
@@ -56,7 +61,6 @@ final class ClipboardHistoryStore {
     }
     synchronized void close() {
         flushPendingWrites();
-        writer.shutdown();
         if (active == this) active = null;
     }
     private static ArrayList<Item> copyItems(List<Item> values) {
@@ -96,17 +100,34 @@ final class ClipboardHistoryStore {
 
     private void migratePlaintextHistory() {
         android.content.SharedPreferences preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
-        if (preferences.contains("blob") || !preferences.contains("item_0")) return;
-        ArrayList<Item> old = new ArrayList<>();
-        long now = System.currentTimeMillis();
-        for (int i = 0; i < recentLimit(); i++) {
-            String text = preferences.getString("item_" + i, null);
-            if (text != null) old.add(new Item(text, preferences.getLong("time_" + i, now),
-                    preferences.getBoolean("fixed_" + text.hashCode(), false)));
+        if (!legacyCleanupPending && !preferences.contains("item_0")) return;
+        SecureLocalStore.ReadResult encrypted = SecureLocalStore.readResult(context, PREFS, KEY_ALIAS);
+        if (!encrypted.succeeded()) {
+            throw new IllegalStateException("剪贴板历史读取失败，原数据已保留；请重新打开页面重试");
         }
-        preferences.edit().clear().commit();
-        writeItems(old);
-        flushPendingWrites();
+        if (encrypted.status == SecureLocalStore.ReadStatus.EMPTY) {
+            ArrayList<Item> old = new ArrayList<>();
+            long now = System.currentTimeMillis();
+            for (int i = 0; i < recentLimit(); i++) {
+                String text = preferences.getString("item_" + i, null);
+                if (text != null) old.add(new Item(text, preferences.getLong("time_" + i, now),
+                        preferences.getBoolean("fixed_" + text.hashCode(), false)));
+            }
+            writeItems(old);
+            flushPendingWrites();
+        } else {
+            // A previous process may have stopped after encryption but before
+            // cleanup. Verify that copy before discarding the legacy records.
+            decodeItems(encrypted.value);
+        }
+        android.content.SharedPreferences.Editor cleanup = preferences.edit();
+        for (String key : preferences.getAll().keySet())
+            if (key.startsWith("item_") || key.startsWith("time_") || key.startsWith("fixed_")) cleanup.remove(key);
+        // Migration already runs on PersonalDataIO. Report cleanup failure rather
+        // than silently leaving a plaintext copy after the encrypted write.
+        legacyCleanupPending = !cleanup.commit();
+        if (legacyCleanupPending)
+            throw new IllegalStateException("剪贴板已加密保存，但旧记录清理失败，请重试");
     }
 
     synchronized void add(String text) {
@@ -192,9 +213,19 @@ final class ClipboardHistoryStore {
         // Legacy migration is needed only when clipboard history is used.
         migratePlaintextHistory();
         if (cachedItems != null) return copyItems(cachedItems);
-        ArrayList<Item> result = new ArrayList<>();
         String raw = SecureLocalStore.read(context, PREFS, KEY_ALIAS);
-        if (raw.isEmpty()) { cachedItems = new ArrayList<>(); return result; }
+        if (raw.isEmpty()) {
+            SecureLocalStore.markReadable(PREFS);
+            cachedItems = new ArrayList<>(); return new ArrayList<>();
+        }
+        ArrayList<Item> result = decodeItems(raw);
+        SecureLocalStore.markReadable(PREFS);
+        cachedItems = copyItems(result);
+        return result;
+    }
+
+    private ArrayList<Item> decodeItems(String raw) {
+        ArrayList<Item> result = new ArrayList<>();
         try {
             JSONArray array = new JSONArray(raw);
             for (int i = 0; i < array.length(); i++) {
@@ -202,9 +233,10 @@ final class ClipboardHistoryStore {
                 result.add(new Item(value.getString("text"), value.getLong("time"), value.optBoolean("pinned")));
             }
         } catch (Exception error) {
+            SecureLocalStore.markUnreadable(PREFS);
             Log.e(TAG, "history parse failed: " + error.getClass().getSimpleName());
+            throw new IllegalStateException("剪贴板历史读取失败，原数据已保留；请重新打开页面重试");
         }
-        cachedItems = copyItems(result);
         return result;
     }
 
@@ -262,11 +294,24 @@ final class ClipboardHistoryStore {
     }
 
     private synchronized void writeItems(List<Item> items) {
+        if (suspended) return;
         ArrayList<Item> normalized = normalize(items);
         cachedItems = copyItems(normalized);
+        dirty = true;
+        long revision = ++writeRevision;
         if (pendingWrite != null) pendingWrite.cancel(false);
         List<Item> snapshot = copyItems(normalized);
-        pendingWrite = writer.schedule(() -> persist(snapshot), 150, TimeUnit.MILLISECONDS);
+        pendingWrite = writer.schedule(() -> {
+            synchronized (this) {
+                if (suspended || revision != writeRevision) return;
+                try {
+                    persist(snapshot);
+                    dirty = false;
+                } catch (RuntimeException error) {
+                    Log.e(TAG, "history write failed: " + error.getClass().getSimpleName());
+                } finally { pendingWrite = null; }
+            }
+        }, 150, TimeUnit.MILLISECONDS);
     }
 
     private void persist(List<Item> items) {
@@ -283,16 +328,16 @@ final class ClipboardHistoryStore {
                 Log.e(TAG, "history encode failed: " + error.getClass().getSimpleName());
             }
         }
-        SecureLocalStore.write(context, PREFS, KEY_ALIAS, array.toString());
+        if (!SecureLocalStore.write(context, PREFS, KEY_ALIAS, array.toString()))
+            throw new IllegalStateException("剪贴板保存失败，已有数据已保留");
     }
 
     private synchronized void flushPendingWrites() {
-        if (pendingWrite == null) return;
-        pendingWrite.cancel(false);
-        List<Item> snapshot = copyItems(cachedItems);
-        try { writer.submit(() -> persist(snapshot)).get(3, TimeUnit.SECONDS); }
-        catch (Exception error) { Log.e(TAG, "history flush failed: " + error.getClass().getSimpleName()); }
+        if (pendingWrite != null) pendingWrite.cancel(false);
         pendingWrite = null;
+        if (!dirty || suspended || cachedItems == null) return;
+        persist(copyItems(cachedItems));
+        dirty = false;
     }
 
     private static Item find(List<Item> items, String text) {

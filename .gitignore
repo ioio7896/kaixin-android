@@ -10,6 +10,8 @@ app/build/
 app/.cxx/
 /app/src/main/assets/databases/pinyin.db
 /app/src/main/assets/databases/pinyin.bin
+/app/src/main/assets/databases/pinyin-manifest.json
+/kaixin-android*.sha256
 
 # Device captures, emulator output, and generated diagnostic bundles
 artifacts/
@@ -44,3 +46,11 @@ AGENTS.md
 # Local website preview and downloads
 website-preview/
 
+
+# Generated source archives
+*.zip
+
+# Rust build output
+target/
+engine/target/
+app/src/main/jniLibs/
