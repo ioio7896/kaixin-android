@@ -39,6 +39,7 @@ public final class HandwritingView extends View {
 
     private final List<Path> paths = new ArrayList<>();
     private final List<List<OfflineHandwritingRecognizer.Point>> strokes = new ArrayList<>();
+    private final List<Float> strokeWidths = new ArrayList<>();
     private final List<Integer> boundaries = new ArrayList<>();
     // A marked segment ends at a stroke index. The unsegmented line uses its
     // recognized character positions and keeps edits while that prefix still matches.
@@ -62,8 +63,11 @@ public final class HandwritingView extends View {
 
     private Path currentPath;
     private List<OfflineHandwritingRecognizer.Point> currentStroke;
+    private float currentStrokeWidthScale = 1f;
     private int activePointer = -1;
     private float inkScale = 1f;
+    private long stylusPalmRejectUntilMs;
+    private static final long PALM_REJECT_WINDOW_MS = 4000L;
 
     HandwritingView(Context context, boolean singleOnly, Callback callback) {
         super(context);
@@ -93,9 +97,16 @@ public final class HandwritingView extends View {
         super.onDraw(canvas);
         canvas.save();
         canvas.scale(inkScale, inkScale);
-        paint.setStrokeWidth(5f * density / inkScale);
-        for (int i = 0; i < strokes.size(); i++) drawStroke(canvas, paths.get(i), strokes.get(i));
-        if (currentStroke != null) drawStroke(canvas, currentPath, currentStroke);
+        float baseWidth = 5f * density / inkScale;
+        for (int i = 0; i < strokes.size(); i++) {
+            float scale = i < strokeWidths.size() ? strokeWidths.get(i) : 1f;
+            paint.setStrokeWidth(baseWidth * scale);
+            drawStroke(canvas, paths.get(i), strokes.get(i));
+        }
+        if (currentStroke != null) {
+            paint.setStrokeWidth(baseWidth * currentStrokeWidthScale);
+            drawStroke(canvas, currentPath, currentStroke);
+        }
         canvas.restore();
     }
 
@@ -132,8 +143,37 @@ public final class HandwritingView extends View {
                 Math.max(1f, height - margin) / bottom));
     }
 
+    private static float stylusWidthScale(MotionEvent event, int pointerIndex) {
+        if (event.getToolType(pointerIndex) != MotionEvent.TOOL_TYPE_STYLUS) return 1f;
+        float pressure = event.getPressure(pointerIndex);
+        if (Float.isNaN(pressure) || pressure <= 0f) return 0.9f;
+        return Math.max(0.65f, Math.min(1.55f, 0.55f + pressure * 1.0f));
+    }
+
     @Override public boolean onTouchEvent(MotionEvent event) {
-        switch (event.getActionMasked()) {
+        int action = event.getActionMasked();
+        int actionIndex = event.getActionIndex();
+        int toolType = event.getToolType(actionIndex);
+        boolean isStylus = toolType == MotionEvent.TOOL_TYPE_STYLUS;
+        boolean isEraser = toolType == MotionEvent.TOOL_TYPE_ERASER;
+        long now = android.os.SystemClock.uptimeMillis();
+        if (isStylus || isEraser) {
+            stylusPalmRejectUntilMs = now + PALM_REJECT_WINDOW_MS;
+        }
+        if (action == MotionEvent.ACTION_DOWN) {
+            if (isEraser) {
+                undoLastStroke();
+                return true;
+            }
+            boolean stylusOnly = settings.getBoolean("handwriting_stylus_only", false);
+            if (!isStylus && (stylusOnly || now < stylusPalmRejectUntilMs)) {
+                if (stylusOnly) callback.onStatus("已开启仅手写笔书写");
+                return true;
+            }
+        } else if (action == MotionEvent.ACTION_POINTER_DOWN && !isStylus && now < stylusPalmRejectUntilMs) {
+            return true;
+        }
+        switch (action) {
             case MotionEvent.ACTION_DOWN:
                 int limit = continuous ? MAX_STROKES * CtcHandwritingDecoder.MAX_CHARACTERS : MAX_STROKES;
                 if (strokes.size() >= limit) {
@@ -145,6 +185,7 @@ public final class HandwritingView extends View {
                 activePointer = event.getPointerId(0);
                 currentPath = new Path();
                 currentStroke = new ArrayList<>();
+                currentStrokeWidthScale = stylusWidthScale(event, 0);
                 addPoint(event.getX(), event.getY());
                 callback.onInkChanged(true);
                 callback.onStatus(continuous ? "从左向右书写，可点「分字」" : "单字书写");
@@ -153,6 +194,11 @@ public final class HandwritingView extends View {
             case MotionEvent.ACTION_MOVE:
                 int pointerIndex = event.findPointerIndex(activePointer);
                 if (pointerIndex < 0 || currentStroke == null) return true;
+                if (event.getToolType(pointerIndex) == MotionEvent.TOOL_TYPE_STYLUS) {
+                    stylusPalmRejectUntilMs = now + PALM_REJECT_WINDOW_MS;
+                    float sampleScale = stylusWidthScale(event, pointerIndex);
+                    currentStrokeWidthScale = currentStrokeWidthScale * 0.7f + sampleScale * 0.3f;
+                }
                 for (int i = 0; i < event.getHistorySize(); i++) {
                     addPoint(event.getHistoricalX(pointerIndex, i), event.getHistoricalY(pointerIndex, i));
                 }
@@ -170,9 +216,10 @@ public final class HandwritingView extends View {
                     }
                     strokes.add(currentStroke);
                     paths.add(currentPath);
+                    strokeWidths.add(currentStrokeWidthScale);
                     endStroke();
                     scheduleRecognition();
-                    if (dot && event.getActionMasked() == MotionEvent.ACTION_UP) performClick();
+                    if (dot && action == MotionEvent.ACTION_UP) performClick();
                 }
                 return true;
             case MotionEvent.ACTION_CANCEL:
@@ -297,6 +344,7 @@ public final class HandwritingView extends View {
             int last = strokes.size();
             strokes.remove(last - 1);
             paths.remove(last - 1);
+            if (!strokeWidths.isEmpty()) strokeWidths.remove(strokeWidths.size() - 1);
             segmentEdits.remove(last);
             boundaries.removeIf(end -> end > strokes.size());
             callback.onInkChanged(hasInk());
@@ -317,6 +365,7 @@ public final class HandwritingView extends View {
         cancelRecognition();
         strokes.clear();
         paths.clear();
+        strokeWidths.clear();
         boundaries.clear();
         inkScale = 1f;
         clearEdits();

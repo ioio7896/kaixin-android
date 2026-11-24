@@ -62,11 +62,29 @@ final class StrokeInputDictionary {
         this.traditionalRank = trad;
     }
 
-    static boolean isValidStrokeSequence(String value) {
+    static boolean isConcreteStrokeSequence(String value) {
         if (value == null || value.isEmpty()) return false;
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
             if (c < '1' || c > '5') return false;
+        }
+        return true;
+    }
+
+    static boolean isValidStrokeSequence(String value) {
+        if (value == null || value.isEmpty()) return false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if ((c < '1' || c > '5') && c != '?') return false;
+        }
+        return true;
+    }
+
+    private static boolean matchesWildcardPrefix(String candidate, String pattern) {
+        if (candidate.length() < pattern.length()) return false;
+        for (int i = 0; i < pattern.length(); i++) {
+            char p = pattern.charAt(i);
+            if (p != '?' && candidate.charAt(i) != p) return false;
         }
         return true;
     }
@@ -82,7 +100,8 @@ final class StrokeInputDictionary {
     List<PinyinDictionary.Entry> suggest(String strokes, boolean traditional, int limit) {
         if (!isValidStrokeSequence(strokes) || limit <= 0)
             return Collections.emptyList();
-        if (useNative) {
+        int firstWildcard = strokes.indexOf('?');
+        if (useNative && firstWildcard < 0) {
             List<PinyinDictionary.Entry> nativeResult =
                     PinyinDictionary.suggestStrokeNative(strokes, traditional, limit);
             if (nativeResult != null) return nativeResult;
@@ -91,11 +110,24 @@ final class StrokeInputDictionary {
         Map<Integer, Integer> rank = ensureRanking(traditional);
         LinkedHashSet<Integer> exact = new LinkedHashSet<>();
         LinkedHashSet<Integer> prefix = new LinkedHashSet<>();
-        addCharacters(seqMap.get(strokes), exact);
-        NavigableMap<String, String> range = seqMap.subMap(strokes, true, strokes + '\uffff', true);
-        for (Map.Entry<String, String> row : range.entrySet()) {
-            if (!row.getKey().startsWith(strokes)) break;
-            if (!row.getKey().equals(strokes)) addCharacters(row.getValue(), prefix);
+        if (firstWildcard < 0) {
+            addCharacters(seqMap.get(strokes), exact);
+            NavigableMap<String, String> range = seqMap.subMap(strokes, true, strokes + '\uffff', true);
+            for (Map.Entry<String, String> row : range.entrySet()) {
+                if (!row.getKey().startsWith(strokes)) break;
+                if (!row.getKey().equals(strokes)) addCharacters(row.getValue(), prefix);
+            }
+        } else {
+            String literalPrefix = strokes.substring(0, firstWildcard);
+            Map<String, String> scan = literalPrefix.isEmpty()
+                    ? seqMap : seqMap.subMap(literalPrefix, true, literalPrefix + '\uffff', true);
+            for (Map.Entry<String, String> row : scan.entrySet()) {
+                String candidate = row.getKey();
+                if (!literalPrefix.isEmpty() && !candidate.startsWith(literalPrefix)) break;
+                if (!matchesWildcardPrefix(candidate, strokes)) continue;
+                if (candidate.length() == strokes.length()) addCharacters(row.getValue(), exact);
+                else addCharacters(row.getValue(), prefix);
+            }
         }
         prefix.removeAll(exact);
         Comparator<Integer> byFrequency = Comparator
@@ -172,7 +204,7 @@ final class StrokeInputDictionary {
                 int tab = line.indexOf('\t');
                 if (tab <= 0 || tab + 1 >= line.length()) continue;
                 String key = line.substring(0, tab);
-                if (isValidStrokeSequence(key)) output.put(key, line.substring(tab + 1));
+                if (isConcreteStrokeSequence(key)) output.put(key, line.substring(tab + 1));
             }
         } catch (Exception error) {
             Log.e(TAG, "stroke sequence load failed", error);

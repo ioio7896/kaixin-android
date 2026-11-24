@@ -611,12 +611,44 @@ impl Engine {
             && (correct_spelling || !req.touch_corrections.is_empty())
             && (4..=32).contains(&req.raw.len()) && req.raw.bytes().all(|b| b.is_ascii_lowercase());
 
+        let exact_single_syllable = !numeric
+            && !creation
+            && opt.full
+            && g.start == 0
+            && !constrained
+            && g.raw.bytes().all(|b| b.is_ascii_lowercase())
+            && self.dict.syllables.standard_id(&g.raw).is_some();
+        let single_full_dict_hit = |hit: &RangeHit| {
+            !numeric
+                && !creation
+                && opt.full
+                && hit.src == Src::Dict
+                && hit.start == g.start
+                && hit.end == n
+                && hit.info.tier() == TIER_EXACT_FULL
+                && hit.info.full == 1
+        };
+        let better_candidate = |old_consumed: usize, old_tier: i32, old_cost: i32,
+                                new_consumed: usize, new_tier: i32, new_cost: i32| {
+            if new_consumed != old_consumed {
+                return new_consumed > old_consumed;
+            }
+            if exact_single_syllable && new_consumed == n {
+                let old_exact = old_tier <= TIER_EXACT_FULL;
+                let new_exact = new_tier <= TIER_EXACT_FULL;
+                if new_exact != old_exact {
+                    return new_exact;
+                }
+            }
+            new_cost < old_cost
+        };
+
         let mut by_word: FxHashMap<String, usize> = FxHashMap::default();
         let mut list: Vec<RawCandidate> = Vec::new();
         let push_raw = |list: &mut Vec<RawCandidate>, by_word: &mut FxHashMap<String, usize>, c: RawCandidate| {
             if let Some(&i) = by_word.get(&c.word) {
                 let old = &list[i];
-                if c.consumed > old.consumed || c.consumed == old.consumed && c.cost < old.cost {
+                if better_candidate(old.consumed, old.tier, old.cost, c.consumed, c.tier, c.cost) {
                     list[i] = c;
                 }
             } else {
@@ -628,7 +660,7 @@ impl Engine {
         let direct = || hits.iter().filter(|h| h.start == g.start && !h.completion);
         // Completion filters against all direct words, including those outside the returned list.
         let range_limit = if complete_nine { usize::MAX } else { limit.max(MIN_DIRECT_RANGE_LIMIT) };
-        let bonus_rows = if direct().any(|h| h.src == Src::Dict && h.hi - h.lo > range_limit) {
+        let bonus_rows = if direct().any(|h| h.src == Src::Dict && !single_full_dict_hit(h) && h.hi - h.lo > range_limit) {
             let personal = hits.iter().filter(|hit| hit.start == g.start && hit.src == Src::User)
                 .flat_map(|hit| hit.lo..hit.hi).map(|row| user.word_at(row).word.as_str());
             self.bonus_rows(personal, &user, &ctx, cancel)?
@@ -636,14 +668,15 @@ impl Engine {
             Vec::new()
         };
         for hit in direct() {
-            let take = self.frequency_take(hit, range_limit, cancel)?;
+            let hit_limit = if single_full_dict_hit(hit) { usize::MAX } else { range_limit };
+            let take = self.frequency_take(hit, hit_limit, cancel)?;
             let tier_base = hit.info.tier();
             let end = hit.end;
             self.for_each_expanded(hit, &user, take, &ctx, &bonus_rows, cancel, |word, seq, cost, pinned| {
                 let tier = if pinned { TIER_USER } else { tier_base };
                 if let Some(&i) = by_word.get(word) {
                     let old = &list[i];
-                    if end > old.consumed || (end == old.consumed && cost < old.cost) {
+                    if better_candidate(old.consumed, old.tier, old.cost, end, tier, cost) {
                         list[i].seq = seq;
                         list[i].reading = None;
                         list[i].consumed = end;
@@ -735,6 +768,32 @@ impl Engine {
                 .then(a.word_chars.cmp(&b.word_chars))
                 .then(a.word.cmp(&b.word))
         });
+        // Prevent high-frequency prefix/abbreviation completions from evicting low-frequency
+        // exact single-syllable characters past the candidate limit, while preserving the
+        // relative order of all kept candidates.
+        if exact_single_syllable && list.len() > limit {
+            let exact_count = list
+                .iter()
+                .filter(|c| c.consumed == n && c.tier <= TIER_EXACT_FULL)
+                .count();
+            let mut non_exact_budget = limit.saturating_sub(exact_count);
+            let mut exact_budget = limit;
+            list.retain(|c| {
+                if c.consumed == n && c.tier <= TIER_EXACT_FULL {
+                    if exact_budget > 0 {
+                        exact_budget -= 1;
+                        true
+                    } else {
+                        false
+                    }
+                } else if non_exact_budget > 0 {
+                    non_exact_budget -= 1;
+                    true
+                } else {
+                    false
+                }
+            });
+        }
         cancel.check()?;
         let mut final_list: Vec<Candidate> = Vec::with_capacity(limit.min(list.len()) + CORRECTION_LIMIT);
         let materialize = |raw: RawCandidate| Candidate {

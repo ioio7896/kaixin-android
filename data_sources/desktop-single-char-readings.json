@@ -1,6 +1,7 @@
 {
-  "character_count": 8105,
-  "reading_count": 10909,
+  "common_character_count": 8105,
+  "character_count": 41428,
+  "reading_count": 50040,
   "pinyin_crate_version": "0.10.0",
   "pinyin_data_version": "0.13.0",
   "sources": [

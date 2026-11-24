@@ -42,9 +42,12 @@ public final class KeyButton extends Button {
     interface TouchAction { Runnable action(float x, float y); }
     private TouchAction touchAction;
     private char inputLetter;
+    private int splitSide;
     void setTouchAction(TouchAction action) { touchAction = action; }
     void setInputLetter(char value) { inputLetter = value; }
     char inputLetter() { return inputLetter; }
+    void setSplitSide(int side) { splitSide = side; }
+    int splitSide() { return splitSide; }
     private Runnable alternate;
     private boolean alternateSwipeEnabled = true;
     private int alternateHoldTimeout;
@@ -55,7 +58,9 @@ public final class KeyButton extends Button {
     interface DeleteAction { void delete(boolean first); }
     private java.util.function.Supplier<DeleteAction> deleteAction;
     private Drawable defaultShiftBackground;
-    private boolean shiftUppercase, shiftLocked;
+    private boolean shiftUppercase, shiftLocked, capsHighlighted;
+    private GradientDrawable activeNormalBackground, activePressedBackground;
+    private GradientDrawable defaultNormalBackground, defaultPressedBackground;
     private int symbolIconResource;
     private Drawable symbolIcon;
     private String symbolCaption = "";
@@ -150,7 +155,7 @@ public final class KeyButton extends Button {
         setIncludeFontPadding(false);
         setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         boolean hasSecondaryLabel = this.label.indexOf(' ') >= 0 || this.label.indexOf('\n') >= 0;
-        setTextSize(("空格".equals(this.label) || "Space".equals(this.label)) ? 13
+        setTextSize(("空格".equals(this.label) || this.label.startsWith("Space")) ? 13
                 : this.label.indexOf('\n') >= 0 ? theme.font
                 : hasSecondaryLabel ? Math.max(11, theme.font - 5)
                 : (this.label.length() > 1 ? Math.max(10, theme.font - 4) : theme.font));
@@ -166,6 +171,8 @@ public final class KeyButton extends Button {
         int pressedColor = blend(normalColor, theme.accent, theme.isDark ? 0.32f : 0.22f);
         pressed.setColor(pressedColor); pressed.setCornerRadius(radius);
         pressed.setStroke(1, blend(pressedColor, theme.accent, 0.08f));
+        defaultNormalBackground = activeNormalBackground = normal;
+        defaultPressedBackground = activePressedBackground = pressed;
         StateListDrawable states = new StateListDrawable(); states.addState(new int[]{android.R.attr.state_pressed}, pressed); states.addState(new int[]{}, normal); setBackground(states);
         setElevation((function ? 0f : 0.5f) * getResources().getDisplayMetrics().density);
         setContentDescription(symbolDescription(this.label));
@@ -212,9 +219,9 @@ public final class KeyButton extends Button {
             symbolIconResource = R.drawable.ic_key_backspace;
             symbolCaption = "";
             setText("");
-        } else if ("空格".equals(label) || "Space".equals(label)) {
+        } else if ("空格".equals(label) || label.startsWith("Space")) {
             symbolIconResource = R.drawable.ic_key_space;
-            symbolCaption = "空格".equals(label) ? "空格" : "Space";
+            symbolCaption = label;
             setText("");
         } else if ("回车".equals(label)) {
             symbolIconResource = R.drawable.ic_key_enter;
@@ -347,19 +354,21 @@ public final class KeyButton extends Button {
     private String symbolDescription(String value) {
         if ("⇧".equals(value)) return "大小写切换";
         if ("⌫".equals(value)) return "退格删除";
-        if ("空格".equals(value) || "Space".equals(value)) return "空格";
+        if ("空格".equals(value) || value.startsWith("Space")) return "空格";
         if ("回车".equals(value)) return "回车";
         return value.replace('\n', ' ');
     }
 
     /** A soft accent identifies the primary action. */
     public void setEmphasized(KeyboardTheme theme) {
-        float radius = theme.radius * getResources().getDisplayMetrics().density;
+        float radius = effectiveCornerRadius(getWidth(), getHeight());
         GradientDrawable normal = new GradientDrawable();
         int surface = theme.emphasizedBackground();
         normal.setColor(surface); normal.setCornerRadius(radius);
         GradientDrawable pressed = new GradientDrawable();
         pressed.setColor(blend(surface, theme.accent, 0.18f)); pressed.setCornerRadius(radius);
+        activeNormalBackground = normal;
+        activePressedBackground = pressed;
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed}, pressed);
         states.addState(new int[]{}, normal);
@@ -379,10 +388,15 @@ public final class KeyButton extends Button {
                 : uppercase ? "下一字母大写，双击锁定大写" : "大小写切换，双击锁定大写");
         setTextColor(locked ? theme.accent : theme.text);
         if (!uppercase) {
-            if (initialized) setBackground(defaultShiftBackground);
+            if (initialized) {
+                activeNormalBackground = defaultNormalBackground;
+                activePressedBackground = defaultPressedBackground;
+                updateCornerRadii(getWidth(), getHeight());
+                setBackground(defaultShiftBackground);
+            }
             return;
         }
-        float radius = theme.radius * getResources().getDisplayMetrics().density;
+        float radius = effectiveCornerRadius(getWidth(), getHeight());
         int surface = blend(theme.function, theme.accent, locked ? 0.42f : 0.18f);
         GradientDrawable normal = new GradientDrawable();
         normal.setColor(surface);
@@ -391,10 +405,58 @@ public final class KeyButton extends Button {
         GradientDrawable pressed = new GradientDrawable();
         pressed.setColor(blend(surface, theme.accent, 0.20f));
         pressed.setCornerRadius(radius);
+        activeNormalBackground = normal;
+        activePressedBackground = pressed;
         StateListDrawable states = new StateListDrawable();
         states.addState(new int[]{android.R.attr.state_pressed}, pressed);
         states.addState(new int[]{}, normal);
         setBackground(states);
+    }
+
+    public void setCapsLockState(boolean locked, KeyboardTheme theme) {
+        boolean initialized = defaultShiftBackground != null;
+        if (initialized && capsHighlighted == locked) return;
+        if (!initialized) defaultShiftBackground = getBackground();
+        capsHighlighted = locked;
+        setSelected(locked);
+        setContentDescription(locked ? "大写锁定已开启，点击关闭" : "大写锁定，点击开启");
+        setTextColor(locked ? theme.accent : theme.text);
+        if (!locked) {
+            if (initialized) {
+                activeNormalBackground = defaultNormalBackground;
+                activePressedBackground = defaultPressedBackground;
+                updateCornerRadii(getWidth(), getHeight());
+                setBackground(defaultShiftBackground);
+            }
+            return;
+        }
+        float radius = effectiveCornerRadius(getWidth(), getHeight());
+        int surface = blend(theme.function, theme.accent, 0.36f);
+        GradientDrawable normal = new GradientDrawable();
+        normal.setColor(surface);
+        normal.setCornerRadius(radius);
+        normal.setStroke(dp(2), theme.accent);
+        GradientDrawable pressed = new GradientDrawable();
+        pressed.setColor(blend(surface, theme.accent, 0.20f));
+        pressed.setCornerRadius(radius);
+        activeNormalBackground = normal;
+        activePressedBackground = pressed;
+        StateListDrawable states = new StateListDrawable();
+        states.addState(new int[]{android.R.attr.state_pressed}, pressed);
+        states.addState(new int[]{}, normal);
+        setBackground(states);
+    }
+
+    private float effectiveCornerRadius(int w, int h) {
+        float configured = theme.radius * getResources().getDisplayMetrics().density;
+        if (w <= 0 || h <= 0) return configured;
+        return Math.min(configured, Math.min(w, h) * 0.28f);
+    }
+
+    private void updateCornerRadii(int w, int h) {
+        float radius = effectiveCornerRadius(w, h);
+        if (activeNormalBackground != null) activeNormalBackground.setCornerRadius(radius);
+        if (activePressedBackground != null) activePressedBackground.setCornerRadius(radius);
     }
 
     private int dp(int value) { return (int) (value * getResources().getDisplayMetrics().density + 0.5f); }
@@ -409,15 +471,16 @@ public final class KeyButton extends Button {
 
     @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         super.onSizeChanged(w, h, oldw, oldh);
+        if (w > 0 && h > 0) updateCornerRadii(w, h);
         if (w <= 0 || label.isEmpty()) return;
         if (symbolIconResource != 0) return;
         if (!primaryLabel.isEmpty() || !swipeUpHint.isEmpty()) return;
         if ("⇧".equals(label) || "⌫".equals(label)) return;
         float target = maxFont;
-        if ("空格".equals(label) || "Space".equals(label)) target = 13;
+        if ("空格".equals(label) || label.startsWith("Space")) target = 13;
         else if (label.indexOf(' ') >= 0) target = Math.max(11, maxFont - 5);
         else if (label.length() > 1) target = Math.max(11, maxFont - 4);
-        float available = Math.max(dp(12), w - getPaddingLeft() - getPaddingRight() - dp(12));
+        float available = Math.max(dp(12), w - getPaddingLeft() - getPaddingRight() - dp(6));
         // Always fit from the configured size, not a previously shrunk size.
         android.graphics.Paint measure = new android.graphics.Paint(getPaint());
         float scaledDensity = getResources().getDisplayMetrics().scaledDensity;

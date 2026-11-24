@@ -34,6 +34,14 @@ final class SettingsAppearancePage {
         host.rows.addNumber(content, host.getString(R.string.settings_pref_one_hand_width), "one_hand_width", 70, 90, 80, 10, "%");
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_split_keyboard), "split_keyboard", false);
         host.rows.addNumber(content, host.getString(R.string.settings_pref_split_gap), "split_gap", 1, 4, 2, 1, " 级");
+        host.rows.addChoice(content, host.getString(R.string.settings_pref_split_center_panel), "split_center_panel",
+                host.getResources().getStringArray(R.array.settings_pref_split_center_panel_options),
+                new String[]{"empty", "numpad", "edit"}, "empty");
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_tablet_pc_layout), "tablet_pc_layout", true);
+        host.rows.addChoice(content, host.getString(R.string.settings_pref_tablet_width_mode), "tablet_width_mode",
+                host.getResources().getStringArray(R.array.settings_pref_tablet_width_mode_options),
+                new String[]{"compact", "standard", "full"}, "standard");
+        host.rows.addNumber(content, host.getString(R.string.settings_pref_tablet_edge_margin), "tablet_edge_margin", 0, 32, 0, 4, " dp");
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_floating), "floating", false);
         host.rows.addNumber(content, host.getString(R.string.settings_pref_floating_width), "floating_width", 280,
                 Math.max(280, host.getResources().getConfiguration().screenWidthDp), 340, 10, " dp");

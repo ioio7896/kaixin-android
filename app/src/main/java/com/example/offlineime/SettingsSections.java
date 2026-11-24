@@ -36,8 +36,9 @@ enum SettingsSections {
     /** “外观反馈”恢复默认时清除的键。 */
     static final String[] APPEARANCE_KEYS = {
             "theme", "dark", "appearance_mode", "high_contrast", "one_hand", "one_hand_side", "one_hand_width",
-            "split_keyboard", "split_gap", "floating", "floating_width", "floating_height",
+            "split_keyboard", "split_gap", "split_center_panel", "floating", "floating_width", "floating_height",
             "tablet_preset_portrait", "tablet_preset_landscape",
+            "tablet_pc_layout", "tablet_width_mode", "tablet_edge_margin",
             "floating_width_portrait", "floating_width_landscape", "floating_height_portrait", "floating_height_landscape",
             "floating_x_portrait", "floating_x_landscape", "floating_y_portrait", "floating_y_landscape",
             "key_height_landscape", "key_height", "keyboard_height", "key_font", "key_radius", "key_gap", "key_preview",
@@ -53,7 +54,12 @@ enum SettingsSections {
             "sentence_prediction", "nine_sentence_prediction", "spelling_correction", "touch_correction",
             "fuzzy_pinyin", "fuzzy_zh_z", "fuzzy_ch_c", "fuzzy_sh_s", "fuzzy_n_l", "fuzzy_h_f",
             "fuzzy_an_ang", "fuzzy_en_eng", "fuzzy_in_ing", "fuzzy_ian_iang", "handwriting_delay",
-            "handwriting_continuous", "handwriting_line_delay", "auto_commit", "space_behavior",
+            "handwriting_continuous", "handwriting_line_delay", "handwriting_stylus_only",
+            VoiceSettings.PREF_PAUSE_SENSITIVITY, VoiceSettings.PREF_AUTO_PUNCTUATION,
+            VoiceSettings.PREF_SPOKEN_PUNCTUATION, VoiceSettings.PREF_ITN_NUMBERS,
+            VoiceSettings.PREF_COMMIT_MODE, VoiceSettings.PREF_SILENCE_TIMEOUT,
+            VoiceSettings.PREF_CUSTOM_HOTWORDS,
+            "hw_keyboard_enabled", "hw_keyboard_hide_soft", "auto_commit", "space_behavior",
             "candidate_count"
     };
 

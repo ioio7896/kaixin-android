@@ -56,6 +56,8 @@
     <string name="clipboard_expiry_forever">永久保留</string>
     <string name="clipboard_expiry_days">剩余%1$d天</string>
     <string name="clipboard_entry_metadata">%1$s · %2$s · %3$d字</string>
+    <string name="clipboard_entry_pinned_time">固定 · %1$s</string>
+    <string name="panel_search_query">🔍 %1$s</string>
     <string name="custom_words_summary">主动保存 %1$d 个词 · 当前找到 %2$d 个词</string>
     <string name="custom_words_show_more">再显示 %1$d 个词</string>
     <string name="candidate_count">%1$d 个</string>
@@ -269,4 +271,55 @@
         <item>30 天</item>
         <item>永久</item>
     </string-array>
+    <string name="settings_pref_tablet_pc_layout">平板 PC 全键盘（数字行+标点）</string>
+    <string name="settings_pref_qwerty_number_row">26键显示顶部数字行</string>
+    <string name="settings_pref_qwerty_bottom_punctuation">26键底行显示逗号和句号</string>
+    <string name="settings_pref_qwerty_swipe_symbols">26键全拼上滑输入数字和符号</string>
+    <string name="settings_pref_tablet_width_mode">平板居中宽度</string>
+    <string-array name="settings_pref_tablet_width_mode_options">
+        <item>紧凑 (720dp)</item>
+        <item>标准 (860dp)</item>
+        <item>铺满屏幕</item>
+    </string-array>
+    <string name="settings_pref_tablet_edge_margin">平板边缘防误触边距</string>
+    <string name="settings_pref_split_center_panel">分离键盘中间区</string>
+    <string-array name="settings_pref_split_center_panel_options">
+        <item>留空</item>
+        <item>数字小键盘</item>
+        <item>编辑快捷键</item>
+    </string-array>
+    <string name="settings_input_hardware_keyboard">外接实体键盘</string>
+    <string name="settings_pref_hw_keyboard_enabled">启用外接实体键盘中文输入</string>
+    <string name="settings_pref_hw_keyboard_hide_soft">接实体键盘时仅显示精简候选条</string>
+    <string name="settings_pref_handwriting_stylus_only">仅允许手写笔书写（防误触）</string>
+    <string name="hw_keyboard_bar_hint">Shift / Ctrl+Space 切换中英 · 1–9 选词 · -/= 翻页</string>
+    <string name="settings_input_voice">离线语音输入</string>
+    <string name="settings_pref_voice_pause_sensitivity">停顿断句灵敏度</string>
+    <string-array name="settings_pref_voice_pause_sensitivity_options">
+        <item>快速 0.8秒</item>
+        <item>标准 1.4秒</item>
+        <item>从容 2.2秒</item>
+    </string-array>
+    <string name="settings_pref_voice_auto_punctuation">自动添加标点（含逗号与问叹号）</string>
+    <string name="settings_pref_voice_spoken_punctuation">口语标点指令（说“逗号/句号/换行”）</string>
+    <string name="settings_pref_voice_itn_numbers">数字、日期与时间智能转换</string>
+    <string name="settings_pref_voice_commit_mode">识别上屏方式</string>
+    <string-array name="settings_pref_voice_commit_mode_options">
+        <item>完成后统一上屏</item>
+        <item>停顿分段实时上屏</item>
+    </string-array>
+    <string name="settings_pref_voice_silence_timeout">无声自动停止</string>
+    <string-array name="settings_pref_voice_silence_timeout_options">
+        <item>关闭</item>
+        <item>6 秒</item>
+        <item>10 秒</item>
+    </string-array>
+    <string name="settings_pref_voice_custom_hotwords">结合自定义词库增强热词识别</string>
+    <string name="settings_help_voice_input">离线语音全程在本机完成，支持长按工具栏语音键直接说话。</string>
+    <string name="settings_help_voice_input_detail">点击工具栏语音按钮进入连续听写面板，长按语音按钮可直接按住说话、松手立即上屏（上滑取消）。自定义词库热词仅在内存生效、不写入文件，开启隐私模式时自动停用。录音期间会自动暂停外放媒体并保持屏幕常亮。</string>
+    <string name="voice_timer">%1$02d:%2$02d</string>
+    <string name="voice_draft_banner">上次未上屏：%1$s</string>
+    <string name="voice_finish_and_action">上屏并%1$s</string>
+    <string name="voice_placeholder_confirm">请说普通话，识别结果会显示在这里</string>
+    <string name="voice_placeholder_segment">请说普通话，停顿后将自动分段上屏</string>
 </resources>

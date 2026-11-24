@@ -1,6 +1,8 @@
 use kaixin_engine::compile;
 use kaixin_engine::dict::{Backing, Dict, Field, FLAG_CORE, VERSION};
-use kaixin_engine::engine::{parse_parts, split_all};
+use kaixin_engine::engine::{
+    parse_parts, split_all, Engine, Request, F_FULL, F_SHORT, MODE_PINYIN, TIER_EXACT_FULL,
+};
 use kaixin_engine::graph::Part;
 use kaixin_engine::syllable::{Syllables, STANDARD};
 use kaixin_engine::user::UserModel;
@@ -139,4 +141,128 @@ fn personal_data_round_trips_learned_words_and_context() {
     assert_eq!(restored.bonus("你好", &reading, 500), 3_000);
     assert_eq!(restored.english_prefix("hel", 500)[0].0, "Hello");
     assert_eq!(restored.predict("大家", "你好"), [("世界".into(), 12)]);
+}
+
+#[test]
+fn standard_syllables_and_entered_prefix_cover_rare_and_umlaut_spellings() {
+    let syllables = standard_syllables();
+    for syl in ["biang", "cei", "fiao", "kei", "tei"] {
+        assert!(
+            syllables.standard_id(syl).is_some(),
+            "expected '{syl}' in STANDARD syllables"
+        );
+    }
+    assert!(syllables.is_entered_prefix("lue"));
+    assert!(syllables.is_entered_prefix("nue"));
+    assert_eq!(syllables.standard_id("lue"), syllables.standard_id("lve"));
+    assert_eq!(syllables.standard_id("nue"), syllables.standard_id("nve"));
+}
+
+#[test]
+fn compiled_dictionary_includes_supplemental_and_rare_syllable_single_chars() {
+    let fixture = Fixture::new();
+    for folder in ["lexicon/core", "lexicon/zh", "lexicon/zh-ext"] {
+        fs::create_dir_all(fixture.0.join(folder)).unwrap();
+    }
+    for file in [
+        "lexicon/en/kaixin_common_english.txt",
+        "lexicon/en/kaixin_mixed_100.txt",
+        "app/src/main/assets/lexicon-corrections/rules.tsv",
+        "app/src/main/assets/lexicon-corrections/idioms.txt",
+        "app/src/main/assets/lexicon-corrections/organizations.txt",
+        "app/src/main/assets/language-model/collocations.tsv",
+    ] {
+        fixture.write(file, "");
+    }
+    fixture.write(
+        "data_sources/desktop_single_char_readings.txt",
+        "忒\ttei\t800\n刻\tkei\t600\n略\tlve\t5000\n",
+    );
+    let output = fixture.0.join("singles.dict");
+    compile::build(&fixture.0, &output, None).unwrap();
+    let engine = Engine::new(Backing::Owned(fs::read(output).unwrap())).unwrap();
+
+    for (raw, expected) in [
+        ("tei", "忒"),
+        ("kei", "刻"),
+        ("lue", "略"),
+        ("ling", "〇"),
+        ("tong", "々"),
+        ("shen", "谌"),
+        ("lao", "乐"),
+        ("yao", "乐"),
+    ] {
+        let found = engine.query(&Request {
+            mode: MODE_PINYIN,
+            raw,
+            parts: None,
+            prev2: "",
+            prev: "",
+            flags: F_FULL | F_SHORT,
+            limit: 64,
+            touch_corrections: &[],
+        });
+        assert!(
+            found.iter().any(|c| c.word == expected && c.tier <= TIER_EXACT_FULL),
+            "expected '{expected}' as exact candidate for '{raw}', got {:?}",
+            found.iter().map(|c| &c.word).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn single_syllable_query_never_evicts_low_frequency_exact_chars_under_limit() {
+    let fixture = Fixture::new();
+    for folder in ["lexicon/core", "lexicon/zh", "lexicon/zh-ext"] {
+        fs::create_dir_all(fixture.0.join(folder)).unwrap();
+    }
+    for file in [
+        "lexicon/en/kaixin_common_english.txt",
+        "lexicon/en/kaixin_mixed_100.txt",
+        "app/src/main/assets/lexicon-corrections/rules.tsv",
+        "app/src/main/assets/lexicon-corrections/idioms.txt",
+        "app/src/main/assets/lexicon-corrections/organizations.txt",
+        "app/src/main/assets/language-model/collocations.tsv",
+    ] {
+        fixture.write(file, "");
+    }
+    let mut singles = String::new();
+    // 10 exact "xi" characters including very low frequency ones (score = 1)
+    let exact_chars = ['西', '希', '喜', '洗', '系', '戏', '细', '习', '夕', '兮'];
+    for (idx, ch) in exact_chars.iter().enumerate() {
+        let score = if idx < 5 { 9000 - idx * 500 } else { 1 };
+        singles.push_str(&format!("{ch}\txi\t{score}\n"));
+    }
+    // 40 high-frequency prefix "xian" / "xiao" characters that outscore score=1 even with prefix penalty
+    let prefix_chars = "先现线县限显险鲜闲献贤咸嫌衔掀仙纤弦馅腺小笑校效消销晓肖萧孝硝削哮嚣宵潇霄逍晓晓";
+    for (idx, ch) in prefix_chars.chars().enumerate() {
+        let syl = if idx < 20 { "xian" } else { "xiao" };
+        singles.push_str(&format!("{ch}\t{syl}\t9500\n"));
+    }
+    fixture.write("data_sources/desktop_single_char_readings.txt", &singles);
+
+    let output = fixture.0.join("evict.dict");
+    compile::build(&fixture.0, &output, None).unwrap();
+    let engine = Engine::new(Backing::Owned(fs::read(output).unwrap())).unwrap();
+
+    // Limit = 16 is much smaller than total candidates (~50), but larger than exact_chars (10).
+    let found = engine.query(&Request {
+        mode: MODE_PINYIN,
+        raw: "xi",
+        parts: None,
+        prev2: "",
+        prev: "",
+        flags: F_FULL | F_SHORT,
+        limit: 16,
+        touch_corrections: &[],
+    });
+    assert_eq!(found.len(), 16);
+    for ch in exact_chars {
+        let s = ch.to_string();
+        assert!(
+            found.iter().any(|c| c.word == s),
+            "exact single char '{s}' was evicted from top-16 for 'xi': {:?}",
+            found.iter().map(|c| &c.word).collect::<Vec<_>>()
+        );
+    }
 }

@@ -1,0 +1,52 @@
+# 阶段性网络热词 49 条（温和权重，按季度复审归档）
+# Source: data_sources/kaixin/seasonal_hot_terms.tsv; scripts/lexicon_quality.py --apply
+# 词语<TAB>全拼<TAB>人工排序分数（1—10000）；不代表实测用户词频。
+不烧心	bu shao xin	4800
+丑东西	chou dong xi	4800
+丑萌	chou meng	4800
+世界巡演	shi jie xun yan	4800
+养龙虾	yang long xia	4800
+助我破鼎	zhu wo po ding	4800
+反向带娃	fan xiang dai wa	4800
+发疯文学	fa feng wen xue	4800
+嘴替文学	zui ti wen xue	4800
+噜噜操	lu lu cao	4800
+大水理论	da shui li lun	4800
+大睡理论	da shui li lun	4800
+太阳之子	tai yang zhi zi	4800
+宿命对视	su ming dui shi	4800
+宿命感	su ming gan	4800
+已读不回	yi du bu hui	4800
+已读乱回	yi du luan hui	4800
+情绪价值	qing xu jia zhi	4800
+情绪搭子	qing xu da zi	4800
+情绪稳定	qing xu wen ding	4800
+抽象文化	chou xiang wen hua	4800
+搭子文化	da zi wen hua	4800
+敬自己一杯	jing zi ji yi bei	4800
+村咖	cun ka	4800
+松弛感	song chi gan	4800
+样人笑幻	yang ren xiao huan	4800
+沉浸式体验	chen jin shi ti yan	4800
+活人感	huo ren gan	4800
+浪子踢球	lang zi ti qiu	4800
+浪浪山小妖怪	lang lang shan xiao yao guai	4800
+爱你老己	ai ni lao ji	4800
+狗熊哆嗦毛	gou xiong duo suo mao	4800
+班味	ban wei	4800
+电子榨菜	dian zi zha cai	4800
+破碎感	po sui gan	4800
+神之八秒	shen zhi ba miao	4800
+精神内耗	jing shen nei hao	4800
+红果体	hong guo ti	4800
+给自己充电	gei zi ji chong dian	4800
+蓝色大肥鱼	lan se da fei yu	4800
+薄肌理论	bao ji li lun	4800
+规矩体	gui ju ti	4800
+认祖归洲	ren zu gui zhou	4800
+赛博养龙虾	sai bo yang long xia	4800
+赛博对账	sai bo dui zhang	4800
+野生狗奶	ye sheng gou nai	4800
+钝感力	dun gan li	4800
+闪身步	shan shen bu	4800
+预制人生	yu zhi ren sheng	4800

@@ -1,30 +1,53 @@
-# Android candidate corrections over the mirrored desktop lexicon.
+# Android candidate corrections over the mirrored desktop lexicon (26 zh-ext categories).
 # cap<TAB>source path<TAB>maximum score
 # cap-prefix<TAB>source path prefix<TAB>maximum score
 # cap-word<TAB>source path<TAB>word<TAB>maximum score
 # scale-prefix<TAB>source path prefix<TAB>percentage (longest prefix wins)
 # exclude<TAB>source path<TAB>word (the replacement is in this directory)
+
+# Base tier for default-enabled zh-ext categories (12 categories).
 scale-prefix	zh-ext/	80
-scale-prefix	zh-ext/category_	65
-scale-prefix	zh-ext/category_common_	95
-scale-prefix	zh-ext/category_chat_	90
-scale-prefix	zh-ext/category_life_daily.txt	90
 scale-prefix	zh-ext/daily_communication.txt	90
-scale-prefix	zh-ext/category_proper_	65
-scale-prefix	zh-ext/professional_	60
+scale-prefix	zh-ext/category_life_daily.txt	90
 cap	zh-ext/animals.txt	3500
+cap	zh-ext/geography_admin.txt	4500
+
+# 14 desktop default-disabled categories: dampened & capped so Android's unified
+# dictionary never lets niche/domain entries hijack everyday words.
+scale-prefix	zh-ext/hangzhou_local.txt	60
+cap	zh-ext/hangzhou_local.txt	3500
+scale-prefix	zh-ext/technology.txt	60
+cap	zh-ext/technology.txt	3500
+scale-prefix	zh-ext/category_medical.txt	60
+cap	zh-ext/category_medical.txt	3500
+scale-prefix	zh-ext/medicine.txt	60
 cap	zh-ext/medicine.txt	3500
-cap-prefix	zh-ext/professional_	3500
-cap	zh-ext/category_proper_places.txt	3500
-cap	zh-ext/category_proper_organizations.txt	3500
-cap	zh-ext/category_proper_people.txt	2000
+scale-prefix	zh-ext/category_finance.txt	60
+cap	zh-ext/category_finance.txt	3500
+scale-prefix	zh-ext/category_law.txt	60
+cap	zh-ext/category_law.txt	3500
+scale-prefix	zh-ext/category_science.txt	60
+cap	zh-ext/category_science.txt	3500
+scale-prefix	zh-ext/category_engineering.txt	60
+cap	zh-ext/category_engineering.txt	3500
+scale-prefix	zh-ext/category_humanities.txt	60
+cap	zh-ext/category_humanities.txt	3500
+scale-prefix	zh-ext/category_idioms.txt	75
+cap	zh-ext/category_idioms.txt	4000
+scale-prefix	zh-ext/people_names.txt	75
+cap	zh-ext/people_names.txt	1200
+scale-prefix	zh-ext/category_proper_organizations.txt	65
+cap	zh-ext/category_proper_organizations.txt	3000
+scale-prefix	zh-ext/category_common_three.txt	80
+cap	zh-ext/category_common_three.txt	3800
+scale-prefix	zh-ext/category_common_four.txt	80
+cap	zh-ext/category_common_four.txt	3800
+
+# Per-word guards for rare/outlier entries.
 cap-word	zh-ext/animals.txt	蚿	900
 cap-word	zh-ext/animals.txt	蛴螬	1200
 cap-word	zh-ext/animals.txt	莽牯朱蛤	1200
 cap-word	zh-ext/medicine.txt	克唑替尼	1500
 cap-word	zh-ext/category_idioms.txt	击壤鼓腹	1000
-cap-word	zh-ext/category_idioms.txt	忍辱念垢	1000
 cap-word	zh-ext/category_idioms.txt	龙骧虎步	1000
-exclude	zh-ext/category_proper_people.txt	大展宏图
-exclude	zh-ext/category_proper_people.txt	衣冠楚楚
 exclude	zh-ext/category_idioms.txt	上海联家超市有限公司

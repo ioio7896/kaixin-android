@@ -167,6 +167,65 @@ class Recognizer::Impl {
     }
   }
 
+  std::unique_ptr<Stream> CreateStream(const std::string &hotwords_text,
+                                       float hotwords_score) const {
+    if (hotwords_text.empty() ||
+        config_.decoder_config.method != "modified_beam_search") {
+      return CreateStream();
+    }
+    std::vector<std::vector<int32_t>> hotwords;
+    std::vector<float> scores;
+    std::istringstream is(hotwords_text);
+    std::string line;
+    while (std::getline(is, line)) {
+      std::istringstream iss(line);
+      std::string word;
+      std::vector<int32_t> tmp;
+      float tmp_score = 0.0f;
+      bool valid = true;
+      while (iss >> word) {
+        if (!word.empty() && word[0] == ':' && word.size() > 1) {
+          try {
+            tmp_score = std::stof(word.substr(1));
+          } catch (...) {
+            valid = false;
+            break;
+          }
+        } else if (sym_.contains(word)) {
+          tmp.push_back(sym_[word]);
+        } else {
+          valid = false;
+          break;
+        }
+      }
+      if (valid && !tmp.empty()) {
+        hotwords.push_back(std::move(tmp));
+        scores.push_back(tmp_score);
+      }
+    }
+    if (hotwords.empty()) {
+      return CreateStream();
+    }
+    auto r = decoder_->GetEmptyResult();
+    auto context_graph =
+        std::make_shared<ContextGraph>(hotwords, hotwords_score, scores);
+    auto stream =
+        std::make_unique<Stream>(config_.feat_config, context_graph);
+    if (stream->GetContextGraph()) {
+      for (auto it = r.hyps.begin(); it != r.hyps.end(); ++it) {
+        it->second.context_state = stream->GetContextGraph()->Root();
+      }
+    }
+    stream->SetResult(r);
+    stream->SetStates(model_->GetEncoderInitStates());
+    return stream;
+  }
+
+  void SetEndpointConfig(const EndpointConfig &config) {
+    config_.endpoint_config = config;
+    endpoint_ = Endpoint(config);
+  }
+
   bool IsReady(Stream *s) const {
     return s->GetNumProcessedFrames() + model_->Segment() < s->NumFramesReady();
   }
@@ -332,6 +391,15 @@ Recognizer::~Recognizer() = default;
 
 std::unique_ptr<Stream> Recognizer::CreateStream() const {
   return impl_->CreateStream();
+}
+
+std::unique_ptr<Stream> Recognizer::CreateStream(
+    const std::string &hotwords_text, float hotwords_score) const {
+  return impl_->CreateStream(hotwords_text, hotwords_score);
+}
+
+void Recognizer::SetEndpointConfig(const EndpointConfig &config) {
+  impl_->SetEndpointConfig(config);
 }
 
 bool Recognizer::IsReady(Stream *s) const { return impl_->IsReady(s); }

@@ -77,6 +77,33 @@ final class SettingsInputLayoutPage {
         host.rows.addChoice(content, host.getString(R.string.settings_pref_handwriting_line_delay), "handwriting_line_delay",
                 host.getResources().getStringArray(R.array.settings_pref_handwriting_line_delay_options),
                 new String[]{"650", "900", "1300", "1800"}, "900");
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_handwriting_stylus_only), "handwriting_stylus_only", false);
+        host.addSubheading(content, host.getString(R.string.settings_input_voice));
+        host.rows.addChoice(content, host.getString(R.string.settings_pref_voice_pause_sensitivity),
+                VoiceSettings.PREF_PAUSE_SENSITIVITY,
+                host.getResources().getStringArray(R.array.settings_pref_voice_pause_sensitivity_options),
+                new String[]{"fast", "standard", "slow"}, "standard");
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_voice_auto_punctuation),
+                VoiceSettings.PREF_AUTO_PUNCTUATION, true);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_voice_spoken_punctuation),
+                VoiceSettings.PREF_SPOKEN_PUNCTUATION, false);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_voice_itn_numbers),
+                VoiceSettings.PREF_ITN_NUMBERS, true);
+        host.rows.addChoice(content, host.getString(R.string.settings_pref_voice_commit_mode),
+                VoiceSettings.PREF_COMMIT_MODE,
+                host.getResources().getStringArray(R.array.settings_pref_voice_commit_mode_options),
+                new String[]{"confirm", "segment"}, "confirm");
+        host.rows.addChoice(content, host.getString(R.string.settings_pref_voice_silence_timeout),
+                VoiceSettings.PREF_SILENCE_TIMEOUT,
+                host.getResources().getStringArray(R.array.settings_pref_voice_silence_timeout_options),
+                new String[]{"0", "6", "10"}, "10");
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_voice_custom_hotwords),
+                VoiceSettings.PREF_CUSTOM_HOTWORDS, true);
+        host.rows.addExpandableHelp(content, host.getString(R.string.settings_help_voice_input),
+                host.getString(R.string.settings_help_voice_input_detail));
+        host.addSubheading(content, host.getString(R.string.settings_input_hardware_keyboard));
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_hw_keyboard_enabled), "hw_keyboard_enabled", true);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_hw_keyboard_hide_soft), "hw_keyboard_hide_soft", true);
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_auto_commit), "auto_commit", false);
         host.rows.addChoice(content, host.getString(R.string.settings_pref_space_behavior), "space_behavior",
                 host.getResources().getStringArray(R.array.settings_pref_space_behavior_options), new String[]{"select", "space"});
@@ -89,6 +116,9 @@ final class SettingsInputLayoutPage {
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_toolbar), "toolbar", true);
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_show_mode), "show_mode", true);
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_show_composing), "show_composing", true);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_qwerty_number_row), "qwerty_number_row", false);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_qwerty_bottom_punctuation), "qwerty_bottom_punctuation", true);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_qwerty_swipe_symbols), "qwerty_swipe_symbols", true);
         host.addSubheading(content, host.getString(R.string.settings_layout_toolbar));
         addToolbarCustomization(content);
     }

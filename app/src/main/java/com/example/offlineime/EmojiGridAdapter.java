@@ -45,12 +45,12 @@ final class EmojiGridAdapter extends BaseAdapter {
         rows.clear();
         for (int from = 0; from < values.size();) {
             boolean text = EmojiCatalog.isTextFace(values.get(from));
-            int columns = text ? Math.max(1, Math.min(4, width / 155))
-                    : Math.max(1, Math.min(14, width / 48));
+            int columns = text ? Math.max(1, Math.min(4, width / 135))
+                    : Math.max(1, Math.min(14, width / 42));
             int end = from + 1;
             while (end < values.size() && end - from < columns
                     && EmojiCatalog.isTextFace(values.get(end)) == text) end++;
-            int height = text ? 48 : Math.max(42, Math.min(60, width / columns));
+            int height = text ? 44 : Math.max(40, Math.min(48, width / columns));
             rows.add(new Row(values.subList(from, end), columns, height, text));
             from = end;
         }
@@ -81,7 +81,8 @@ final class EmojiGridAdapter extends BaseAdapter {
             String output = EmojiPreferences.preferred(prefs, catalog, glyph);
             tile.setVisibility(View.VISIBLE);
             tile.setText(output);
-            tile.setTextSize(row.text ? 17 : 25);
+            tile.setTextSize(row.text ? 15 : 23);
+            tile.setPadding(row.text ? dp(3) : 0, 0, row.text ? dp(3) : 0, 0);
             tile.setTextColor(theme.text);
             tile.setContentDescription(catalog.description(output));
             tile.setOnClickListener(v -> commit.accept(output));

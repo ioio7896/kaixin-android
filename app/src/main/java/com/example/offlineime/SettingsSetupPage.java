@@ -18,9 +18,11 @@ final class SettingsSetupPage {
     private final SettingsActivity host;
     private View homeSetupCard, homeSetupLink;
     private int state = -1;
+    private boolean micGranted;
     private TextView homeSetupTitle, homeSetupDescription, homeSetupAction;
     private TextView setupStatus, setupStatusDescription, enableStepNumber, enableStepState;
     private TextView pickerStepNumber, pickerStepState, enableSetupAction, pickerSetupAction;
+    private TextView micStepNumber, micStepState, micSetupAction;
 
     SettingsSetupPage(SettingsActivity host) {
         this.host = host;
@@ -76,6 +78,7 @@ final class SettingsSetupPage {
     void releaseDetails() {
         setupStatus = setupStatusDescription = enableStepNumber = enableStepState = null;
         pickerStepNumber = pickerStepState = enableSetupAction = pickerSetupAction = null;
+        micStepNumber = micStepState = micSetupAction = null;
     }
 
     LinearLayout createSetupDetails() {
@@ -114,6 +117,7 @@ final class SettingsSetupPage {
             InputMethodManager manager = (InputMethodManager) host.getSystemService(Context.INPUT_METHOD_SERVICE);
             if (manager != null) manager.showInputMethodPicker();
         });
+        addOptionalMicStep(page);
 
         TextView tip = host.text("完成后返回此页，状态会自动更新。以后也可以在输入框的键盘切换按钮中更换输入法。",
                 13, palette.textSecondary);
@@ -197,10 +201,63 @@ final class SettingsSetupPage {
                 && OfflineImeService.class.getName().equals(selected.getClassName()) ? 2 : 1;
     }
 
+    private void addOptionalMicStep(LinearLayout page) {
+        UiTokens.Palette palette = host.palette();
+        LinearLayout card = new LinearLayout(host);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(host.dp(16), host.dp(17), host.dp(16), host.dp(16));
+        LinearLayout heading = new LinearLayout(host);
+        heading.setGravity(Gravity.CENTER_VERTICAL);
+        TextView number = host.text("3", 15, palette.accent);
+        number.setGravity(Gravity.CENTER);
+        number.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        heading.addView(number, new LinearLayout.LayoutParams(host.dp(32), host.dp(32)));
+        TextView label = host.text("离线语音权限（可选）", 17, palette.textPrimary);
+        label.setTypeface(android.graphics.Typeface.create("sans-serif-medium", android.graphics.Typeface.NORMAL));
+        LinearLayout.LayoutParams labelParams = new LinearLayout.LayoutParams(0, -2, 1);
+        labelParams.leftMargin = host.dp(10);
+        heading.addView(label, labelParams);
+        TextView permState = host.text("未开启", 12, palette.textSecondary);
+        heading.addView(permState);
+        card.addView(heading);
+        TextView detail = host.text("允许录音权限即可使用离线语音输入；所有语音均在本机识别，不保存录音、不联网。", 14, palette.textSecondary);
+        detail.setLineSpacing(host.dp(3), 1f);
+        LinearLayout.LayoutParams detailParams = new LinearLayout.LayoutParams(-1, -2);
+        detailParams.topMargin = host.dp(10);
+        card.addView(detail, detailParams);
+        TextView action = host.text("允许录音权限  ›", 15, Color.WHITE);
+        action.setGravity(Gravity.CENTER);
+        action.setTypeface(android.graphics.Typeface.DEFAULT, android.graphics.Typeface.BOLD);
+        action.setOnClickListener(v -> host.startActivity(new Intent(host, VoicePermissionActivity.class)));
+        action.setMinimumHeight(host.dp(UiTokens.MIN_TOUCH));
+        LinearLayout.LayoutParams actionParams = new LinearLayout.LayoutParams(-1, -2);
+        actionParams.topMargin = host.dp(16);
+        card.addView(action, actionParams);
+        LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(-1, -2);
+        cardParams.topMargin = host.dp(12);
+        page.addView(card, cardParams);
+        host.bindPalette(card, () -> {
+            UiTokens.Palette current = host.palette();
+            card.setBackground(host.roundRect(current.surface, SettingsUi.CARD_RADIUS));
+            label.setTextColor(current.textPrimary);
+            detail.setTextColor(current.textSecondary);
+        });
+        micStepNumber = number;
+        micStepState = permState;
+        micSetupAction = action;
+    }
+
+    private boolean isMicGranted() {
+        return host.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                == android.content.pm.PackageManager.PERMISSION_GRANTED;
+    }
+
     void refresh() {
         int current = inputMethodSetupState();
-        if (state == current) return;
+        boolean currentMic = isMicGranted();
+        if (state == current && micGranted == currentMic) return;
         state = current;
+        micGranted = currentMic;
         renderState();
     }
 
@@ -232,6 +289,15 @@ final class SettingsSetupPage {
         pickerStepNumber.setTextColor(state > 0 ? palette.accent : palette.textSecondary);
         enableStepState.setTextColor(state > 0 ? palette.accent : palette.textSecondary);
         pickerStepState.setTextColor(state == 2 ? palette.accent : palette.textSecondary);
+        if (micStepNumber != null) {
+            micStepNumber.setText(micGranted ? "✓" : "3");
+            micStepNumber.setBackground(host.roundRect(micGranted ? palette.accentSoft : palette.surfaceMuted, 10));
+            micStepNumber.setTextColor(micGranted ? palette.accent : palette.textSecondary);
+            micStepState.setText(micGranted ? "已允许" : "可选");
+            micStepState.setTextColor(micGranted ? palette.accent : palette.textSecondary);
+            micSetupAction.setText(micGranted ? "已获得录音权限" : "允许录音权限  ›");
+            styleSetupAction(micSetupAction, false, !micGranted);
+        }
     }
 
     private void styleSetupAction(TextView action, boolean primary, boolean enabled) {

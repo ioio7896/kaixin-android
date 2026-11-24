@@ -203,8 +203,24 @@ final class ComposingSessionController {
 
     String currentPinyinPath(OfflineImeService.Mode mode, boolean shuangpinMode, boolean sensitive,
                              List<PinyinPathEditor.Segment> segments) {
-        if (sensitive || buffer.length() == 0
-                || mode != OfflineImeService.Mode.PINYIN && mode != OfflineImeService.Mode.NINE) {
+        if (sensitive || buffer.length() == 0) return "";
+        if (mode == OfflineImeService.Mode.STROKE) {
+            StringBuilder display = new StringBuilder(buffer.length());
+            for (int i = 0; i < buffer.length(); i++) {
+                char c = buffer.charAt(i);
+                switch (c) {
+                    case '1': display.append('一'); break;
+                    case '2': display.append('丨'); break;
+                    case '3': display.append('丿'); break;
+                    case '4': display.append('丶'); break;
+                    case '5': display.append('乛'); break;
+                    case '?': display.append('？'); break;
+                    default: display.append(c); break;
+                }
+            }
+            return display.toString();
+        }
+        if (mode != OfflineImeService.Mode.PINYIN && mode != OfflineImeService.Mode.NINE) {
             return "";
         }
         boolean nineKey = mode == OfflineImeService.Mode.NINE;

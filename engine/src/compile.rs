@@ -103,12 +103,62 @@ enum ScoreMerge {
     Override,
 }
 
+/// Supplemental single-character readings missing from `pinyin-data 0.13.0`
+/// (e.g. CJK symbols `〇`/`々`, compatibility ideographs, and common polyphone readings).
+const SUPPLEMENTAL_SINGLE_CHAR_READINGS: &[(&str, &str, u32)] = &[
+    ("〇", "ling", 3_600),
+    ("々", "tong", 600),
+    ("灰", "hui", 1),
+    ("谌", "shen", 400),
+    ("乐", "lao", 200),
+    ("乐", "yao", 200),
+    ("骑", "ji", 120),
+    ("恒", "geng", 100),
+    ("阏", "yu", 120),
+    ("缪", "liao", 120),
+    ("溉", "ji", 80),
+    ("齐", "zi", 80),
+];
+
+fn is_hanzi_only(word: &str) -> bool {
+    !word.is_empty()
+        && word.chars().all(|ch| {
+            matches!(
+                ch as u32,
+                0x3005
+                    | 0x3007
+                    | 0x3400..=0x4DBF
+                    | 0x4E00..=0x9FFF
+                    | 0xF900..=0xFAFF
+                    | 0x20000..=0x323AF
+            )
+        })
+}
+
 impl Builder {
     fn add(&mut self, source: &str, word: &str, reading: &str, score: u32, flags: u8, merge: ScoreMerge) {
         let word = word.trim();
+        if word.is_empty() {
+            self.skipped += 1;
+            return;
+        }
+        // Mixed/tech entries (e.g. C++ -> cpp, C# -> csharp, SQLite -> sqlite, B站 -> b zhan)
+        // cannot match Hanzi-per-syllable rules; route valid multi-letter ASCII codes to ALPHA_MIXED.
+        if !is_hanzi_only(word) {
+            let code: String = reading.split_whitespace().collect();
+            let valid_code = code.len() >= 2
+                && code.len() <= MAX_WORD_SYLLABLES
+                && code.bytes().all(|b| b.is_ascii_lowercase());
+            if !valid_code {
+                self.skipped += 1;
+                return;
+            }
+            let Some(score) = self.rules.apply(source, word, score) else { return };
+            self.alpha.push((code, word.to_string(), score, ALPHA_MIXED));
+            return;
+        }
         let syllables: Vec<&str> = reading.split_whitespace().map(canonical_syllable).collect();
-        let valid = !word.is_empty()
-            && !syllables.is_empty()
+        let valid = !syllables.is_empty()
             && syllables.len() <= MAX_WORD_SYLLABLES
             && syllables.len() == word.chars().count()
             && syllables
@@ -189,9 +239,17 @@ pub fn build(root: &Path, out: &Path, emoji_catalog: Option<&Path>) -> Result<Su
         }
     }
     let singles = root.join("data_sources/desktop_single_char_readings.txt");
+    let words_before_singles = b.words.len();
     b.load_three_column(root, &singles, FLAG_CORE, ScoreMerge::Highest)?;
+    if b.words.len() > words_before_singles {
+        for &(ch, reading, score) in SUPPLEMENTAL_SINGLE_CHAR_READINGS {
+            b.add("supplemental_single_char_readings", ch, reading, score, FLAG_CORE, ScoreMerge::Highest);
+        }
+    }
     // Each curated pronunciation has its own score, including low-priority alternate readings.
-    b.load_three_column(&lexicon, &pronunciation_aliases, FLAG_CORE, ScoreMerge::Override)?;
+    if pronunciation_aliases.is_file() {
+        b.load_three_column(&lexicon, &pronunciation_aliases, FLAG_CORE, ScoreMerge::Override)?;
+    }
 
     for line in read_lines(&lexicon.join("en/kaixin_common_english.txt"))? {
         let cols: Vec<&str> = line.split('\t').collect();
@@ -351,8 +409,10 @@ pub fn build(root: &Path, out: &Path, emoji_catalog: Option<&Path>) -> Result<Su
         .iter()
         .map(|(code, word, score, kind)| (string_id[code.as_str()], string_id[word.as_str()], *score as u16, *kind))
         .collect();
-    alpha.sort_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)).then(a.1.cmp(&b.1)));
-    alpha.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
+    // Deduplicate identical (code, word, kind) keeping the highest score before final code-order sort.
+    alpha.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.3.cmp(&b.3)).then(b.2.cmp(&a.2)));
+    alpha.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1 && a.3 == b.3);
+    alpha.sort_by(|a, b| a.0.cmp(&b.0).then(b.2.cmp(&a.2)).then(a.1.cmp(&b.1)).then(a.3.cmp(&b.3)));
 
     let mut colloc: Vec<(u32, u32, u32)> = Vec::new();
     for line in &colloc_lines {

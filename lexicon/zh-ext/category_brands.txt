@@ -1,18 +1,16 @@
-# 开心离线输入法分类补充：品牌应用
-# 项目词表与匹配模板：项目整理，生成式 AI 辅助；不使用私人消息或用户输入。
-# 语料补充：jieba 0.42.1 本地 dict.txt；MIT 许可全文见 category-LICENSE.jieba.md。
-# 拼音：pypinyin 0.55.0，优先沿用已有词语读音及项目多音词校正。
-# 格式：词语<TAB>实际无声调拼音<TAB>基础排序分数；不扩散错拼别名。
-爱奇艺	ai qi yi	9211
-中国银行	zhong guo yin hang	8890
-京东物流	jing dong wu liu	8800
-哔哩哔哩	bi li bi li	8800
-小红书	xiao hong shu	8800
-微信支付	wei xin zhi fu	8800
-抖音商城	dou yin shang cheng	8800
-拼多多	pin duo duo	8800
-饿了么	e le me	8800
-喜马拉雅	xi ma la ya	8558
+# 开心输入法扩展词库：品牌与应用（55 条）
+# 来源合并：category_brands.txt
+# 格式：词语<TAB>全拼或输入码<TAB>万分制排序分数（1-10000，按分数降序分层）。
+中国银行	zhong guo yin hang	6200
+京东物流	jing dong wu liu	6200
+哔哩哔哩	bi li bi li	6200
+喜马拉雅	xi ma la ya	6200
+小红书	xiao hong shu	6200
+微信支付	wei xin zhi fu	6200
+抖音商城	dou yin shang cheng	6200
+拼多多	pin duo duo	6200
+爱奇艺	ai qi yi	6200
+饿了么	e le me	6200
 招商银行	zhao shang yin hang	6196
 七猫小说	qi mao xiao shuo	6100
 中国邮政	zhong guo you zheng	6100

@@ -11,6 +11,35 @@ import re
 import unicodedata
 
 
+SUPPLEMENTAL_READINGS = (
+    ("〇", "ling", 3600),
+    ("々", "tong", 600),
+    ("灰", "hui", 1),
+    ("谌", "shen", 400),
+    ("乐", "lao", 200),
+    ("乐", "yao", 200),
+    ("骑", "ji", 120),
+    ("恒", "geng", 100),
+    ("阏", "yu", 120),
+    ("缪", "liao", 120),
+    ("溉", "ji", 80),
+    ("齐", "zi", 80),
+)
+
+
+def is_hanzi_char(char):
+    if len(char) != 1:
+        return False
+    code = ord(char)
+    return (
+        code in (0x3005, 0x3007)
+        or 0x3400 <= code <= 0x4DBF
+        or 0x4E00 <= code <= 0x9FFF
+        or 0xF900 <= code <= 0xFAFF
+        or 0x20000 <= code <= 0x323AF
+    )
+
+
 def normalize(reading):
     # Preserve the umlaut before removing tone marks (lü -> lv, not lu).
     decomposed = unicodedata.normalize("NFD", reading.lower())
@@ -29,11 +58,12 @@ def main():
     source_path = args.desktop_root / "lexicon/zh/single_char_common_8105.txt"
     override_paths = [args.desktop_root / "data_sources/kaixin" / name
                       for name in ("pronunciation_aliases.tsv", "pronunciation_exclusions.tsv")]
-    scores = {}
+    common_scores = {}
     for line in source_path.read_text(encoding="utf-8-sig").splitlines():
         if line.strip() and not line.startswith("#"):
             char, score = line.split("\t")
-            scores[char] = int(score)
+            common_scores[char] = int(score)
+    scores = dict(common_scores)
     readings = {}
     for line in raw_path.read_text(encoding="utf-8-sig").splitlines():
         content = line.split("#", 1)[0].strip()
@@ -41,8 +71,9 @@ def main():
             continue
         point, values = content.split(":", 1)
         char = chr(int(point.strip()[2:], 16))
-        if char in scores:
+        if char in scores or is_hanzi_char(char):
             readings[char] = list(dict.fromkeys(normalize(v.strip()) for v in values.split(",")))
+            scores.setdefault(char, 1)
     excluded = {}
     for path in override_paths:
         for line in path.read_text(encoding="utf-8-sig").splitlines():
@@ -50,7 +81,7 @@ def main():
                 continue
             columns = line.split("\t")
             char, reading = columns[0], normalize(columns[1])
-            if char not in scores or len(char) != 1:
+            if len(char) != 1 or (char not in scores and not is_hanzi_char(char)):
                 continue
             if len(columns) > 3 and columns[3].lower() == "historical":
                 excluded.setdefault(char, set()).add(reading)
@@ -58,17 +89,32 @@ def main():
                 values = readings.setdefault(char, [])
                 if reading not in values:
                     values.append(reading)
+                scores.setdefault(char, 1)
+    supplemental_scores = {(char, reading): score for char, reading, score in SUPPLEMENTAL_READINGS}
+    for char, reading in supplemental_scores:
+        values = readings.setdefault(char, [])
+        if reading not in values:
+            values.append(reading)
+        scores.setdefault(char, 1)
+    ordered_chars = list(common_scores.keys()) + sorted(
+        (c for c in scores if c not in common_scores), key=ord
+    )
     rows = []
-    for char, score in scores.items():
+    imported_chars = 0
+    for char in ordered_chars:
+        score = scores[char]
         values = [v for v in readings.get(char, [])
                   if v not in excluded.get(char, ()) and re.fullmatch("[a-z]+", v)]
         if not values:
-            raise ValueError(f"Desktop character has no usable reading: U+{ord(char):04X}")
-        rows.extend((char, reading, score) for reading in values)
+            if char in common_scores:
+                raise ValueError(f"Desktop character has no usable reading: U+{ord(char):04X}")
+            continue
+        imported_chars += 1
+        rows.extend((char, reading, supplemental_scores.get((char, reading), score)) for reading in values)
     output = root / "data_sources/desktop_single_char_readings.txt"
-    comments = ["# 桌面 8105 单字词库的显式拼音读音；保留原始字频及多音读音。",
-                "# 字频来源：开心输入法/lexicon/zh/single_char_common_8105.txt",
-                "# 读音来源：桌面项目 pinyin crate 0.10.0 内含 pinyin-data 0.13.0。",
+    comments = ["# 桌面单字词库的显式拼音读音；保留 8105 常用字原始字频，并补全全量扩展汉字及多音读音。",
+                "# 常用字频来源：开心输入法/lexicon/zh/single_char_common_8105.txt（其余扩展单字默认字频 1）",
+                "# 读音来源：桌面项目 pinyin crate 0.10.0 内含 pinyin-data 0.13.0 及代码补充读音。",
                 "# 应用桌面项目 pronunciation_aliases.tsv 和 pronunciation_exclusions.tsv；排除明确旧读。",
                 "# MIT 许可全文见 app/src/main/assets/lexicon-notices/LICENSE.pinyin-data.md；普通构建无需安装 Rust 或拼音库。",
                 "# 格式：汉字<TAB>无声调拼音<TAB>字频"]
@@ -77,7 +123,8 @@ def main():
     license_path = root / "app/src/main/assets/lexicon-notices/LICENSE.pinyin-data.md"
     license_path.parent.mkdir(parents=True, exist_ok=True)
     license_path.write_text(license_text, encoding="utf-8")
-    report = {"character_count": len(scores), "reading_count": len(rows),
+    report = {"common_character_count": len(common_scores), "character_count": imported_chars,
+              "reading_count": len(rows),
               "pinyin_crate_version": "0.10.0", "pinyin_data_version": "0.13.0",
               "sources": [{"path": ("pinyin-0.10.0/" + p.relative_to(args.pinyin_crate).as_posix()
                                      if p == raw_path else "desktop/" + p.relative_to(args.desktop_root).as_posix()),
@@ -86,7 +133,7 @@ def main():
               "output": "data_sources/desktop_single_char_readings.txt"}
     (root / "data_sources/desktop-single-char-readings.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    print(f"Imported {len(scores)} desktop characters with {len(rows)} readings")
+    print(f"Imported {imported_chars} desktop characters ({len(common_scores)} common) with {len(rows)} readings")
 
 
 if __name__ == "__main__":

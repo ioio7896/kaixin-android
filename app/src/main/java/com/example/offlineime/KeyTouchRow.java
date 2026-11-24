@@ -56,18 +56,32 @@ final class KeyTouchRow extends LinearLayout {
             KeyButton gapTarget = null;
             float density = getResources().getDisplayMetrics().density;
             float nearest = Float.MAX_VALUE;
+            float touchX = event.getX(index);
+            float touchY = event.getY(index);
+            KeyButton firstVisible = null;
+            KeyButton lastVisible = null;
             for (int i = 0; i < getChildCount(); i++) {
                 View child = getChildAt(i);
                 if (!(child instanceof KeyButton) || !child.isEnabled()
                         || child.getVisibility() != VISIBLE) continue;
-                float x = Math.max(child.getLeft(), Math.min(event.getX(index), child.getRight() - 1));
-                float y = Math.max(child.getTop(), Math.min(event.getY(index), child.getBottom() - 1));
-                float dx = x - event.getX(index), dy = y - event.getY(index);
+                KeyButton key = (KeyButton) child;
+                if (firstVisible == null) firstVisible = key;
+                lastVisible = key;
+                float x = Math.max(child.getLeft(), Math.min(touchX, child.getRight() - 1));
+                float y = Math.max(child.getTop(), Math.min(touchY, child.getBottom() - 1));
+                float dx = x - touchX, dy = y - touchY;
                 float distance = dx * dx + dy * dy;
-                float limit = (((KeyButton) child).inputLetter() == 0 ? 8 : 10) * density;
+                float limit = (key.inputLetter() == 0 ? 8 : 10) * density;
                 if (distance <= limit * limit && distance < nearest) {
-                    nearest = distance; gapTarget = (KeyButton) child;
+                    nearest = distance; gapTarget = key;
                 }
+            }
+            // In horizontal rows (e.g. QWERTY row 2 with outer insets), route outer
+            // horizontal margin touches to the first/last key instead of dropping them.
+            if (gapTarget == null && getOrientation() == HORIZONTAL && firstVisible != null
+                    && touchY >= 0 && touchY < getHeight()) {
+                if (touchX < firstVisible.getLeft()) gapTarget = firstVisible;
+                else if (touchX >= lastVisible.getRight()) gapTarget = lastVisible;
             }
             if (gapTarget != null) gapTargets.put(event.getPointerId(index), gapTarget);
         }

@@ -63,6 +63,39 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private boolean clipboardSearchRestorePanel;
     private boolean clipboardSearchResumePending;
     private EditorInfo clipboardSearchReturnEditorInfo;
+    private boolean hardwareSoftExpanded;
+    private HandwritingView stylusOverlayView;
+    private final HardwareKeyboardController hardwareKeyboard = new HardwareKeyboardController(
+            new HardwareKeyboardController.Host() {
+                @Override public boolean isEnabled() {
+                    return settingsPreferences != null && settingsPreferences.getBoolean("hw_keyboard_enabled", true);
+                }
+                @Override public boolean isChineseMode() {
+                    return mode == Mode.PINYIN || mode == Mode.NINE || mode == Mode.STROKE;
+                }
+                @Override public boolean isComposing() { return !composingSession.isEmpty(); }
+                @Override public boolean isPasswordOrUri() {
+                    return editorSession.sensitive || "email".equals(editorSession.layout)
+                            || "uri".equals(editorSession.layout) || editorSession.numeric;
+                }
+                @Override public void onKey(String key) { OfflineImeService.this.onKey(key); }
+                @Override public void toggleChineseEnglish() { OfflineImeService.this.onKey("中英"); }
+                @Override public void clearComposing() { OfflineImeService.this.clearComposing(true); }
+                @Override public void commitText(String text) { OfflineImeService.this.commit(text); }
+                @Override public void pageCandidates(int delta) { OfflineImeService.this.onCandidatePage(delta); }
+                @Override public boolean selectCandidateOnPage(int indexInPage) {
+                    int pageSize = CandidatePaging.pageSize(
+                            SettingsRepository.integer(settingsPreferences, "candidate_count", 6));
+                    List<PinyinDictionary.Entry> values = candidates();
+                    int index = candidatePage * pageSize + indexInPage;
+                    if (index < 0 || index >= values.size()) return false;
+                    onCandidate(index);
+                    return true;
+                }
+                @Override public void ensureCandidateBarVisible() {
+                    if (!isInputViewShown() && android.os.Build.VERSION.SDK_INT >= 28) requestShowSelf(0);
+                }
+            });
     private List<ClipboardHistoryStore.Entry> clipboardClearBackup;
     private final java.util.LinkedHashSet<String> clipboardSelection = new java.util.LinkedHashSet<>();
     private boolean clipboardMultiSelect;
@@ -75,8 +108,15 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private static final Pattern LABELED_ONE_TIME_CODE = Pattern.compile(
             "(?i)(验证码|动态码|校验码|一次性密码|otp|one[- ]?time code).{0,16}\\b\\d{4,8}\\b");
     private boolean handwritingShown, handwritingFullscreen;
-    private boolean voiceShown, voiceFinishing;
+    private static final long VOICE_DRAFT_TTL_MS = 180_000L;
+    private boolean voiceShown, voiceFinishing, voicePaused, voiceHoldMode;
+    private boolean voiceSegmentCommitMode, voiceSegmentCommitInProgress, voiceCommitAndSendPending, voiceLowSignalShown;
+    private int voiceCommittedSegments;
+    private float voiceAudioLevel;
+    private long voiceElapsedMs;
     private String voiceStatus = "", voicePreview = "";
+    private String voiceDraftText = "";
+    private long voiceDraftSavedAt;
     private long voiceEditorGeneration;
     private int voiceSelectionStart = -1, voiceSelectionEnd = -1;
     private VoiceInputController voiceInput;
@@ -260,7 +300,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
     boolean pinyinCandidatesEmpty() { return candidateSession.candidateResults.isEmpty(); }
     boolean nineKeyMode() { return mode == Mode.NINE; }
-    boolean compactNineLayout() { return mode == Mode.NINE && !handwritingShown; }
+    boolean compactNineLayout() {
+        return (mode == Mode.NINE || mode == Mode.SYMBOLS || mode == Mode.STROKE) && !handwritingShown;
+    }
     void refreshPinyinPaths() { if (!destroyed) refresh(); }
     String pinyinDisplayReading(PinyinPathEditor.Segment segment) {
         return composingSession.displayReading(segment, isShuangpin(), mode == Mode.NINE);
@@ -384,8 +426,25 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         logImeLifecycle("window_hidden");
     }
 
+    boolean isHardwareCompactMode() {
+        if (hardwareSoftExpanded || handwritingShown) return false;
+        android.content.SharedPreferences p = settingsPreferences != null
+                ? settingsPreferences : getSharedPreferences("settings", MODE_PRIVATE);
+        return KeyboardPlacement.hardwareCompactBar(this, p);
+    }
+
+    @Override public boolean onEvaluateInputViewShown() {
+        boolean base = super.onEvaluateInputViewShown();
+        if (base) return true;
+        android.content.SharedPreferences p = settingsPreferences != null
+                ? settingsPreferences : getSharedPreferences("settings", MODE_PRIVATE);
+        return KeyboardPlacement.hardwareKeyboardConnected(this)
+                && p.getBoolean("hw_keyboard_enabled", true);
+    }
+
     @Override public void onConfigurationChanged(android.content.res.Configuration newConfig) {
         super.onConfigurationChanged(newConfig);
+        if (!KeyboardPlacement.hardwareKeyboardConnected(this)) hardwareSoftExpanded = false;
         if (keyboardView != null) keyboardView.setDark(isDarkMode());
         updateInputViewLayout();
         if (keyboardView != null) refresh();
@@ -394,10 +453,13 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     private void updateInputViewLayout() {
         if (keyboardView == null) return;
         android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
-        boolean floating = !handwritingShown && KeyboardPlacement.floating(this, p);
-        int screen = getResources().getConfiguration().screenWidthDp;
-        int width = handwritingShown ? screen : KeyboardPlacement.width(this, p);
-        String side = handwritingShown ? "off" : KeyboardPlacement.side(this, p);
+        boolean hwCompact = isHardwareCompactMode();
+        boolean floating = !handwritingShown && !hwCompact && KeyboardPlacement.floating(this, p);
+        int screen = KeyboardPlacement.availableWidthDp(this);
+        int screenHeight = KeyboardPlacement.availableHeightDp(this);
+        int width = handwritingShown ? screen : hwCompact ? Math.min(720, screen) : KeyboardPlacement.width(this, p);
+        String side = handwritingShown || hwCompact ? "off" : KeyboardPlacement.side(this, p);
+        keyboardView.setHardwareCompactMode(hwCompact);
         keyboardView.setHandwritingFullscreen(handwritingShown && handwritingFullscreen);
         keyboardView.setFloatingLandscape(floating || width < screen);
         keyboardView.requestLayout();
@@ -405,7 +467,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         android.view.Window window = dialog == null ? null : dialog.getWindow();
         if (window == null) return;
         WindowManager.LayoutParams params = window.getAttributes();
-        boolean resized = handwritingShown || floating || KeyboardPlacement.landscape(this)
+        boolean resized = handwritingShown || hwCompact || floating || KeyboardPlacement.landscape(this)
                 || !"off".equals(side) || width < screen;
         if (resized) {
             if (!originalImeWindowLayoutSaved) {
@@ -428,11 +490,15 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 String axis = KeyboardPlacement.axis(this);
                 int x = floating ? p.getInt("floating_x_" + axis, (screen - width) / 2)
                         : "left".equals(side) ? 0 : "right".equals(side) ? screen - width : (screen - width) / 2;
-                int maxY = Math.max(0, getResources().getConfiguration().screenHeightDp - KeyboardPlacement.height(this, p) - 32);
-                int physicalX = Math.max(0, Math.min(screen - width, x));
+                int maxY = Math.max(0, screenHeight - KeyboardPlacement.height(this, p) - 32);
+                int physicalX = Math.max(0, Math.min(Math.max(0, screen - width), x));
+                int physicalY = floating ? Math.max(0, Math.min(maxY, p.getInt("floating_y_" + axis, 48))) : 0;
+                if (floating && (physicalX != x || physicalY != p.getInt("floating_y_" + axis, 48))) {
+                    p.edit().putInt("floating_x_" + axis, physicalX).putInt("floating_y_" + axis, physicalY).apply();
+                }
                 boolean rtl = window.getDecorView().getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
-                params.x = Math.round((rtl ? screen - width - physicalX : physicalX) * density);
-                params.y = floating ? Math.round(Math.max(0, Math.min(maxY, p.getInt("floating_y_" + axis, 48))) * density) : 0;
+                params.x = Math.round((rtl ? Math.max(0, screen - width) - physicalX : physicalX) * density);
+                params.y = Math.round(physicalY * density);
             }
             window.setAttributes(params);
             if (!customImeWindowLayout)
@@ -453,14 +519,88 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         android.view.Window window = getWindow().getWindow();
         WindowManager.LayoutParams params = window.getAttributes();
         float density = getResources().getDisplayMetrics().density;
-        android.content.res.Configuration c = getResources().getConfiguration();
-        int maxX = Math.max(0, Math.round(c.screenWidthDp * density) - params.width);
-        int maxY = Math.max(0, Math.round((c.screenHeightDp - KeyboardPlacement.height(this, p) - 32) * density));
+        int screenW = KeyboardPlacement.availableWidthDp(this);
+        int screenH = KeyboardPlacement.availableHeightDp(this);
+        int maxX = Math.max(0, Math.round(screenW * density) - params.width);
+        int maxY = Math.max(0, Math.round((screenH - KeyboardPlacement.height(this, p) - 32) * density));
         params.x = Math.max(0, Math.min(maxX, params.x + Math.round(dx)));
         params.y = Math.max(0, Math.min(maxY, params.y - Math.round(dy)));
         window.setAttributes(params);
-        if (save) p.edit().putInt("floating_x_" + KeyboardPlacement.axis(this), Math.round(params.x / density))
-                .putInt("floating_y_" + KeyboardPlacement.axis(this), Math.round(params.y / density)).apply();
+        if (save) {
+            int yDp = Math.round(params.y / density);
+            if (yDp <= 6 && dy > 0) {
+                snapFloatingToDock();
+                return;
+            }
+            p.edit().putInt("floating_x_" + KeyboardPlacement.axis(this), Math.round(params.x / density))
+                    .putInt("floating_y_" + KeyboardPlacement.axis(this), yDp).apply();
+        }
+    }
+
+    void resizeFloatingKeyboard(float dwPx, float dhPx, boolean save) {
+        android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
+        if (handwritingShown || !KeyboardPlacement.floating(this, p)) return;
+        float density = Math.max(0.5f, getResources().getDisplayMetrics().density);
+        int screenW = KeyboardPlacement.availableWidthDp(this);
+        int screenH = KeyboardPlacement.availableHeightDp(this);
+        int curW = KeyboardPlacement.width(this, p);
+        int curH = KeyboardPlacement.height(this, p);
+        int nextW = Math.max(Math.min(280, screenW), Math.min(screenW, curW + Math.round(dwPx / density)));
+        int nextH = Math.max(200, Math.min(Math.min(560, Math.round(screenH * 0.68f)), curH + Math.round(dhPx / density)));
+        String axis = KeyboardPlacement.axis(this);
+        p.edit().putString("tablet_preset_" + axis, "floating")
+                .putInt("floating_width_" + axis, nextW)
+                .putInt("floating_height_" + axis, nextH).apply();
+        if (save) updateInputViewLayout();
+    }
+
+    void snapFloatingToDock() {
+        android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
+        String axis = KeyboardPlacement.axis(this);
+        p.edit().putString("tablet_preset_" + axis, "center").putBoolean("floating", false).apply();
+        toastWord("已停靠到底部");
+    }
+
+    @Override public void onPrepareStylusHandwriting() {
+        super.onPrepareStylusHandwriting();
+        if (android.os.Build.VERSION.SDK_INT >= 33 && stylusOverlayView == null) {
+            stylusOverlayView = new HandwritingView(this, false, new HandwritingView.Callback() {
+                @Override public void onChoices(List<String> candidates, String draft) {
+                    if (candidates != null && !candidates.isEmpty() && stylusOverlayView != null
+                            && !stylusOverlayView.isContinuous()) {
+                        commit(candidates.get(0));
+                        stylusOverlayView.clear();
+                    }
+                }
+                @Override public void onInkChanged(boolean hasInk) { }
+                @Override public void onStatus(String message) { }
+                @Override public void onConfirm(String value) {
+                    if (value != null && !value.isEmpty()) commit(value);
+                    if (stylusOverlayView != null) stylusOverlayView.clear();
+                }
+            });
+            stylusOverlayView.setBackgroundColor(Color.TRANSPARENT);
+        }
+    }
+
+    @Override public boolean onStartStylusHandwriting() {
+        if (android.os.Build.VERSION.SDK_INT < 33) return false;
+        android.view.Window stylusWindow = getStylusHandwritingWindow();
+        if (stylusWindow == null) return false;
+        if (stylusOverlayView == null) onPrepareStylusHandwriting();
+        if (stylusOverlayView == null) return false;
+        stylusOverlayView.applyTheme(KeyboardTheme.from(this, isDarkMode()));
+        stylusOverlayView.setBackgroundColor(Color.TRANSPARENT);
+        stylusWindow.setContentView(stylusOverlayView);
+        return true;
+    }
+
+    @Override public void onFinishStylusHandwriting() {
+        if (stylusOverlayView != null) {
+            stylusOverlayView.confirm();
+            stylusOverlayView.clear();
+        }
+        super.onFinishStylusHandwriting();
     }
 
     @Override public void onComputeInsets(android.inputmethodservice.InputMethodService.Insets out) {
@@ -471,7 +611,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 // Keep the editor's layout behind the full-screen writing surface.
                 out.contentTopInsets = keyboardView.getRootView().getHeight();
             }
-        } else if (KeyboardPlacement.floating(this, getSharedPreferences("settings", MODE_PRIVATE))) {
+        } else if (!isHardwareCompactMode() && KeyboardPlacement.floating(this, getSharedPreferences("settings", MODE_PRIVATE))) {
             int[] position = new int[2]; keyboardView.getLocationInWindow(position);
             int bottom = position[1] + keyboardView.getHeight();
             out.contentTopInsets = bottom; out.visibleTopInsets = bottom;
@@ -489,6 +629,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
 
     @Override public void onStartInput(EditorInfo info, boolean restarting) {
         stopVoiceInput();
+        hardwareKeyboard.reset();
         selectionEdit.clearTransientState();
         if (restarting && sameEditor(editorSession.info, info) && (!composingSession.isEmpty() || handwritingShown)
                 && info.initialSelStart == editorSession.selectionStart && info.initialSelEnd == editorSession.selectionEnd
@@ -622,6 +763,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     @Override public void onFinishInput() {
         flushPersonalDataSave();
         stopVoiceInput();
+        if (voiceInput != null) voiceInput.scheduleQuickRelease();
         selectionEdit.clearAll();
         cancelRenderRefresh();
         keyInputOrder.cancelAll();
@@ -652,7 +794,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         destroyed = true;
         if (keyPreview != null) keyPreview.dismiss();
         if (voiceInput != null) { voiceInput.close(); voiceInput = null; }
-        stopVoiceInput();
+        clearVoiceDraft();
+        stopVoiceInput(false);
         cancelRenderRefresh();
         keyInputOrder.cancelAll();
         cancelCandidateWork();
@@ -725,10 +868,19 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 && (newSelStart != editorSession.selectionStart || newSelEnd != editorSession.selectionEnd)) {
             pad.cancelPendingConfirmation();
         }
+        if (voiceSegmentCommitInProgress) {
+            voiceSelectionStart = newSelStart;
+            voiceSelectionEnd = newSelEnd;
+            editorSession.selectionStart = newSelStart;
+            editorSession.selectionEnd = newSelEnd;
+            return;
+        }
         if (voiceShown && voiceSelectionStart >= 0 && voiceSelectionEnd >= 0
                 && (newSelStart != voiceSelectionStart || newSelEnd != voiceSelectionEnd)) {
-            stopVoiceInput();
-            toastWord("光标已移动，语音输入已取消");
+            boolean hadPreview = !voicePreview.trim().isEmpty();
+            stopVoiceInput(true);
+            toastWord(hadPreview && !editorSession.sensitive && !isPrivacyMode()
+                    ? "光标已移动，已暂存已识别文字" : "光标已移动，语音输入已取消");
             refresh();
         }
         if (candidateCommitInProgress) {
@@ -763,19 +915,67 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     @Override public void onKey(String key) {
         if (key == null || key.isEmpty()) return;
         selectionEdit.onKeyBegin(key);
-        if ("语音".equals(key)) { beginVoiceInput(); return; }
-        if ("语音取消".equals(key)) { stopVoiceInput(); refresh(); return; }
-        if ("语音完成".equals(key)) {
-            if (voiceShown && !voiceFinishing && voiceInput != null) {
-                voiceFinishing = true; voiceStatus = "正在完成识别…";
-                voiceInput.finish(); refresh();
+        if ("语音".equals(key)) { beginVoiceInput(false); return; }
+        if ("语音按住开始".equals(key)) { if (!voiceShown) beginVoiceInput(true); return; }
+        if ("语音按住取消提示".equals(key)) {
+            if (voiceShown && voiceHoldMode && !voiceFinishing) {
+                voiceStatus = "松开取消本次语音输入"; refresh();
             }
             return;
         }
+        if ("语音按住恢复提示".equals(key)) {
+            if (voiceShown && voiceHoldMode && !voiceFinishing) {
+                voiceStatus = "松开立即上屏 · 上滑取消"; refresh();
+            }
+            return;
+        }
+        if ("语音取消".equals(key)) {
+            boolean saveDraft = !voiceHoldMode && voicePreview.trim().length() >= 4;
+            stopVoiceInput(saveDraft); refresh(); return;
+        }
+        if ("语音清空".equals(key)) {
+            if (voiceShown && !voiceFinishing && voiceInput != null) {
+                voicePreview = "";
+                voiceInput.clearRecognized();
+                refresh();
+            }
+            return;
+        }
+        if ("语音退格".equals(key)) {
+            if (voiceShown && !voiceFinishing && voiceInput != null) {
+                voiceInput.backspaceRecognized();
+            }
+            return;
+        }
+        if ("语音暂停".equals(key)) {
+            if (voiceShown && !voiceFinishing && voiceInput != null) {
+                voicePaused = !voicePaused;
+                voiceInput.setPaused(voicePaused);
+                voiceStatus = voicePaused ? "已暂停录音 · 点击继续" : defaultVoiceListeningStatus();
+                refresh();
+            }
+            return;
+        }
+        if ("语音完成".equals(key)) { finishVoiceInput(false); return; }
+        if ("语音完成并发送".equals(key)) { finishVoiceInput(true); return; }
+        if ("语音恢复草稿".equals(key)) {
+            String draft = activeVoiceDraftPreview();
+            clearVoiceDraft();
+            if (!draft.isEmpty()) {
+                stopVoiceInput(false);
+                clearWordContext();
+                if (commit(convertGeneratedText(draft))) toastWord("已恢复上次识别文字");
+                else toastWord("无法输入识别结果，请重试");
+            }
+            refresh();
+            return;
+        }
+        if ("语音清除草稿".equals(key)) { clearVoiceDraft(); refresh(); return; }
         if ("隐私模式".equals(key)) {
             android.content.SharedPreferences p = getSharedPreferences("settings", MODE_PRIVATE);
             boolean enabled = !p.getBoolean("privacy_mode", false);
             p.edit().putBoolean("privacy_mode", enabled).apply();
+            if (enabled) clearVoiceDraft();
             toastWord(enabled ? "隐私模式已开启" : "隐私模式已关闭"); return;
         }
         if ("原文上屏".equals(key)) {
@@ -1173,6 +1373,10 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             case "取消清空剪贴板": clipboardClearConfirmShown = false; refresh(); return;
             case "撤销清空剪贴板": undoClipboardClear(); return;
             case "搜索剪贴板": showClipboardSearchDialog(); return;
+            case "清除剪贴板搜索":
+                clipboardSearchQuery = "";
+                refresh();
+                return;
             case "启用剪贴板历史":
                 getSharedPreferences("settings", Context.MODE_PRIVATE).edit().putBoolean("clipboard_enabled", true).apply();
                 clipboardEnablePromptShown = false;
@@ -1209,6 +1413,24 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                     }
                 }
                 refresh(); return;
+            case "Tab":
+                if (!clearComposing(true)) return;
+                sendKey(KeyEvent.KEYCODE_TAB);
+                return;
+            case "CapsLock":
+                capsLock = !capsLock;
+                shift = capsLock;
+                lastShiftTapUptime = 0;
+                refresh();
+                return;
+            case "展开软键盘":
+                hardwareSoftExpanded = !hardwareSoftExpanded;
+                updateInputViewLayout();
+                refresh();
+                return;
+            case "停靠键盘":
+                snapFloatingToDock();
+                return;
             case "←": if (!composingSession.isEmpty()) { composingSession.cursor = Math.max(0, Math.min(composingSession.length(), composingSession.cursor) - 1); refresh(); } else moveCaretBy(-1); return;
             case "→": if (!composingSession.isEmpty()) { composingSession.cursor = Math.min(composingSession.length(), composingSession.cursor + 1); refresh(); } else moveCaretBy(1); return;
             case "↑": if (!clearComposing(true)) return; sendKey(KeyEvent.KEYCODE_DPAD_UP); return;
@@ -1257,7 +1479,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 if (keyboardView != null) { if (toolsShown) keyboardView.showTools(); else refresh(); }
                 return;
         }
-        if (mode == Mode.STROKE && key.length() == 1 && key.charAt(0) >= '1' && key.charAt(0) <= '5') {
+        if (mode == Mode.STROKE && key.length() == 1
+                && ((key.charAt(0) >= '1' && key.charAt(0) <= '5') || key.charAt(0) == '?')) {
             if (composingSession.length() >= 30) return;
             composingSession.buffer.append(key);
             composingSession.cursor = composingSession.length();
@@ -1581,13 +1804,23 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 flags, creatingWord, unavailable, touches);
     }
 
+    private static boolean isSingleSyllablePinyinLookup(CandidateLookup lookup) {
+        if (lookup.mode != Mode.PINYIN || lookup.raw == null || lookup.raw.isEmpty()) return false;
+        if (lookup.constraint == null || lookup.constraint.isEmpty()) {
+            return PinyinPathEditor.isCompleteReading(lookup.raw.toLowerCase(java.util.Locale.ROOT));
+        }
+        return lookup.constraint.indexOf(NativeEngine.UNIT) < 0
+                && (lookup.constraint.startsWith("=") || lookup.constraint.startsWith("|"));
+    }
+
     /** Runs on a candidate worker lane or, without one, synchronously. */
     private List<PinyinDictionary.Entry> runLookup(CandidateLookup lookup, String creationStrokes) {
         if (lookup.mode == Mode.STROKE)
             return filterBlocked(StrokeInputDictionary.get(this).suggest(this, lookup.raw, 256));
         if (lookup.unavailable || lookup.mode == Mode.SYMBOLS) return java.util.Collections.emptyList();
+        int limit = lookup.creating ? 512 : isSingleSyllablePinyinLookup(lookup) ? 1024 : 256;
         List<PinyinDictionary.Entry> found = dictionary.lookup(lookup.mode, lookup.raw, lookup.constraint,
-                lookup.previous2, lookup.previous, lookup.flags, lookup.creating ? 512 : 256, lookup.touches);
+                lookup.previous2, lookup.previous, lookup.flags, limit, lookup.touches);
         found = filterBlocked(found);
         if (lookup.creating) return wordCreationController.filterCreationStrokes(found, creationStrokes);
         // Nine-key alias matches have no reading and can expand to any saved text.
@@ -2710,6 +2943,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             backKeyHandled = true;
             return true;
         }
+        if (hardwareKeyboard.onKeyDown(keyCode, event)) return true;
         return super.onKeyDown(keyCode, event);
     }
 
@@ -2718,6 +2952,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             backKeyHandled = false;
             return true;
         }
+        if (hardwareKeyboard.onKeyUp(keyCode, event)) return true;
         return super.onKeyUp(keyCode, event);
     }
 
@@ -2745,8 +2980,51 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         return false;
     }
 
-    private void beginVoiceInput() {
-        if (voiceShown) { stopVoiceInput(); refresh(); return; }
+    private boolean isPrivacyMode() {
+        return getSharedPreferences("settings", MODE_PRIVATE).getBoolean("privacy_mode", false);
+    }
+
+    private void clearVoiceDraft() {
+        voiceDraftText = "";
+        voiceDraftSavedAt = 0L;
+    }
+
+    private String activeVoiceDraftPreview() {
+        if (voiceDraftText.isEmpty() || editorSession.sensitive || isPrivacyMode()) return "";
+        if (android.os.SystemClock.uptimeMillis() - voiceDraftSavedAt > VOICE_DRAFT_TTL_MS) {
+            clearVoiceDraft();
+            return "";
+        }
+        return voiceDraftText;
+    }
+
+    private String voiceQuickSendLabel() {
+        if (editorSession.info == null
+                || (editorSession.info.imeOptions & EditorInfo.IME_FLAG_NO_ENTER_ACTION) != 0) return "";
+        int action = editorSession.info.imeOptions & EditorInfo.IME_MASK_ACTION;
+        if (action == EditorInfo.IME_ACTION_SEND) return "发送";
+        if (action == EditorInfo.IME_ACTION_SEARCH) return "搜索";
+        return "";
+    }
+
+    private String defaultVoiceListeningStatus() {
+        if (voiceHoldMode) return "松开立即上屏 · 上滑取消";
+        return voiceSegmentCommitMode ? "正在听 · 停顿自动分段上屏" : "正在听 · 按停顿断句，完成后上屏";
+    }
+
+    private void finishVoiceInput(boolean andSend) {
+        if (voiceShown && !voiceFinishing && voiceInput != null) {
+            voiceFinishing = true;
+            voicePaused = false;
+            voiceCommitAndSendPending = andSend;
+            voiceStatus = "正在完成识别…";
+            voiceInput.finish();
+            refresh();
+        }
+    }
+
+    private void beginVoiceInput(boolean holdMode) {
+        if (voiceShown) { stopVoiceInput(false); refresh(); return; }
         if (editorSession.info == null || getCurrentInputConnection() == null
                 || editorSession.sensitive || editorSession.forcedLayout
                 || clipboardSearchDialogOpen || wordCreationController.isActive()) {
@@ -2761,9 +3039,19 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         }
         if (!composingSession.isEmpty() && !clearComposing(true)) return;
         hidePanels();
+        android.content.SharedPreferences prefs = getSharedPreferences("settings", MODE_PRIVATE);
+        VoiceInputController.Config config = VoiceSettings.loadConfig(this, prefs, holdMode);
         voiceShown = true;
         voiceFinishing = false;
-        voiceStatus = "正在准备离线语音识别…";
+        voicePaused = false;
+        voiceHoldMode = holdMode;
+        voiceSegmentCommitMode = config.segmentCommitMode;
+        voiceCommitAndSendPending = false;
+        voiceLowSignalShown = false;
+        voiceCommittedSegments = 0;
+        voiceAudioLevel = 0f;
+        voiceElapsedMs = 0L;
+        voiceStatus = holdMode ? "正在启动录音 · 松开即上屏" : "正在准备离线语音识别…";
         voicePreview = "";
         voiceEditorGeneration = editorSession.generation;
         voiceSelectionStart = editorSession.selectionStart;
@@ -2772,12 +3060,57 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             voiceInput = new VoiceInputController(this, new VoiceInputController.Listener() {
                 @Override public void onVoiceListening() {
                     if (!voiceShown || voiceFinishing) return;
-                    voiceStatus = "正在听 · 按停顿断句，完成后上屏";
+                    if (!voiceHoldMode && keyboardView != null) {
+                        KeyFeedback.get(OfflineImeService.this).press(keyboardView);
+                    }
+                    voiceStatus = defaultVoiceListeningStatus();
                     refresh();
+                }
+                @Override public void onVoiceAudioState(float level, long elapsedMs, boolean paused,
+                                                        boolean lowSignalWarning) {
+                    if (!voiceShown) return;
+                    voiceAudioLevel = level;
+                    voiceElapsedMs = elapsedMs;
+                    if (keyboardView != null) {
+                        keyboardView.updateVoiceAudio(level, elapsedMs, !voiceFinishing && !paused);
+                    }
+                    if (!voiceFinishing && !paused && lowSignalWarning != voiceLowSignalShown) {
+                        voiceLowSignalShown = lowSignalWarning;
+                        voiceStatus = lowSignalWarning
+                                ? "未检测到麦克风声音，请检查是否被占用"
+                                : defaultVoiceListeningStatus();
+                        refresh();
+                    }
                 }
                 @Override public void onVoicePartial(String text) {
                     if (!voiceShown) return;
-                    voicePreview = text; refresh();
+                    String display = convertGeneratedText(text == null ? "" : text);
+                    voicePreview = display;
+                    if (!display.isEmpty() && voiceLowSignalShown) {
+                        voiceLowSignalShown = false;
+                        if (!voiceFinishing && !voicePaused) voiceStatus = defaultVoiceListeningStatus();
+                    }
+                    refresh();
+                }
+                @Override public void onVoiceSegmentCommit(String segment) {
+                    if (!voiceShown || editorSession.generation != voiceEditorGeneration
+                            || editorSession.sensitive || getCurrentInputConnection() == null) {
+                        stopVoiceInput(false); refresh(); return;
+                    }
+                    String value = segment == null ? "" : segment.trim();
+                    if (value.isEmpty()) return;
+                    clearWordContext();
+                    voiceSegmentCommitInProgress = true;
+                    try {
+                        if (commit(convertGeneratedText(value))) {
+                            voiceCommittedSegments++;
+                            clearVoiceDraft();
+                        }
+                    } finally {
+                        voiceSegmentCommitInProgress = false;
+                    }
+                    voicePreview = "";
+                    refresh();
                 }
                 @Override public void onVoiceDraining(String message) {
                     if (!voiceShown) return;
@@ -2786,32 +3119,61 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                 @Override public void onVoiceComplete(String text, String warning) {
                     if (!voiceShown || editorSession.generation != voiceEditorGeneration
                             || editorSession.sensitive || getCurrentInputConnection() == null) {
-                        stopVoiceInput(); refresh(); return;
+                        stopVoiceInput(false); refresh(); return;
                     }
+                    boolean shouldSend = voiceCommitAndSendPending;
+                    int priorSegments = voiceCommittedSegments;
                     String value = text == null ? "" : text.trim();
-                    stopVoiceInput();
-                    if (value.isEmpty()) toastWord(warning.isEmpty() ? "没有识别到文字，请重试" : warning);
-                    else {
+                    stopVoiceInput(false);
+                    if (!value.isEmpty()) {
                         clearWordContext();
-                        if (!commit(convertGeneratedText(value))) toastWord("无法输入识别结果，请重试");
-                        else if (!warning.isEmpty()) toastWord(warning + "，已输入已识别文字");
+                        if (!commit(convertGeneratedText(value))) {
+                            toastWord("无法输入识别结果，请重试");
+                        } else {
+                            clearVoiceDraft();
+                            if (!warning.isEmpty()) toastWord(warning + "，已输入已识别文字");
+                            if (shouldSend) enter();
+                        }
+                    } else if (priorSegments > 0) {
+                        clearVoiceDraft();
+                        if (!warning.isEmpty()) toastWord(warning);
+                        if (shouldSend) enter();
+                    } else {
+                        toastWord(warning.isEmpty() ? "没有识别到文字，请重试" : warning);
                     }
                     refresh();
                 }
                 @Override public void onVoiceError(String message) {
                     if (!voiceShown) return;
-                    stopVoiceInput(); toastWord(message); refresh();
+                    stopVoiceInput(false); toastWord(message); refresh();
                 }
             });
         }
-        voiceInput.start();
+        voiceInput.start(config);
         refresh();
     }
 
     private void stopVoiceInput() {
+        stopVoiceInput(true);
+    }
+
+    private void stopVoiceInput(boolean preserveDraft) {
+        if (preserveDraft && voiceShown && !voicePreview.trim().isEmpty()
+                && !editorSession.sensitive && !isPrivacyMode()) {
+            voiceDraftText = voicePreview.trim();
+            voiceDraftSavedAt = android.os.SystemClock.uptimeMillis();
+        }
         if (voiceInput != null) voiceInput.cancel();
         voiceShown = false;
         voiceFinishing = false;
+        voicePaused = false;
+        voiceHoldMode = false;
+        voiceSegmentCommitMode = false;
+        voiceCommitAndSendPending = false;
+        voiceLowSignalShown = false;
+        voiceCommittedSegments = 0;
+        voiceAudioLevel = 0f;
+        voiceElapsedMs = 0L;
         voiceStatus = voicePreview = "";
         voiceSelectionStart = voiceSelectionEnd = -1;
     }
@@ -2898,7 +3260,9 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
                     clipboardSearchQuery, clipboardClearConfirmShown, clipboardClearBackup != null,
                     clipboardMultiSelect, new java.util.LinkedHashSet<>(clipboardSelection));
             else if (handwritingShown) keyboardView.showHandwriting();
-            else if (voiceShown) keyboardView.showVoice(voiceStatus, voicePreview, voiceFinishing);
+            else if (voiceShown) keyboardView.showVoice(voiceStatus, voicePreview, voiceFinishing,
+                    voicePaused, voiceAudioLevel, voiceElapsedMs, voiceSegmentCommitMode,
+                    activeVoiceDraftPreview(), voiceQuickSendLabel());
             // The emoji view retains its rows and scroll position across candidate refreshes.
             // Category changes render explicitly through onKey.
             else if (emojiShown) keyboardView.showEmojiPanel(emojiSearchQuery);

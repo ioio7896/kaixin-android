@@ -36,7 +36,16 @@ final class PinyinPathEditor {
         return Collections.unmodifiableMap(result);
     }
 
-    static boolean isCompleteReading(String reading) { return SYLLABLES.contains(reading); }
+    static boolean isCompleteReading(String reading) { return SYLLABLES.contains(canonicalReading(reading)); }
+
+    private static String canonicalReading(String reading) {
+        if (reading == null) return "";
+        switch (reading) {
+            case "lue": return "lve";
+            case "nue": return "nve";
+            default: return reading;
+        }
+    }
 
     private static String alternateSpelling(String reading) {
         switch (reading) {

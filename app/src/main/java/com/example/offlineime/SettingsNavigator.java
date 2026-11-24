@@ -23,6 +23,7 @@ final class SettingsNavigator {
     private final LinearLayout home;
     private final TextView title;
     private final View offlineBadge;
+    private final boolean twoPane;
     private LinearLayout details;
     private SettingsSections section;
     private int homeScroll;
@@ -31,16 +32,27 @@ final class SettingsNavigator {
     private int pendingScroll;
 
     SettingsNavigator(SettingsActivity activity, ScrollView scroll, FrameLayout pageHost,
-                      LinearLayout home, TextView title, View offlineBadge) {
+                      LinearLayout home, TextView title, View offlineBadge, boolean twoPane) {
         this.activity = activity;
         this.scroll = scroll;
         this.pageHost = pageHost;
         this.home = home;
         this.title = title;
         this.offlineBadge = offlineBadge;
+        this.twoPane = twoPane;
     }
 
     void open(SettingsSections next) {
+        if (twoPane) {
+            if (section == next) return;
+            if (section != null) {
+                activity.closeSection();
+                pageHost.removeView(details);
+                details = null;
+            }
+            show(next, 0);
+            return;
+        }
         if (section != null) return;
         homeScroll = visibleScroll();
         show(next, 0);
@@ -49,12 +61,12 @@ final class SettingsNavigator {
     private void show(SettingsSections next, int y) {
         section = next;
         details = activity.buildSection(next);
-        home.setVisibility(View.GONE);
+        if (!twoPane) home.setVisibility(View.GONE);
         pageHost.addView(details, new FrameLayout.LayoutParams(-1, -2));
         title.setText(next.title);
-        offlineBadge.setVisibility(View.GONE);
+        if (!twoPane) offlineBadge.setVisibility(View.GONE);
         scrollToAfterLayout(y);
-        if (Build.VERSION.SDK_INT >= 33) {
+        if (!twoPane && Build.VERSION.SDK_INT >= 33) {
             OnBackInvokedDispatcher dispatcher = activity.getOnBackInvokedDispatcher();
             OnBackInvokedCallback callback = this::back;
             dispatcher.registerOnBackInvokedCallback(OnBackInvokedDispatcher.PRIORITY_DEFAULT, callback);
@@ -64,7 +76,7 @@ final class SettingsNavigator {
 
     boolean back() {
         if (activity.dismissChoicePopup()) return true;
-        if (section == null) return false;
+        if (twoPane || section == null) return false;
         activity.closeSection();
         removeBackCallback();
         pageHost.removeView(details);
@@ -78,12 +90,19 @@ final class SettingsNavigator {
     }
 
     void restore(Bundle state) {
-        if (state == null) return;
+        if (state == null) {
+            if (twoPane) show(SettingsSections.APPEARANCE, 0);
+            return;
+        }
         homeScroll = state.getInt(HOME_SCROLL, state.getInt("main_scroll_y", 0));
         SettingsSections saved = SettingsSections.restore(activity, state.getString(SECTION),
                 state.getString("open_section"));
-        if (saved == null) scrollToAfterLayout(homeScroll);
-        else show(saved, state.getInt(DETAIL_SCROLL, state.getInt("detail_scroll_y", 0)));
+        if (saved == null) {
+            if (twoPane) show(SettingsSections.APPEARANCE, 0);
+            else scrollToAfterLayout(homeScroll);
+        } else {
+            show(saved, state.getInt(DETAIL_SCROLL, state.getInt("detail_scroll_y", 0)));
+        }
     }
 
     void save(Bundle state) {

@@ -92,6 +92,14 @@ class Recognizer {
   /// Create a stream for decoding.
   std::unique_ptr<Stream> CreateStream() const;
 
+  /// Create a stream with in-memory hotwords (one space-separated phrase per line,
+  /// optional trailing ":score"). Unknown tokens are skipped without failing.
+  std::unique_ptr<Stream> CreateStream(const std::string &hotwords_text,
+                                       float hotwords_score) const;
+
+  /// Update endpoint rules without reloading the acoustic model.
+  void SetEndpointConfig(const EndpointConfig &config);
+
   /**
    * Return true if the given stream has enough frames for decoding.
    * Return false otherwise

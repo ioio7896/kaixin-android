@@ -90,23 +90,45 @@ public final class SettingsActivity extends Activity {
         toolbar.addView(offlineBadge, new LinearLayout.LayoutParams(-2, -2));
         root.addView(toolbar, new LinearLayout.LayoutParams(-1, -2));
 
+        android.content.res.Configuration config = getResources().getConfiguration();
+        boolean twoPane = config.screenWidthDp >= 720;
         ScrollView scroll = new ScrollView(this);
         scroll.setFillViewport(true);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setClipToPadding(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
         FrameLayout pageHost = new FrameLayout(this);
-        FrameLayout pageFrame = new FrameLayout(this);
-        android.content.res.Configuration config = getResources().getConfiguration();
-        int maxContent = config.screenWidthDp > 720 ? dp(720) : -1;
-        pageFrame.addView(pageHost, new FrameLayout.LayoutParams(maxContent, -2,
-                Gravity.TOP | Gravity.CENTER_HORIZONTAL));
-        scroll.addView(pageFrame, new ScrollView.LayoutParams(-1, -2));
-        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
-
         LinearLayout home = buildHome();
-        pageHost.addView(home, new FrameLayout.LayoutParams(-1, -2));
-        navigator = new SettingsNavigator(this, scroll, pageHost, home, toolbarTitle, offlineBadge);
+        if (twoPane) {
+            LinearLayout panes = new LinearLayout(this);
+            panes.setOrientation(LinearLayout.HORIZONTAL);
+            ScrollView navScroll = new ScrollView(this);
+            navScroll.setFillViewport(true);
+            navScroll.setVerticalScrollBarEnabled(false);
+            navScroll.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+            navScroll.addView(home, new ScrollView.LayoutParams(-1, -2));
+            panes.addView(navScroll, new LinearLayout.LayoutParams(dp(296), -1));
+
+            View divider = new View(this);
+            divider.setBackgroundColor(palette.divider);
+            panes.addView(divider, new LinearLayout.LayoutParams(dp(1), -1));
+
+            int detailMax = config.screenWidthDp - 300 > 680 ? dp(680) : -1;
+            FrameLayout detailFrame = new FrameLayout(this);
+            detailFrame.addView(pageHost, new FrameLayout.LayoutParams(detailMax, -2,
+                    Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+            scroll.addView(detailFrame, new ScrollView.LayoutParams(-1, -2));
+            panes.addView(scroll, new LinearLayout.LayoutParams(0, -1, 1));
+            root.addView(panes, new LinearLayout.LayoutParams(-1, 0, 1));
+        } else {
+            FrameLayout pageFrame = new FrameLayout(this);
+            pageFrame.addView(pageHost, new FrameLayout.LayoutParams(-1, -2,
+                    Gravity.TOP | Gravity.CENTER_HORIZONTAL));
+            scroll.addView(pageFrame, new ScrollView.LayoutParams(-1, -2));
+            root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+            pageHost.addView(home, new FrameLayout.LayoutParams(-1, -2));
+        }
+        navigator = new SettingsNavigator(this, scroll, pageHost, home, toolbarTitle, offlineBadge, twoPane);
         root.setOnApplyWindowInsetsListener((view, insets) -> {
             int left = 0, top = 0, right = 0, bottom = 0;
             if (Build.VERSION.SDK_INT >= 30) {

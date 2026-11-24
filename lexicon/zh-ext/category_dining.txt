@@ -1,18 +1,40 @@
-# 开心离线输入法分类补充：餐饮外卖
-# 项目词表与匹配模板：项目整理，生成式 AI 辅助；不使用私人消息或用户输入。
-# 语料：jieba 0.42.1 本地词典及项目分类词条；完整来源与许可见项目词库说明。
-# 拼音：实际无声调拼音，保留项目校正读音。
-# 格式：词语<TAB>实际无声调拼音<TAB>基础排序分数；不扩散错拼别名。
+# 开心输入法扩展词库：美食烹饪与餐饮（329 条）
+# 来源合并：category_dining.txt, category_cooking.txt, category_groceries.txt
+# 格式：词语<TAB>全拼或输入码<TAB>万分制排序分数（1-10000，按分数降序分层）。
+橄榄油	gan lan you	6200
+电饭煲	dian fan bao	6200
+番茄酱	fan qie jiang	6200
+调味料	tiao wei liao	6200
+食用油	shi yong you	6200
 不放香菜	bu fang xiang cai	6100
 不要葱花	bu yao cong hua	6100
 不要餐具	bu yao can ju	6100
 中辣	zhong la	6100
+临期食品	lin qi shi pin	6100
+产品溯源	chan pin su yuan	6100
+产地直供	chan di zhi gong	6100
+会员价格	hui yuan jia ge	6100
+会员积分	hui yuan ji fen	6100
+低脂牛奶	di zhi niu nai	6100
+保质期限	bao zhi qi xian	6100
+储存条件	chu cun tiao jian	6100
 免辣备注	mian la bei zhu	6100
+全麦面包	quan mai mian bao	6100
+冷冻保存	leng dong bao cun	6100
+冷冻食品	leng dong shi pin	6100
+冷藏保存	leng cang bao cun	6100
+冷藏食品	leng cang shi pin	6100
+净含量	jing han liang	6100
+净菜加工	jing cai jia gong	6100
 到店自取	dao dian zi qu	6100
+剩菜保存	sheng cai bao cun	6100
 加一份饭	jia yi fen fan	6100
 包厢预订	bao xiang yu ding	6100
+即食食品	ji shi shi pin	6100
+厨房秤	chu fang cheng	6100
 去冰饮料	qu bing yin liao	6100
 取餐号码	qu can hao ma	6100
+口感酥脆	kou gan su cui	6100
 叫号通知	jiao hao tong zhi	6100
 堂食自取	tang shi zi qu	6100
 外卖取餐	wai mai qu can	6100
@@ -20,41 +42,105 @@
 外卖订单	wai mai ding dan	6100
 外卖配送	wai mai pei song	6100
 外卖骑手	wai mai qi shou	6100
+外酥里嫩	wai su li nen	6100
+大火收汁	da huo shou zhi	6100
 套餐优惠	tao can you hui	6100
 套餐内容	tao can nei rong	6100
+小火慢炖	xiao huo man dun	6100
 少放辣椒	shao fang la jiao	6100
 少油少盐	shao you shao yan	6100
+少盐少油	shao yan shao you	6100
 少糖饮料	shao tang yin liao	6100
+常温食品	chang wen shi pin	6100
 常温饮料	chang wen yin liao	6100
-我在店里等你	wo zai dian li deng ni	6100
+开封保存	kai feng bao cun	6100
 打包带走	da bao dai zou	6100
 打包费用	da bao fei yong	6100
 扫码点餐	sao ma dian can	6100
 排队取号	pai dui qu hao	6100
+放凉备用	fang liang bei yong	6100
+散装食品	san zhuang shi pin	6100
+新鲜水果	xin xian shui guo	6100
+方便食品	fang bian shi pin	6100
+无公害蔬菜	wu gong hai shu cai	6100
+无糖酸奶	wu tang suan nai	6100
 无糖饮料	wu tang yin liao	6100
+时令水果	shi ling shui guo	6100
+有机蔬菜	you ji shu cai	6100
+杂粮米	za liang mi	6100
+植物奶	zhi wu nai	6100
+水果成熟度	shui guo cheng shu du	6100
+水果礼盒	shui guo li he	6100
+水淀粉	shui dian fen	6100
+沥干水分	li gan shui fen	6100
+油温控制	you wen kong zhi	6100
+活鲜水产	huo xian shui chan	6100
+淀粉勾芡	dian fen gou qian	6100
+火候控制	huo hou kong zhi	6100
 点餐小程序	dian can xiao cheng xu	6100
+烤箱预热	kao xiang yu re	6100
+焯水去腥	chao shui qu xing	6100
+熟食卤味	shu shi lu wei	6100
+燕麦奶	yan mai nai	6100
 甜度选择	tian du xuan ze	6100
+生产日期	sheng chan ri qi	6100
+生熟分开	sheng shu fen kai	6100
+生鲜蔬菜	sheng xian shu cai	6100
+生鲜超市	sheng xian chao shi	6100
+生鲜配送	sheng xian pei song	6100
 用餐人数	yong can ren shu	6100
 用餐时间	yong can shi jian	6100
 用餐评价	yong can ping jia	6100
+空气炸锅	kong qi zha guo	6100
+翻炒均匀	fan chao jun yun	6100
+肉类分切	rou lei fen qie	6100
+脱脂牛奶	tuo zhi niu nai	6100
+膳食纤维	shan shi xian wei	6100
 菜品分量	cai pin fen liang	6100
 菜品口味	cai pin kou wei	6100
 菜品推荐	cai pin tui jian	6100
+营养成分	ying yang cheng fen	6100
+蒜蓉酱	suan rong jiang	6100
+蒸汽烹饪	zheng qi peng ren	6100
+蒸烤箱	zheng kao xiang	6100
+蔬菜拼盘	shu cai pin pan	6100
+计量称重	ji liang cheng zhong	6100
 请帮我打包	qing bang wo da bao	6100
 请放在门口	qing fang zai men kou	6100
-送到楼下即可	song dao lou xia ji ke	6100
+豆奶饮料	dou nai yin liao	6100
+购物清单	gou wu qing dan	6100
+超市会员	chao shi hui yuan	6100
+进口水果	jin kou shui guo	6100
+速冻水饺	su dong shui jiao	6100
+速冻汤圆	su dong tang yuan	6100
+配料表	pei liao biao	6100
+量勺	liang shao	6100
+铸铁锅	zhu tie guo	6100
+面粉发酵	mian fen fa jiao	6100
 预约订餐	yu yue ding can	6100
+食品批次	shi pin pi ci	6100
+食品标签	shi pin biao qian	6100
 食品过敏	shi pin guo min	6100
+食材保存	shi cai bao cun	6100
+食材切配	shi cai qie pei	6100
+食材处理	shi cai chu li	6100
+食材清洗	shi cai qing xi	6100
+食材腌制	shi cai yan zhi	6100
+食材解冻	shi cai jie dong	6100
+食材采购	shi cai cai gou	6100
 食物禁忌	shi wu jin ji	6100
 餐位预订	can wei yu ding	6100
 餐具数量	can ju shu liang	6100
 餐具费用	can ju fei yong	6100
 餐厅预订	can ting yu ding	6100
 麻烦快一点	ma fan kuai yi dian	6100
+花生油	hua sheng you	5668
 我点外卖	wo dian wai mai	5424
 不点外卖	bu dian wai mai	5385
 你点外卖	ni dian wai mai	5385
 想点外卖	xiang dian wai mai	5270
+我在店里等你	wo zai dian li deng ni	5200
+送到楼下即可	song dao lou xia ji ke	5200
 点的外卖	dian de wai mai	5077
 动物餐厅	dong wu can ting	5039
 点了外卖	dian le wai mai	5039
@@ -62,8 +148,10 @@
 音乐餐厅	yin yue can ting	5039
 地下餐厅	di xia can ting	5000
 离婚餐厅	li hun can ting	5000
+平底锅	ping di guo	4978
 天空餐厅	tian kong can ting	4962
 点个外卖	dian ge wai mai	4962
+辣椒粉	la jiao fen	4893
 交通饭店	jiao tong fan dian	4847
 叫个外卖	jiao ge wai mai	4847
 和平饭店	he ping fan dian	4847
@@ -86,8 +174,12 @@
 点外卖	dian wai mai	4693
 送外卖	song wai mai	4693
 外卖情人	wai mai qing ren	4654
+老抽	lao chou	4624
 杀手餐厅	sha shou can ting	4616
 美味餐厅	mei wei can ting	4616
+量杯	liang bei	4603
+生抽	sheng chou	4583
+高压锅	gao ya guo	4583
 旋转餐厅	xuan zhuan can ting	4539
 菜单设置	cai dan she zhi	4500
 菜单设计	cai dan she ji	4500
@@ -107,11 +199,18 @@
 外卖呢	wai mai ne	4308
 外卖柜	wai mai gui	4308
 外卖的	wai mai de	4308
+完美烹饪	wan mei peng ren	4308
 我外卖	wo wai mai	4308
 拿外卖	na wai mai	4308
+烹饪中心	peng ren zhong xin	4308
+烹饪技巧	peng ren ji qiao	4308
+烹饪方式	peng ren fang shi	4308
+烹饪时间	peng ren shi jian	4308
+烹饪步骤	peng ren bu zhou	4308
 等外卖	deng wai mai	4308
 订外卖	ding wai mai	4308
 跑外卖	pao wai mai	4308
+料酒	liao jiu	4278
 一级菜单	yi ji cai dan	4193
 一餐厅	yi can ting	4193
 上级菜单	shang ji cai dan	4193
@@ -129,8 +228,12 @@
 风味餐厅	feng wei can ting	4077
 饭店里	fan dian li	4077
 自助餐厅	zi zhu can ting	4039
+减肥食谱	jian fei shi pu	3962
+秘密食谱	mi mi shi pu	3962
+小苏打	xiao su da	3958
 五星饭店	wu xing fan dian	3924
 星级饭店	xing ji fan dian	3924
+中式烹饪	zhong shi peng ren	3808
 去餐厅	qu can ting	3808
 在餐厅	zai can ting	3808
 客餐厅	ke can ting	3808
@@ -160,11 +263,15 @@
 下拉菜单	xia la cai dan	3462
 国宾饭店	guo bin fan dian	3462
 外卖小哥	wai mai xiao ge	3462
+炒菜锅	chao cai guo	3462
+芝麻油	zhi ma you	3439
 糖糖餐厅	tang tang can ting	3385
 凯伦饭店	kai lun fan dian	3308
+煮饭菜	zhu fan cai	3308
 假面饭店	jia mian fan dian	3270
 菜单键	cai dan jian	3270
 饭店迷情	fan dian mi qing	3270
+美食菜谱	mei shi cai pu	3231
 招牌菜	zhao pai cai	3120
 点餐助手	dian can zhu shou	3039
 你的外卖	ni de wai mai	3000
@@ -175,9 +282,32 @@
 点外卖吧	dian wai mai ba	3000
 订外卖了	ding wai mai le	3000
 送外卖的	song wai mai de	3000
+炒菜花	chao cai hua	2962
+不煮饭	bu zhu fan	2924
+你煮饭	ni zhu fan	2924
+在煮饭	zai zhu fan	2924
+我煮饭	wo zhu fan	2924
+没煮饭	mei zhu fan	2924
+煮饭了	zhu fan le	2924
+煮饭吃	zhu fan chi	2924
+煮饭吗	zhu fan ma	2924
+煮饭机	zhu fan ji	2924
+煮饭的	zhu fan de	2924
+要煮饭	yao zhu fan	2924
+黑胡椒	hei hu jiao	2817
 浮华饭店	fu hua fan dian	2731
+不炒菜	bu chao cai	2654
 为你点餐	wei ni dian can	2654
+你炒菜	ni chao cai	2654
+吃炒菜	chi chao cai	2654
+在炒菜	zai chao cai	2654
 我在餐厅	wo zai can ting	2654
+我炒菜	wo chao cai	2654
+没炒菜	mei chao cai	2654
+炒菜了	chao cai le	2654
+炒菜吧	chao cai ba	2654
+炒菜呢	chao cai ne	2654
+炒菜的	chao cai de	2654
 到饭店了	dao fan dian le	2616
 开饭店的	kai fan dian de	2616
 我在饭店	wo zai fan dian	2616
@@ -185,4 +315,18 @@
 柳京饭店	liu jing fan dian	2616
 礼查饭店	li cha fan dian	2616
 翠宫饭店	cui gong fan dian	2616
+豆瓣酱	dou ban jiang	2305
+我在煮饭	wo zai zhu fan	2116
+我煮饭了	wo zhu fan le	2116
+煮饭了吗	zhu fan le ma	2116
+煮饭去了	zhu fan qu le	2116
+我在炒菜	wo zai chao cai	1962
 为您点餐	wei nin dian can	1885
+沙拉酱	sha la jiang	1651
+蚝油	hao you	1630
+不粘锅	bu nian guo	1133
+酵母粉	jiao mu fen	808
+玉米油	yu mi you	780
+五香粉	wu xiang fen	605
+泡打粉	pao da fen	241
+白胡椒	bai hu jiao	91
