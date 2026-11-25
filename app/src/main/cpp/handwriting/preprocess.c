@@ -41,13 +41,21 @@ static int resample_pass_(
     float inv_filterscl = 1.0f / filterscale;
 
     /* 预算 (xmin, xmax, weights),内层循环只 weighted-sum,
-     * 完全按 Pillow ImagingResample 的 calc 流程。 */
-    int*    xmin    = (int*)   malloc(sizeof(int)   * (size_t) out_dim);
-    int*    xmax    = (int*)   malloc(sizeof(int)   * (size_t) out_dim);
-    int     max_k   = (int)(2.0f * filterscale + 2.0f);  /* 上界,实际可能更小 */
-    float*  weights = (float*) malloc(sizeof(float) * (size_t) out_dim * (size_t) max_k);
+     * 完全按 Pillow ImagingResample 的 calc 流程。
+     * out_dim 最大为 HCCR_CONTENT_SIZE (56),优先用栈缓冲避免高频 malloc/free。 */
+    int     xmin_stack[HCCR_CONTENT_SIZE];
+    int     xmax_stack[HCCR_CONTENT_SIZE];
+    float   weights_stack[HCCR_CONTENT_SIZE * 24];
+    int     max_k = (int)(2.0f * filterscale + 2.0f);  /* 上界,实际可能更小 */
+    size_t  w_count = (size_t) out_dim * (size_t) max_k;
+    int     use_stack_dim = out_dim <= HCCR_CONTENT_SIZE;
+    int     use_stack_w = w_count <= (sizeof(weights_stack) / sizeof(weights_stack[0]));
+    int*    xmin    = use_stack_dim ? xmin_stack : (int*) malloc(sizeof(int) * (size_t) out_dim);
+    int*    xmax    = use_stack_dim ? xmax_stack : (int*) malloc(sizeof(int) * (size_t) out_dim);
+    float*  weights = use_stack_w ? weights_stack : (float*) malloc(sizeof(float) * w_count);
     if (!xmin || !xmax || !weights) {
-        free(xmin); free(xmax); free(weights);
+        if (!use_stack_dim) { free(xmin); free(xmax); }
+        if (!use_stack_w) free(weights);
         return 0;
     }
 
@@ -93,7 +101,8 @@ static int resample_pass_(
         }
     }
 
-    free(xmin); free(xmax); free(weights);
+    if (!use_stack_dim) { free(xmin); free(xmax); }
+    if (!use_stack_w) free(weights);
     return 1;
 }
 
@@ -120,10 +129,13 @@ int hccr_preprocess(const uint8_t* gray, int w, int h, float* out) {
         return 0;
     }
 
-    /* 2. crop bbox 到 cropped */
+    /* 2. crop bbox 到 cropped (常规手写尺寸优先使用栈缓冲) */
     int cropW = max_x - min_x + 1;
     int cropH = max_y - min_y + 1;
-    uint8_t* cropped = (uint8_t*) malloc((size_t) cropW * (size_t) cropH);
+    uint8_t cropped_stack[128 * 128];
+    size_t cropped_bytes = (size_t) cropW * (size_t) cropH;
+    int cropped_heap = cropped_bytes > sizeof(cropped_stack);
+    uint8_t* cropped = cropped_heap ? (uint8_t*) malloc(cropped_bytes) : cropped_stack;
     if (!cropped) return 0;
     for (int y = 0; y < cropH; y++) {
         memcpy(cropped + (size_t) y * (size_t) cropW,
@@ -137,12 +149,16 @@ int hccr_preprocess(const uint8_t* gray, int w, int h, float* out) {
     int   newW    = imax_i(1, iround_f((float) cropW * scale));
     int   newH    = imax_i(1, iround_f((float) cropH * scale));
 
-    uint8_t* tmp     = (uint8_t*) malloc((size_t) newW * (size_t) cropH);
-    uint8_t* resized = (uint8_t*) malloc((size_t) newW * (size_t) newH);
-    if (!tmp || !resized ||
+    uint8_t tmp_stack[HCCR_CONTENT_SIZE * 128];
+    size_t tmp_bytes = (size_t) newW * (size_t) cropH;
+    int tmp_heap = tmp_bytes > sizeof(tmp_stack);
+    uint8_t* tmp = tmp_heap ? (uint8_t*) malloc(tmp_bytes) : tmp_stack;
+    uint8_t resized[HCCR_CONTENT_SIZE * HCCR_CONTENT_SIZE];
+    if (!tmp ||
         !resample_pass_(cropped, cropW, cropH, tmp, newW, cropH, 1) ||
         !resample_pass_(tmp, newW, cropH, resized, newW, newH, 0)) {
-        free(cropped); free(tmp); free(resized);
+        if (cropped_heap) free(cropped);
+        if (tmp_heap) free(tmp);
         return 0;
     }
 
@@ -163,6 +179,7 @@ int hccr_preprocess(const uint8_t* gray, int w, int h, float* out) {
         out[i] = (float)(255 - canvas[i]) / 255.0f;
     }
 
-    free(cropped); free(tmp); free(resized);
+    if (cropped_heap) free(cropped);
+    if (tmp_heap) free(tmp);
     return 1;
 }

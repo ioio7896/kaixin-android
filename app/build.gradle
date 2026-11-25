@@ -60,7 +60,10 @@ android {
     }
 
     // Map bundled dictionary and NCNN binary model weights directly from the APK without decompression.
-    androidResources { noCompress += ["dict", "bin"] }
+    // Keep the OpenCC and stroke tables available when the native engine is unavailable.
+    androidResources {
+        noCompress += ["dict", "bin"]
+    }
 
     lint {
         checkTestSources = false

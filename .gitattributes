@@ -1,1 +1,9 @@
 downloads/kaixin-android-debug.apk filter=lfs diff=lfs merge=lfs -text
+
+# These files are validated against SHA-256 hashes during the build.
+/lexicon/zh-ext/*.txt text eol=lf
+/app/src/main/assets/handwriting/**/*.ncnn.param text eol=lf
+/app/src/main/assets/handwriting/charset.json text eol=lf
+/app/src/main/assets/handwriting/extended/characters.json text eol=lf
+/app/src/main/assets/speech/*.ncnn.param text eol=lf
+/app/src/main/assets/speech/tokens.txt text eol=lf

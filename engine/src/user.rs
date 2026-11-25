@@ -8,15 +8,18 @@
 //! Context snapshots start with a header identifying the seconds-based format.
 
 use crate::dict::SeqIndex;
-use crate::fxhash::FxHashMap;
+use crate::fxhash::{FxHashMap, FxHashSet};
 use crate::syllable::{split_reading, Syllables};
 use std::collections::BTreeMap;
+use std::fmt::Write;
 use std::ops::Bound::{Included, Unbounded};
 use std::sync::OnceLock;
 
 pub const MAX_LEARNED: usize = 20_000;
 pub const MAX_CONTEXT: usize = 30_000;
 const CONTEXT_HEADER: &str = "KXCTX1";
+const WORDS_BIN_MAGIC: &[u8; 6] = b"KXUSR1";
+const CONTEXT_BIN_MAGIC: &[u8; 6] = b"KXCTX2";
 
 #[derive(Clone, Debug)]
 pub struct UserWord {
@@ -50,6 +53,7 @@ pub struct UserModel {
     english: BTreeMap<String, (String, u32, u64)>,
     custom: Vec<UserWord>,
     aliases: AliasIndex,
+    blocked: FxHashSet<String>,
     context: FxHashMap<String, ContextGroup>,
     bigram_count: usize,
     trigram_count: usize,
@@ -70,6 +74,95 @@ pub(crate) fn now() -> u64 {
 
 fn clean(field: &str) -> String {
     field.replace(['\t', '\n', '\r'], " ")
+}
+
+#[inline]
+fn write_str_u16(out: &mut Vec<u8>, value: &str) {
+    let bytes = value.as_bytes();
+    let len = bytes.len().min(u16::MAX as usize);
+    let len = if len < bytes.len() {
+        let mut end = len;
+        while end > 0 && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        end
+    } else {
+        len
+    };
+    out.extend_from_slice(&(len as u16).to_le_bytes());
+    out.extend_from_slice(&bytes[..len]);
+}
+
+#[inline]
+fn read_u8(raw: &[u8], cursor: &mut usize) -> Option<u8> {
+    let v = *raw.get(*cursor)?;
+    *cursor += 1;
+    Some(v)
+}
+
+#[inline]
+fn read_u32(raw: &[u8], cursor: &mut usize) -> Option<u32> {
+    let end = cursor.checked_add(4)?;
+    let slice = raw.get(*cursor..end)?;
+    *cursor = end;
+    Some(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
+}
+
+#[inline]
+fn read_u64(raw: &[u8], cursor: &mut usize) -> Option<u64> {
+    let end = cursor.checked_add(8)?;
+    let slice = raw.get(*cursor..end)?;
+    *cursor = end;
+    Some(u64::from_le_bytes([
+        slice[0], slice[1], slice[2], slice[3],
+        slice[4], slice[5], slice[6], slice[7],
+    ]))
+}
+
+#[inline]
+fn read_str_u16<'a>(raw: &'a [u8], cursor: &mut usize) -> Option<&'a str> {
+    let end_len = cursor.checked_add(2)?;
+    let len_bytes = raw.get(*cursor..end_len)?;
+    let len = u16::from_le_bytes([len_bytes[0], len_bytes[1]]) as usize;
+    let end = end_len.checked_add(len)?;
+    let text = std::str::from_utf8(raw.get(end_len..end)?).ok()?;
+    *cursor = end;
+    Some(text)
+}
+
+fn read_words_binary(raw: &[u8], mut row: impl FnMut(&str, &str, u32, u64, u8)) -> Option<()> {
+    let raw = raw.strip_prefix(WORDS_BIN_MAGIC)?;
+    let mut cursor = 0;
+    let learned_count = read_u32(raw, &mut cursor)?;
+    for _ in 0..learned_count {
+        let word = read_str_u16(raw, &mut cursor)?;
+        let reading = read_str_u16(raw, &mut cursor)?;
+        let count = read_u32(raw, &mut cursor)?;
+        let last = read_u64(raw, &mut cursor)?;
+        let flags = read_u8(raw, &mut cursor)?;
+        row(word, reading, count, last, flags & 1);
+    }
+    let english_count = read_u32(raw, &mut cursor)?;
+    for _ in 0..english_count {
+        let code = read_str_u16(raw, &mut cursor)?;
+        let word = read_str_u16(raw, &mut cursor)?;
+        let count = read_u32(raw, &mut cursor)?;
+        let last = read_u64(raw, &mut cursor)?;
+        row(word, code, count, last, 2);
+    }
+    (cursor == raw.len()).then_some(())
+}
+
+/// Preserve the stored readings for the word manager without consulting a syllable table.
+pub(crate) fn decode_words_to_text(raw: &[u8]) -> Option<String> {
+    if !raw.starts_with(WORDS_BIN_MAGIC) {
+        return std::str::from_utf8(raw).ok().map(str::to_owned);
+    }
+    let mut text = String::new();
+    read_words_binary(raw, |word, reading, count, last, flags| {
+        let _ = writeln!(text, "W\t{}\t{}\t{count}\t{last}\t{flags}", clean(word), clean(reading));
+    })?;
+    Some(text)
 }
 
 impl UserModel {
@@ -349,6 +442,21 @@ impl UserModel {
         self.custom_words_revision += 1;
     }
 
+    pub fn set_blocked(&mut self, words: Vec<String>) {
+        self.blocked.clear();
+        self.blocked.extend(words.into_iter().filter(|w| !w.is_empty()));
+    }
+
+    #[inline]
+    pub fn is_blocked(&self, word: &str) -> bool {
+        !self.blocked.is_empty() && self.blocked.contains(word)
+    }
+
+    #[inline]
+    pub(crate) fn blocked_set(&self) -> Option<&FxHashSet<String>> {
+        if self.blocked.is_empty() { None } else { Some(&self.blocked) }
+    }
+
     pub fn learned_readings(&self, syl: &Syllables, word: &str) -> Vec<String> {
         self.learned
             .iter()
@@ -390,6 +498,151 @@ impl UserModel {
             }
         }
         out
+    }
+
+    pub fn export_words_binary(&self, syl: &Syllables) -> Vec<u8> {
+        let mut out = Vec::with_capacity(16 + (self.learned.len() + self.english.len()) * 32);
+        out.extend_from_slice(WORDS_BIN_MAGIC);
+        out.extend_from_slice(&(self.learned.len() as u32).to_le_bytes());
+        let mut reading = String::new();
+        for w in &self.learned {
+            write_str_u16(&mut out, &w.word);
+            reading.clear();
+            for (idx, &s) in w.seq.iter().enumerate() {
+                if idx > 0 {
+                    reading.push(' ');
+                }
+                reading.push_str(syl.name(s));
+            }
+            write_str_u16(&mut out, &reading);
+            out.extend_from_slice(&w.count.to_le_bytes());
+            out.extend_from_slice(&w.last.to_le_bytes());
+            out.push(if w.pinned { 1 } else { 0 });
+        }
+        out.extend_from_slice(&(self.english.len() as u32).to_le_bytes());
+        for (code, (word, count, last)) in &self.english {
+            write_str_u16(&mut out, code);
+            write_str_u16(&mut out, word);
+            out.extend_from_slice(&count.to_le_bytes());
+            out.extend_from_slice(&last.to_le_bytes());
+        }
+        out
+    }
+
+    pub fn export_context_binary(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(16 + (self.bigram_count + self.trigram_count) * 24);
+        out.extend_from_slice(CONTEXT_BIN_MAGIC);
+        out.extend_from_slice(&(self.context.len() as u32).to_le_bytes());
+        for (prev, group) in &self.context {
+            write_str_u16(&mut out, prev);
+            out.extend_from_slice(&(group.bigram.len() as u32).to_le_bytes());
+            for (word, (count, last)) in &group.bigram {
+                write_str_u16(&mut out, word);
+                out.extend_from_slice(&count.to_le_bytes());
+                out.extend_from_slice(&last.to_le_bytes());
+            }
+            out.extend_from_slice(&(group.trigram.len() as u32).to_le_bytes());
+            for (prev2, rows) in &group.trigram {
+                write_str_u16(&mut out, prev2);
+                out.extend_from_slice(&(rows.len() as u32).to_le_bytes());
+                for (word, (count, last)) in rows {
+                    write_str_u16(&mut out, word);
+                    out.extend_from_slice(&count.to_le_bytes());
+                    out.extend_from_slice(&last.to_le_bytes());
+                }
+            }
+        }
+        out
+    }
+
+    /// Imports learned words and/or context from either binary (`KXUSR1`/`KXCTX2`) or legacy UTF-8 text.
+    pub fn import_bytes(&mut self, syl: &Syllables, words: Option<&[u8]>, context: Option<&[u8]>) {
+        if let Some(raw) = words {
+            if raw.starts_with(WORDS_BIN_MAGIC) {
+                if self.import_words_binary(syl, raw) {
+                    self.reindex();
+                    self.words_revision += 1;
+                }
+            } else if let Ok(text) = std::str::from_utf8(raw) {
+                self.import(syl, Some(text), None);
+            }
+        }
+        if let Some(raw) = context {
+            if raw.starts_with(CONTEXT_BIN_MAGIC) {
+                if self.import_context_binary(raw) {
+                    self.recount_context();
+                    self.context_revision += 1;
+                }
+            } else if let Ok(text) = std::str::from_utf8(raw) {
+                self.import(syl, None, Some(text));
+            }
+        }
+    }
+
+    fn import_words_binary(&mut self, syl: &Syllables, raw: &[u8]) -> bool {
+        let mut learned = Vec::new();
+        let mut english = BTreeMap::new();
+        let parsed = read_words_binary(raw, |word, reading, count, last, flags| {
+            if flags & 2 != 0 {
+                english.insert(reading.to_string(), (word.to_string(), count, last));
+                return;
+            }
+            let seq: Option<Vec<u16>> = split_reading(reading).iter().map(|s| syl.id(s)).collect();
+            let Some(seq) = seq.filter(|s| !s.is_empty()) else { return };
+            learned.push(UserWord {
+                word: word.to_string(),
+                seq,
+                count,
+                last,
+                pinned: flags & 1 != 0,
+                custom: false,
+            });
+        });
+        if parsed.is_none() {
+            return false;
+        }
+        self.learned = learned;
+        self.english = english;
+        true
+    }
+
+    fn import_context_binary(&mut self, raw: &[u8]) -> bool {
+        let mut cursor = CONTEXT_BIN_MAGIC.len();
+        let Some(group_count) = read_u32(raw, &mut cursor) else { return false };
+        let group_count = (group_count as usize).min(MAX_CONTEXT * 2);
+        let mut context: FxHashMap<String, ContextGroup> = FxHashMap::default();
+        context.reserve(group_count.min(4096));
+        for _ in 0..group_count {
+            let Some(prev) = read_str_u16(raw, &mut cursor) else { return false };
+            let Some(bi_count) = read_u32(raw, &mut cursor) else { return false };
+            let mut group = ContextGroup::default();
+            for _ in 0..(bi_count as usize).min(MAX_CONTEXT) {
+                let Some(word) = read_str_u16(raw, &mut cursor) else { return false };
+                let Some(count) = read_u32(raw, &mut cursor) else { return false };
+                let Some(last) = read_u64(raw, &mut cursor) else { return false };
+                group.bigram.insert(word.to_string(), (count, last));
+            }
+            let Some(tri_groups) = read_u32(raw, &mut cursor) else { return false };
+            for _ in 0..(tri_groups as usize).min(MAX_CONTEXT) {
+                let Some(prev2) = read_str_u16(raw, &mut cursor) else { return false };
+                let Some(row_count) = read_u32(raw, &mut cursor) else { return false };
+                let mut rows = ContextCounts::default();
+                for _ in 0..(row_count as usize).min(MAX_CONTEXT) {
+                    let Some(word) = read_str_u16(raw, &mut cursor) else { return false };
+                    let Some(count) = read_u32(raw, &mut cursor) else { return false };
+                    let Some(last) = read_u64(raw, &mut cursor) else { return false };
+                    rows.insert(word.to_string(), (count, last));
+                }
+                if !rows.is_empty() {
+                    group.trigram.insert(prev2.to_string(), rows);
+                }
+            }
+            if !group.bigram.is_empty() || !group.trigram.is_empty() {
+                context.insert(prev.to_string(), group);
+            }
+        }
+        self.context = context;
+        true
     }
 
     /// Replaces learned words and/or context from exported text.

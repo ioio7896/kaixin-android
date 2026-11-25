@@ -14,6 +14,7 @@ final class ImePerformanceMonitor {
     private static final long[][][] samples = new long[4][METRICS.length][WINDOW_SIZE];
     private static final int[][] counts = new int[4][METRICS.length];
     private static volatile int phase;
+    private static volatile Boolean loggingEnabled;
     private static boolean shown;
     private static long inputStarted;
     private static final int[] candidateFrameCounts = new int[2];
@@ -50,9 +51,22 @@ final class ImePerformanceMonitor {
     static void query(Context context, long started, int count, boolean t9) { stage(context, "full_query", started, count, t9); }
     static void fastCandidates(Context context, long started, int count, boolean t9) { stage(context, "fast_candidates", started, count, t9); }
     static void candidateReady(Context context, long started, int count, boolean t9) { stage(context, "candidate_ready", started, count, t9); }
+    static void refreshLoggingEnabled(Context context) {
+        if (context == null) return;
+        loggingEnabled = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                .getBoolean("performance_logging", false);
+    }
+    private static boolean isLoggingEnabled(Context context) {
+        Boolean cached = loggingEnabled;
+        if (cached != null) return cached;
+        if (context == null) return false;
+        boolean value = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
+                .getBoolean("performance_logging", false);
+        loggingEnabled = value;
+        return value;
+    }
     static synchronized void candidateTopChange(Context context, boolean changed, boolean t9) {
-        if (context == null || !context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                .getBoolean("performance_logging", false)) return;
+        if (!isLoggingEnabled(context)) return;
         int mode = t9 ? 1 : 0;
         candidateFrameCounts[mode]++;
         if (changed) candidateTopChanges[mode]++;
@@ -62,11 +76,11 @@ final class ImePerformanceMonitor {
         }
     }
     static void stage(Context context, String metric, long started, int count, boolean t9) {
+        if (!isLoggingEnabled(context)) return;
         duration(context, metric, Math.max(0L, start() - started), count, t9);
     }
     static void duration(Context context, String metric, long nanos, int count, boolean t9) {
-        if (context == null || !context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-                .getBoolean("performance_logging", false)) return;
+        if (!isLoggingEnabled(context)) return;
         long elapsed = Math.max(0, nanos / 1_000_000L); int currentPhase = phase;
         Log.d(TAG, metric + " phase=" + (currentPhase == 0 ? "cold" : "warm")
                 + " mode=" + (t9 ? "t9" : "alpha") + " elapsed=" + elapsed + "ms candidates=" + count);

@@ -6,13 +6,11 @@ import android.os.OperationCanceledException;
 /** Cancellation and timing for one candidate query on the worker lanes. */
 final class QueryWork {
     private static final ThreadLocal<CancellationSignal> current = new ThreadLocal<>();
+    private static final ThreadLocal<Long> cancelGen = new ThreadLocal<>();
     private static final ThreadLocal<java.util.Map<String, Long>> timings = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> firstScreen = new ThreadLocal<>();
     private static final ThreadLocal<Long> deadline = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> limited = new ThreadLocal<>();
-
-    /** Per-ticket scratch space shared by the screen and supplement stages. */
-    static final class StageData { }
 
     private QueryWork() { }
 
@@ -30,12 +28,19 @@ final class QueryWork {
         return true;
     }
     static boolean wasLimited() { return Boolean.TRUE.equals(limited.get()); }
-    static void begin(CancellationSignal signal) { begin(signal, null); }
-    static void begin(CancellationSignal signal, StageData data) {
-        current.set(signal); timings.set(new java.util.HashMap<>()); limited.set(false);
+    static void begin(CancellationSignal signal, long nativeCancelGen) {
+        current.set(signal);
+        cancelGen.set(nativeCancelGen);
+        timings.set(new java.util.HashMap<>());
+        limited.set(false);
     }
     static void end() {
-        current.remove(); timings.remove(); firstScreen.remove(); deadline.remove(); limited.remove();
+        current.remove();
+        cancelGen.remove();
+        timings.remove();
+        firstScreen.remove();
+        deadline.remove();
+        limited.remove();
     }
     static void elapsed(String metric, long started) {
         java.util.Map<String, Long> values = timings.get();
@@ -47,6 +52,10 @@ final class QueryWork {
             ImePerformanceMonitor.duration(context, value.getKey(), value.getValue(), count, t9);
     }
     static CancellationSignal signal() { return current.get(); }
+    static long cancelGen() {
+        Long value = cancelGen.get();
+        return value == null ? 0L : value;
+    }
     static void check() {
         if (Thread.currentThread().isInterrupted()) throw new OperationCanceledException();
         CancellationSignal signal = current.get();

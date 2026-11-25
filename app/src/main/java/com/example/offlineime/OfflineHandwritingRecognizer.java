@@ -31,6 +31,59 @@ final class OfflineHandwritingRecognizer {
         return recognize(context, strokes, Collections.emptyList());
     }
 
+    private static final class NativeStrokeAnalysis {
+        final String strokeSeq;
+        final List<String> templateMatches;
+        NativeStrokeAnalysis(String strokeSeq, List<String> templateMatches) {
+            this.strokeSeq = strokeSeq;
+            this.templateMatches = templateMatches;
+        }
+    }
+
+    private static NativeStrokeAnalysis analyzeNative(List<? extends List<Point>> strokes) {
+        int strokeCount = strokes.size();
+        int totalPoints = 0;
+        for (List<Point> stroke : strokes) {
+            if (stroke == null || stroke.isEmpty()) return null;
+            totalPoints += stroke.size();
+        }
+        if (totalPoints == 0) return null;
+        float[] coords = new float[totalPoints * 2];
+        int[] lens = new int[strokeCount];
+        int out = 0;
+        for (int s = 0; s < strokeCount; s++) {
+            List<Point> stroke = strokes.get(s);
+            lens[s] = stroke.size();
+            for (int p = 0; p < stroke.size(); p++) {
+                Point pt = stroke.get(p);
+                if (pt == null || !Float.isFinite(pt.x) || !Float.isFinite(pt.y)) return null;
+                coords[out++] = pt.x;
+                coords[out++] = pt.y;
+            }
+        }
+        byte[] encoded;
+        try {
+            encoded = NativeEngine.analyzeStrokes(coords, lens);
+        } catch (LinkageError ignored) {
+            return null;
+        }
+        if (encoded == null || encoded.length < 8) return null;
+        java.nio.ByteBuffer buf = java.nio.ByteBuffer.wrap(encoded).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        int seqLen = buf.getInt();
+        if (seqLen < 0 || buf.remaining() < seqLen + 4) return null;
+        String seq = seqLen == 0 ? "" : new String(encoded, buf.position(), seqLen, java.nio.charset.StandardCharsets.UTF_8);
+        buf.position(buf.position() + seqLen);
+        int tmplCount = buf.getInt();
+        ArrayList<String> matches = new ArrayList<>(Math.max(0, tmplCount));
+        for (int i = 0; i < tmplCount && buf.remaining() >= 4; i++) {
+            int len = buf.getInt();
+            if (len < 0 || buf.remaining() < len) break;
+            matches.add(new String(encoded, buf.position(), len, java.nio.charset.StandardCharsets.UTF_8));
+            buf.position(buf.position() + len);
+        }
+        return new NativeStrokeAnalysis(seq, matches);
+    }
+
     static List<String> recognize(Context context, List<? extends List<Point>> strokes,
                                   List<String> neuralCandidates) {
         if (strokes == null || strokes.isEmpty() || strokes.size() > MAX_STROKES)
@@ -39,14 +92,22 @@ final class OfflineHandwritingRecognizer {
         boolean traditional = "traditional".equals(context.getSharedPreferences(
                 "settings", Context.MODE_PRIVATE).getString("output_script", "simplified"));
         for (String value : neuralCandidates) addCandidate(context, result, value, traditional);
-        for (String value : recognize(strokes)) addCandidate(context, result, value, traditional);
-        StringBuilder sequence = new StringBuilder(strokes.size());
-        for (List<Point> stroke : strokes) {
-            if (Thread.currentThread().isInterrupted()) return Collections.emptyList();
-            sequence.append(classifyStroke(resample(stroke, SAMPLE_COUNT)));
+        NativeStrokeAnalysis nativeAnalysis = analyzeNative(strokes);
+        String strokeSequence;
+        if (nativeAnalysis != null) {
+            for (String value : nativeAnalysis.templateMatches) addCandidate(context, result, value, traditional);
+            strokeSequence = nativeAnalysis.strokeSeq;
+        } else {
+            for (String value : recognize(strokes)) addCandidate(context, result, value, traditional);
+            StringBuilder sequence = new StringBuilder(strokes.size());
+            for (List<Point> stroke : strokes) {
+                if (Thread.currentThread().isInterrupted()) return Collections.emptyList();
+                sequence.append(classifyStroke(resample(stroke, SAMPLE_COUNT)));
+            }
+            strokeSequence = sequence.toString();
         }
         for (String value : StrokeInputDictionary.get(context)
-                .suggestCharacters(context, sequence.toString(), 16)) {
+                .suggestCharacters(context, strokeSequence, 16)) {
             if (Thread.currentThread().isInterrupted()) return Collections.emptyList();
             addCandidate(context, result, value, traditional);
             if (result.size() >= 20) break;

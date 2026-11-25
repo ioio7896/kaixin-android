@@ -14,7 +14,7 @@ use std::cmp::Ordering;
 
 pub const MAGIC: &[u8; 8] = b"KXDICT01";
 // Increment this when the binary layout or the interpretation of stored fields changes.
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 pub const HEADER_LEN: usize = 128;
 pub const ENTRY_LEN: usize = 12;
 pub const ALPHA_LEN: usize = 12;
@@ -92,6 +92,7 @@ pub enum Field {
     StrokeSimpRankOff = 112,
     StrokeTradRankCount = 116,
     StrokeTradRankOff = 120,
+    FirstSylRangesOff = 124,
 }
 
 pub enum Backing {
@@ -120,11 +121,13 @@ pub struct Entry {
 pub struct Dict {
     backing: Backing,
     pub syllables: Syllables,
-    /// `first_syl_ranges[s]..first_syl_ranges[s + 1]` is the entry range whose first syllable is `s`.
-    first_syl_ranges: Vec<usize>,
+    /// Offset of `syl_count + 1` u32 entry indices in the mmap'd dictionary for O(1) depth-0 buckets.
+    first_syl_ranges: usize,
+    syl_count: usize,
     word_count: usize,
     word_offsets: usize,
     word_blob: usize,
+    word_blob_len: usize,
     entry_count: usize,
     entries: usize,
     seq: usize,
@@ -192,12 +195,15 @@ impl Dict {
         };
         let field = |f: Field| fields[f as usize / 4];
         let syl_count = names.len();
-        let mut dict = Dict {
+        let word_blob_len = field(Field::WordBlobLen);
+        let dict = Dict {
             syllables: Syllables::new(names),
-            first_syl_ranges: Vec::new(),
+            first_syl_ranges: field(Field::FirstSylRangesOff),
+            syl_count,
             word_count: field(Field::WordCount),
             word_offsets: field(Field::WordOffsetsOff),
             word_blob: field(Field::WordBlobOff),
+            word_blob_len,
             entry_count: field(Field::EntryCount),
             entries: field(Field::EntriesOff),
             seq: field(Field::SeqOff),
@@ -221,8 +227,10 @@ impl Dict {
             backing,
         };
         let len = dict.bytes().len();
-        let word_blob_len = field(Field::WordBlobLen);
         let Some(word_offsets_count) = dict.word_count.checked_add(1) else {
+            return Err("truncated dictionary".into());
+        };
+        let Some(first_syl_count) = syl_count.checked_add(1) else {
             return Err("truncated dictionary".into());
         };
         if !check_range(dict.word_offsets, word_offsets_count, 4, len)
@@ -237,41 +245,38 @@ impl Dict {
             || !check_range(dict.stroke_seq, dict.stroke_seq_count, PAIR_LEN, len)
             || !check_range(dict.stroke_simp_rank, dict.stroke_simp_rank_count, PAIR_LEN, len)
             || !check_range(dict.stroke_trad_rank, dict.stroke_trad_rank_count, PAIR_LEN, len)
+            || !check_range(dict.first_syl_ranges, first_syl_count, 4, len)
         {
             return Err("truncated dictionary".into());
         }
 
-        // Validate word_blob UTF-8 and word_offsets boundaries once on open so `word()` can be zero-check.
+        // Spot-check word offset sentinels and precomputed first-syllable range bounds without faulting word_blob pages.
         {
             let b = dict.bytes();
-            let blob = std::str::from_utf8(&b[dict.word_blob..dict.word_blob + word_blob_len])
-                .map_err(|_| "invalid word table".to_string())?;
+            let first_off = u32_at(b, dict.word_offsets) as usize;
+            let last_off = u32_at(b, dict.word_offsets + dict.word_count * 4) as usize;
+            if first_off > last_off || last_off > word_blob_len {
+                return Err("invalid word offset".into());
+            }
             let mut prev = 0usize;
-            for i in 0..word_offsets_count {
-                let off = u32_at(b, dict.word_offsets + i * 4) as usize;
-                if off < prev || off > word_blob_len || !blob.is_char_boundary(off) {
-                    return Err("invalid word offset".into());
+            for s in 0..first_syl_count {
+                let bound = u32_at(b, dict.first_syl_ranges + s * 4) as usize;
+                if bound < prev || bound > dict.entry_count {
+                    return Err("invalid first-syllable range".into());
                 }
-                prev = off;
+                prev = bound;
             }
         }
-
-        // Build O(1) first-syllable bucket table for depth-0 lookups.
-        let mut ranges = Vec::with_capacity(syl_count + 1);
-        let mut lo = 0usize;
-        for s in 0..=syl_count {
-            lo = dict.lower(lo, dict.entry_count, 0, s as i32);
-            ranges.push(lo);
-        }
-        dict.first_syl_ranges = ranges;
         Ok(dict)
     }
 
     #[inline]
     pub(crate) fn first_syllable_range(&self, syl: u16) -> (usize, usize) {
         let s = syl as usize;
-        if s + 1 < self.first_syl_ranges.len() {
-            (self.first_syl_ranges[s], self.first_syl_ranges[s + 1])
+        if s < self.syl_count {
+            let b = self.bytes();
+            let at = self.first_syl_ranges + s * 4;
+            (u32_at(b, at) as usize, u32_at(b, at + 4) as usize)
         } else {
             (0, 0)
         }
@@ -327,8 +332,10 @@ impl Dict {
         let b = self.bytes();
         let start = u32_at(b, self.word_offsets + id as usize * 4) as usize;
         let end = u32_at(b, self.word_offsets + id as usize * 4 + 4) as usize;
-        // SAFETY: Both offsets are in the table validated by `Dict::open` as UTF-8 boundaries.
-        unsafe { std::str::from_utf8_unchecked(&b[self.word_blob + start..self.word_blob + end]) }
+        if start > end || end > self.word_blob_len {
+            return "";
+        }
+        std::str::from_utf8(&b[self.word_blob + start..self.word_blob + end]).unwrap_or("")
     }
 
     /// Word id of an exact string.
@@ -429,6 +436,16 @@ impl Dict {
         lo
     }
 
+    fn upper_opencc_prefix(&self, base: usize, mut lo: usize, mut hi: usize, prefix: &[u8]) -> usize {
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            let (k_id, _) = self.pair_at(base, mid);
+            let k = self.word(k_id).as_bytes();
+            if k.starts_with(prefix) || k < prefix { lo = mid + 1 } else { hi = mid }
+        }
+        lo
+    }
+
     fn lookup_opencc_in(&self, base: usize, mut lo: usize, mut hi: usize, target: &[u8]) -> Option<&str> {
         while lo < hi {
             let mid = (lo + hi) / 2;
@@ -482,9 +499,10 @@ impl Dict {
                     || (lo + 1 < count && self.word(self.pair_at(base, lo + 1).0).as_bytes().starts_with(first_bytes)));
             let mut matched = false;
             if has_multi {
+                let hi = self.upper_opencc_prefix(base, lo + 1, count, first_bytes);
                 for len in (2..=max_len).rev() {
                     let candidate = &text.as_bytes()[offsets[i]..offsets[i + len]];
-                    if let Some(replacement) = self.lookup_opencc_in(base, lo, count, candidate) {
+                    if let Some(replacement) = self.lookup_opencc_in(base, lo, hi, candidate) {
                         out.push_str(replacement);
                         i += len;
                         matched = true;
@@ -523,48 +541,88 @@ impl Dict {
         None
     }
 
-    /// Five-stroke candidate lookup directly over the mmap'd stroke sequence & frequency tables.
-    /// Returns `(codepoint, score, exact)` tuples sorted by frequency.
+    /// Five-stroke candidate lookup directly over the mmap'd stroke sequence & frequency tables,
+    /// including '?' wildcard patterns. Returns `(codepoint, score, exact)` tuples sorted by frequency.
     pub fn suggest_stroke(&self, strokes: &str, traditional: bool, limit: usize) -> Option<Vec<StrokeCandidate>> {
-        self.suggest_stroke_cancellable(strokes, traditional, limit, &QueryCancellation::new(None))
+        self.suggest_stroke_cancellable(strokes, traditional, limit, None, &QueryCancellation::none())
             .ok().flatten()
     }
 
     pub(crate) fn suggest_stroke_cancellable(
-        &self, strokes: &str, traditional: bool, limit: usize, cancel: &QueryCancellation<'_>,
+        &self, strokes: &str, traditional: bool, limit: usize,
+        blocked: Option<&FxHashSet<String>>, cancel: &QueryCancellation<'_>,
     ) -> Result<Option<Vec<StrokeCandidate>>, QueryCancelled> {
         cancel.check()?;
         if self.stroke_seq_count == 0 {
             return Ok(None);
         }
-        if strokes.is_empty() || limit == 0 || !strokes.bytes().all(|b| (b'1'..=b'5').contains(&b)) {
+        if strokes.is_empty()
+            || limit == 0
+            || !strokes.bytes().all(|b| (b'1'..=b'5').contains(&b) || b == b'?')
+        {
             return Ok(Some(Vec::new()));
         }
         let key = strokes.as_bytes();
+        let first_wildcard = key.iter().position(|&b| b == b'?');
+        let literal_prefix = match first_wildcard {
+            Some(pos) => &key[..pos],
+            None => key,
+        };
         let seq_bytes = |i: usize| self.word(self.pair_at(self.stroke_seq, i).0).as_bytes();
-        let (mut lo, mut hi) = (0usize, self.stroke_seq_count);
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            if seq_bytes(mid) < key { lo = mid + 1 } else { hi = mid }
-        }
-        let start = lo;
-        hi = self.stroke_seq_count;
-        while lo < hi {
-            let mid = (lo + hi) / 2;
-            let s = seq_bytes(mid);
-            if s.starts_with(key) || s < key { lo = mid + 1 } else { hi = mid }
-        }
-        let end = lo;
+        let (start, end) = if literal_prefix.is_empty() {
+            (0usize, self.stroke_seq_count)
+        } else {
+            let (mut lo, mut hi) = (0usize, self.stroke_seq_count);
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                if seq_bytes(mid) < literal_prefix { lo = mid + 1 } else { hi = mid }
+            }
+            let start = lo;
+            hi = self.stroke_seq_count;
+            while lo < hi {
+                let mid = (lo + hi) / 2;
+                let s = seq_bytes(mid);
+                if s.starts_with(literal_prefix) || s < literal_prefix { lo = mid + 1 } else { hi = mid }
+            }
+            (start, lo)
+        };
 
         let mut exact_seen = FxHashSet::default();
         let mut exact: Vec<(u32, Option<u32>)> = Vec::new();
         let mut prefix_seen = FxHashSet::default();
         let mut prefix: Vec<(u32, Option<u32>)> = Vec::new();
+        let mut ch_buf = [0u8; 4];
         for i in start..end {
             let (s_id, chars_id) = self.pair_at(self.stroke_seq, i);
-            let is_exact = self.word(s_id).as_bytes() == key;
+            let candidate_seq = self.word(s_id).as_bytes();
+            let is_exact = if let Some(wild_pos) = first_wildcard {
+                cancel.step()?;
+                if candidate_seq.len() < key.len() {
+                    continue;
+                }
+                let mut matched = true;
+                for idx in wild_pos..key.len() {
+                    let k = key[idx];
+                    if k != b'?' && candidate_seq[idx] != k {
+                        matched = false;
+                        break;
+                    }
+                }
+                if !matched {
+                    continue;
+                }
+                candidate_seq.len() == key.len()
+            } else {
+                candidate_seq == key
+            };
             for ch in self.word(chars_id).chars() {
                 cancel.step()?;
+                if let Some(blocked_set) = blocked {
+                    let s = ch.encode_utf8(&mut ch_buf);
+                    if blocked_set.contains(s) {
+                        continue;
+                    }
+                }
                 let cp = ch as u32;
                 if is_exact {
                     if exact_seen.insert(cp) {
@@ -611,6 +669,26 @@ pub trait SeqIndex {
             if self.syllable(mid, depth) < value { lo = mid + 1 } else { hi = mid }
         }
         lo
+    }
+
+    /// Exponential (galloping) lower bound starting from `lo`, faster when the target is nearby.
+    fn lower_gallop(&self, lo: usize, hi: usize, depth: usize, value: i32) -> usize {
+        if lo >= hi || self.syllable(lo, depth) >= value {
+            return lo;
+        }
+        let mut step = 1usize;
+        let mut prev = lo;
+        while let Some(probe) = lo.checked_add(step) {
+            if probe >= hi {
+                return self.lower(prev + 1, hi, depth, value);
+            }
+            if self.syllable(probe, depth) >= value {
+                return self.lower(prev + 1, probe, depth, value);
+            }
+            prev = probe;
+            step = step.saturating_mul(2);
+        }
+        self.lower(prev + 1, hi, depth, value)
     }
 }
 

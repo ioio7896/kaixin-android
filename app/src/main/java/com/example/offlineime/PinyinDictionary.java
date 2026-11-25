@@ -133,12 +133,18 @@ public final class PinyinDictionary {
     private final AssetManager assets;
     private final Context context;
     private final SharedPreferences settings;
+    private final SharedPreferences.OnSharedPreferenceChangeListener settingsListener = (prefs, key) -> refreshCachedSettings();
     private final ReentrantReadWriteLock lock = new ReentrantReadWriteLock();
     private long handle;
     private NativeRef nativeRef;
     private boolean closed;
     private volatile boolean loaded;
     private volatile boolean userReady;
+    private volatile int cachedAlphaFlags;
+    private volatile int cachedNineFlags;
+    private volatile boolean cachedBasicContext = true;
+    private volatile boolean cachedDoubleInitials = true;
+    private volatile boolean cachedPrivacyMode;
     private long wordsRevision = Long.MIN_VALUE;
     private long contextRevision = Long.MIN_VALUE;
     private long customRevision = Long.MIN_VALUE;
@@ -150,6 +156,36 @@ public final class PinyinDictionary {
         this.context = context == null ? null : context.getApplicationContext();
         this.settings = this.context == null ? null
                 : this.context.getSharedPreferences("settings", Context.MODE_PRIVATE);
+        refreshCachedSettings();
+        if (this.settings != null) {
+            this.settings.registerOnSharedPreferenceChangeListener(settingsListener);
+        }
+    }
+
+    void refreshCachedSettings() {
+        cachedBasicContext = preference("basic_context", true);
+        cachedDoubleInitials = preference("double_initials", true);
+        cachedPrivacyMode = preference("privacy_mode", false);
+        int common = 0;
+        if (preference("full_pinyin", true)) common |= NativeEngine.FLAG_FULL;
+        if (cachedDoubleInitials) common |= NativeEngine.FLAG_DOUBLE_INITIALS;
+        if (preference("mixed_english", true)) common |= NativeEngine.FLAG_MIXED_ENGLISH;
+        if (cachedBasicContext) common |= NativeEngine.FLAG_BASIC_CONTEXT;
+        if (preference("fuzzy_pinyin", false)) {
+            common |= NativeEngine.FLAG_FUZZY;
+            for (int i = 0; i < FUZZY_KEYS.length; i++)
+                if (preference(FUZZY_KEYS[i], false)) common |= 1 << (NativeEngine.FUZZY_SHIFT + i);
+        }
+        boolean shortPinyin = preference("short_pinyin", true);
+        int alpha = common;
+        if (shortPinyin) alpha |= NativeEngine.FLAG_SHORT;
+        if (preference("sentence_prediction", true)) alpha |= NativeEngine.FLAG_SENTENCE;
+        int nine = common;
+        if (shortPinyin && preference("nine_short_words", true)) nine |= NativeEngine.FLAG_SHORT;
+        if (preference("nine_word_completion", false)) nine |= NativeEngine.FLAG_NINE_COMPLETION;
+        if (preference("nine_sentence_prediction", false)) nine |= NativeEngine.FLAG_SENTENCE;
+        cachedAlphaFlags = alpha;
+        cachedNineFlags = nine;
     }
 
     public boolean isLoaded() { return loaded; }
@@ -210,6 +246,7 @@ public final class PinyinDictionary {
     }
 
     void close() {
+        if (settings != null) settings.unregisterOnSharedPreferenceChangeListener(settingsListener);
         lock.writeLock().lock();
         try {
             closed = true;
@@ -221,6 +258,23 @@ public final class PinyinDictionary {
             if (handle != 0) NativeEngine.close(handle);
             handle = 0;
         } finally { lock.writeLock().unlock(); }
+    }
+
+    /** Atomically invalidates any in-flight native queries and returns the new generation token. */
+    long cancelQueries() {
+        lock.readLock().lock();
+        try {
+            return handle == 0 ? 0L : NativeEngine.cancelQueries(handle);
+        } finally { lock.readLock().unlock(); }
+    }
+
+    void setBlockedWords(java.util.Collection<String> words) {
+        lock.readLock().lock();
+        try {
+            if (handle == 0) return;
+            String[] array = words == null || words.isEmpty() ? new String[0] : words.toArray(new String[0]);
+            NativeEngine.setBlockedWords(handle, array);
+        } finally { lock.readLock().unlock(); }
     }
 
     /** Zero-heap Simplified <-> Traditional conversion backed by the mmap'd Rust dictionary. */
@@ -247,7 +301,7 @@ public final class PinyinDictionary {
             QueryWork.check();
             long nativeHandle = active.handle;
             if (nativeHandle == 0) return null;
-            return NativeEngine.convertHanBatch(nativeHandle, words, QueryWork.signal());
+            return NativeEngine.convertHanBatch(nativeHandle, words, QueryWork.cancelGen());
         } catch (LinkageError ignored) {
             return null;
         } finally {
@@ -265,7 +319,7 @@ public final class PinyinDictionary {
             QueryWork.check();
             long nativeHandle = active.handle;
             if (nativeHandle == 0) return null;
-            encoded = NativeEngine.suggestStroke(nativeHandle, strokes, traditional, limit, QueryWork.signal());
+            encoded = NativeEngine.suggestStroke(nativeHandle, strokes, traditional, limit, QueryWork.cancelGen());
         } catch (LinkageError ignored) {
             return null;
         } finally {
@@ -298,22 +352,7 @@ public final class PinyinDictionary {
             "fuzzy_h_f", "fuzzy_an_ang", "fuzzy_en_eng", "fuzzy_in_ing", "fuzzy_ian_iang"};
 
     int flags(OfflineImeService.Mode mode, boolean creating, boolean names) {
-        boolean nine = mode == OfflineImeService.Mode.NINE;
-        int flags = 0;
-        if (preference("full_pinyin", true)) flags |= NativeEngine.FLAG_FULL;
-        if (preference("short_pinyin", true) && (!nine || preference("nine_short_words", true)))
-            flags |= NativeEngine.FLAG_SHORT;
-        if (preference("double_initials", true)) flags |= NativeEngine.FLAG_DOUBLE_INITIALS;
-        if (nine && preference("nine_word_completion", false)) flags |= NativeEngine.FLAG_NINE_COMPLETION;
-        if (preference("fuzzy_pinyin", false)) {
-            flags |= NativeEngine.FLAG_FUZZY;
-            for (int i = 0; i < FUZZY_KEYS.length; i++)
-                if (preference(FUZZY_KEYS[i], false)) flags |= 1 << (NativeEngine.FUZZY_SHIFT + i);
-        }
-        if (nine ? preference("nine_sentence_prediction", false) : preference("sentence_prediction", true))
-            flags |= NativeEngine.FLAG_SENTENCE;
-        if (preference("mixed_english", true)) flags |= NativeEngine.FLAG_MIXED_ENGLISH;
-        if (preference("basic_context", true)) flags |= NativeEngine.FLAG_BASIC_CONTEXT;
+        int flags = mode == OfflineImeService.Mode.NINE ? cachedNineFlags : cachedAlphaFlags;
         if (names) flags |= NativeEngine.FLAG_NAMES;
         if (creating) flags |= NativeEngine.FLAG_CREATION;
         return flags;
@@ -325,34 +364,50 @@ public final class PinyinDictionary {
         return NativeEngine.MODE_PINYIN;
     }
 
+    static final class LookupResult {
+        final List<Entry> entries;
+        final boolean mayHaveMore;
+
+        LookupResult(List<Entry> entries, boolean mayHaveMore) {
+            this.entries = entries;
+            this.mayHaveMore = mayHaveMore;
+        }
+    }
+
     /** Ranked candidates for one composition. {@code constraint} is the editor encoding or "". */
-    List<Entry> lookup(OfflineImeService.Mode mode, String raw, String constraint,
-                       String previous2, String previous, int flags, int limit, String[] touches) {
+    LookupResult lookup(OfflineImeService.Mode mode, String raw, String constraint,
+                        String previous2, String previous, int flags, int limit, String[] touches) {
         byte[] rows;
         lock.readLock().lock();
         try {
             QueryWork.check();
-            if (handle == 0 || raw == null || raw.isEmpty()) return Collections.emptyList();
+            if (handle == 0 || raw == null || raw.isEmpty()) {
+                return new LookupResult(Collections.emptyList(), false);
+            }
             rows = NativeEngine.query(handle, nativeMode(mode), raw, constraint == null ? "" : constraint,
                     previous2 == null ? "" : previous2, previous == null ? "" : previous, flags, limit, touches,
-                    QueryWork.signal());
+                    QueryWork.cancelGen());
         } finally { lock.readLock().unlock(); }
         QueryWork.check();
-        return entries(rows, raw);
+        if (rows == null || rows.length == 0) return new LookupResult(Collections.emptyList(), false);
+        ByteBuffer buffer = ByteBuffer.wrap(rows).order(ByteOrder.LITTLE_ENDIAN);
+        boolean mayHaveMore = buffer.get() != 0;
+        return new LookupResult(entries(buffer, raw), mayHaveMore);
     }
 
-    private static List<Entry> entries(byte[] rows, String raw) {
-        if (rows == null || rows.length == 0) return Collections.emptyList();
-        ByteBuffer buffer = ByteBuffer.wrap(rows).order(ByteOrder.LITTLE_ENDIAN);
+    private static List<Entry> entries(ByteBuffer buffer, String raw) {
         ArrayList<Entry> result = new ArrayList<>();
         while (buffer.hasRemaining()) {
             int consumed = buffer.getInt();
             int tier = buffer.getInt();
             int score = buffer.getInt();
             String word = readCandidateText(buffer);
+            String originalWord = readCandidateText(buffer);
             String reading = readCandidateText(buffer);
-            Entry entry = new Entry(word, score, tier, tier == TIER_USER, score, tier)
-                    .withInput(Math.min(raw.length(), consumed), reading);
+            Entry entry = new Entry(word, score, tier, tier == TIER_USER, score, tier,
+                    originalWord.isEmpty() ? word : originalWord);
+            entry.consumedLength = Math.min(raw.length(), consumed);
+            entry.pronunciation = reading;
             int segmentCount = buffer.getInt();
             if (segmentCount > 0) {
                 ArrayList<String> segments = new ArrayList<>(segmentCount);
@@ -389,7 +444,7 @@ public final class PinyinDictionary {
         try {
             if (handle == 0 || previous == null || previous.isEmpty()) return Collections.emptyList();
             words = NativeEngine.predict(handle, previous2 == null ? "" : previous2, previous, limit,
-                    preference("basic_context", true));
+                    cachedBasicContext);
         } finally { lock.readLock().unlock(); }
         ArrayList<Entry> result = new ArrayList<>();
         if (words != null) for (int i = 0; i < words.length; i++)
@@ -403,7 +458,7 @@ public final class PinyinDictionary {
         lock.readLock().lock();
         try {
             if (handle == 0 || raw == null || raw.isEmpty()) return Collections.emptyList();
-            values = NativeEngine.paths(handle, raw, numeric, preference("double_initials", true), 32);
+            values = NativeEngine.paths(handle, raw, numeric, cachedDoubleInitials, 32);
         } finally { lock.readLock().unlock(); }
         List<List<String>> result = new ArrayList<>();
         if (values != null) for (String value : values)
@@ -521,12 +576,12 @@ public final class PinyinDictionary {
         try {
             if (handle == 0) return;
             if (words != wordsRevision || contextData != contextRevision) {
-                String wordText = words != wordsRevision ? readStore(WORDS_PREFS, WORDS_KEY) : null;
-                String contextText = contextData != contextRevision ? readStore(CONTEXT_PREFS, CONTEXT_KEY) : null;
-                long[] revisions = NativeEngine.importUser(handle, wordText, contextText);
+                byte[] wordBytes = words != wordsRevision ? readStoreBytes(WORDS_PREFS, WORDS_KEY) : null;
+                byte[] contextBytes = contextData != contextRevision ? readStoreBytes(CONTEXT_PREFS, CONTEXT_KEY) : null;
+                long[] revisions = NativeEngine.importUserBinary(handle, wordBytes, contextBytes);
                 if (revisions == null || revisions.length != 2) return;
-                if (wordText != null) savedWordsRevision = revisions[0];
-                if (contextText != null) savedContextRevision = revisions[1];
+                if (wordBytes != null) savedWordsRevision = revisions[0];
+                if (contextBytes != null) savedContextRevision = revisions[1];
                 wordsRevision = words; contextRevision = contextData;
             }
             if (custom != customRevision) {
@@ -537,14 +592,14 @@ public final class PinyinDictionary {
         } finally { lock.readLock().unlock(); }
     }
 
-    private String readStore(String prefs, String key) {
-        SecureLocalStore.ReadResult result = SecureLocalStore.readResult(context, prefs, key);
+    private byte[] readStoreBytes(String prefs, String key) {
+        SecureLocalStore.BytesReadResult result = SecureLocalStore.readBytesResult(context, prefs, key);
         if (result.succeeded()) {
             SecureLocalStore.markReadable(prefs);
             return result.value;
         }
         SecureLocalStore.markUnreadable(prefs);
-        return "";
+        return new byte[0];
     }
 
     private String[] customRows() {
@@ -563,7 +618,7 @@ public final class PinyinDictionary {
 
     /** Saves learned words and context when they changed; call on the personal-data IO thread. */
     synchronized void persistLearnedWords() {
-        if (context == null || settings == null || settings.getBoolean("privacy_mode", false)) return;
+        if (context == null || settings == null || cachedPrivacyMode) return;
         // Another screen rewrote a store: adopt its data instead of overwriting it.
         if (settings.getLong("user_words_revision", 0) != wordsRevision
                 || settings.getLong("context_revision", 0) != contextRevision) {
@@ -571,17 +626,36 @@ public final class PinyinDictionary {
             if (settings.getLong("user_words_revision", 0) != wordsRevision
                     || settings.getLong("context_revision", 0) != contextRevision) return;
         }
-        String[] snapshot;
+        byte[] snapshot;
         lock.readLock().lock();
         try {
             if (handle == 0 || !userReady) return;
-            snapshot = NativeEngine.snapshotUser(handle, savedWordsRevision, savedContextRevision);
+            snapshot = NativeEngine.snapshotUserBinary(handle, savedWordsRevision, savedContextRevision);
         } finally { lock.readLock().unlock(); }
-        if (snapshot == null || snapshot.length != 4) return;
-        long wordVersion = Long.parseLong(snapshot[0]), contextVersion = Long.parseLong(snapshot[1]);
-        if (wordVersion != savedWordsRevision && SecureLocalStore.write(context, WORDS_PREFS, WORDS_KEY, snapshot[2]))
-            savedWordsRevision = wordVersion;
-        if (contextVersion != savedContextRevision && SecureLocalStore.write(context, CONTEXT_PREFS, CONTEXT_KEY, snapshot[3]))
+        if (snapshot == null || snapshot.length < 24) return;
+        ByteBuffer buffer = ByteBuffer.wrap(snapshot).order(ByteOrder.LITTLE_ENDIAN);
+        long wordVersion = buffer.getLong();
+        long contextVersion = buffer.getLong();
+        int wordsLen = buffer.getInt();
+        byte[] wordsBytes = null;
+        if (wordsLen > 0) {
+            wordsBytes = new byte[wordsLen];
+            buffer.get(wordsBytes);
+        }
+        int contextLen = buffer.getInt();
+        byte[] contextBytes = null;
+        if (contextLen > 0) {
+            contextBytes = new byte[contextLen];
+            buffer.get(contextBytes);
+        }
+        synchronized (PinyinDictionary.class) {
+            // Settings can rewrite the word store while the native snapshot is being prepared.
+            if (wordVersion != savedWordsRevision && settings.getLong("user_words_revision", 0) == wordsRevision
+                    && SecureLocalStore.writeBytes(context, WORDS_PREFS, WORDS_KEY, wordsBytes == null ? new byte[0] : wordsBytes))
+                savedWordsRevision = wordVersion;
+        }
+        if (contextVersion != savedContextRevision
+                && SecureLocalStore.writeBytes(context, CONTEXT_PREFS, CONTEXT_KEY, contextBytes == null ? new byte[0] : contextBytes))
             savedContextRevision = contextVersion;
     }
 
@@ -594,7 +668,18 @@ public final class PinyinDictionary {
     // ------------------------------------------------ stored words (activities)
 
     private static List<String[]> storedRows(Context context) {
-        String text = SecureLocalStore.read(context, WORDS_PREFS, WORDS_KEY);
+        SecureLocalStore.BytesReadResult result = SecureLocalStore.readBytesResult(context, WORDS_PREFS, WORDS_KEY);
+        if (!result.succeeded()) throw new IllegalStateException("本地数据读取失败，原数据已保留；请重新打开页面重试");
+        if (result.value.length == 0) return new ArrayList<>();
+        String text;
+        if (result.value.length >= 6 && result.value[0] == 'K' && result.value[1] == 'X'
+                && result.value[2] == 'U' && result.value[3] == 'S'
+                && result.value[4] == 'R' && result.value[5] == '1') {
+            text = NativeEngine.decodeWordsToText(result.value);
+        } else {
+            text = new String(result.value, StandardCharsets.UTF_8);
+        }
+        if (text == null) throw new IllegalStateException("本地词库格式无效，原数据已保留");
         List<String[]> rows = new ArrayList<>();
         for (String line : text.split("\n")) {
             String[] columns = line.split("\t", -1);

@@ -555,6 +555,18 @@ pub fn build(root: &Path, out: &Path, emoji_catalog: Option<&Path>) -> Result<Su
         out_bytes.extend_from_slice(&rank.to_le_bytes());
     }
 
+    // Precompute O(1) first-syllable bucket offsets so Dict::open does zero binary searches.
+    header.push((Field::FirstSylRangesOff, out_bytes.len() as u32));
+    let mut first_syl_pos = 0usize;
+    for s in 0..=names.len() {
+        while first_syl_pos < rows.len()
+            && rows[first_syl_pos].seq.first().is_some_and(|&syl| (syl as usize) < s)
+        {
+            first_syl_pos += 1;
+        }
+        out_bytes.extend_from_slice(&(first_syl_pos as u32).to_le_bytes());
+    }
+
     for (field, value) in header {
         let at = field as usize;
         out_bytes[at..at + 4].copy_from_slice(&value.to_le_bytes());

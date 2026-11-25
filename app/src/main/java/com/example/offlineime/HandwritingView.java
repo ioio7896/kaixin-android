@@ -3,9 +3,12 @@ package com.example.offlineime;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PorterDuff;
+import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.MotionEvent;
@@ -66,6 +69,10 @@ public final class HandwritingView extends View {
     private float currentStrokeWidthScale = 1f;
     private int activePointer = -1;
     private float inkScale = 1f;
+    private Bitmap committedBitmap;
+    private Canvas committedCanvas;
+    private boolean committedDirty = true;
+    private final Rect dirtyRect = new Rect();
     private long stylusPalmRejectUntilMs;
     private static final long PALM_REJECT_WINDOW_MS = 4000L;
 
@@ -90,24 +97,90 @@ public final class HandwritingView extends View {
     void applyTheme(KeyboardTheme theme) {
         paint.setColor(KeyboardTheme.readableText(theme.text, theme.key));
         setBackgroundColor(theme.key);
+        committedDirty = true;
         invalidate();
+    }
+
+    private boolean ensureCommittedCache() {
+        int w = getWidth(), h = getHeight();
+        if (w <= 0 || h <= 0) return false;
+        if (committedBitmap == null || committedBitmap.isRecycled()
+                || committedBitmap.getWidth() != w || committedBitmap.getHeight() != h) {
+            releaseCommittedCache();
+            try {
+                committedBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                committedCanvas = new Canvas(committedBitmap);
+                committedDirty = true;
+            } catch (OutOfMemoryError ignored) {
+                committedBitmap = null;
+                committedCanvas = null;
+                return false;
+            }
+        }
+        if (committedDirty) {
+            committedCanvas.drawColor(0, PorterDuff.Mode.CLEAR);
+            if (!strokes.isEmpty()) {
+                committedCanvas.save();
+                committedCanvas.scale(inkScale, inkScale);
+                float baseWidth = 5f * density / inkScale;
+                for (int i = 0; i < strokes.size(); i++) {
+                    float scale = i < strokeWidths.size() ? strokeWidths.get(i) : 1f;
+                    paint.setStrokeWidth(baseWidth * scale);
+                    drawStroke(committedCanvas, paths.get(i), strokes.get(i));
+                }
+                committedCanvas.restore();
+            }
+            committedDirty = false;
+        }
+        return true;
+    }
+
+    private void drawCommittedStroke(Path path, List<OfflineHandwritingRecognizer.Point> stroke, float widthScale) {
+        if (committedDirty || committedBitmap == null || committedBitmap.isRecycled() || committedCanvas == null) {
+            committedDirty = true;
+            return;
+        }
+        committedCanvas.save();
+        committedCanvas.scale(inkScale, inkScale);
+        paint.setStrokeWidth((5f * density / inkScale) * widthScale);
+        drawStroke(committedCanvas, path, stroke);
+        committedCanvas.restore();
+    }
+
+    private void releaseCommittedCache() {
+        if (committedBitmap != null) {
+            committedBitmap.recycle();
+            committedBitmap = null;
+        }
+        committedCanvas = null;
+        committedDirty = true;
     }
 
     @Override protected void onDraw(Canvas canvas) {
         super.onDraw(canvas);
-        canvas.save();
-        canvas.scale(inkScale, inkScale);
-        float baseWidth = 5f * density / inkScale;
-        for (int i = 0; i < strokes.size(); i++) {
-            float scale = i < strokeWidths.size() ? strokeWidths.get(i) : 1f;
-            paint.setStrokeWidth(baseWidth * scale);
-            drawStroke(canvas, paths.get(i), strokes.get(i));
+        if (!strokes.isEmpty()) {
+            if (ensureCommittedCache()) {
+                canvas.drawBitmap(committedBitmap, 0f, 0f, null);
+            } else {
+                canvas.save();
+                canvas.scale(inkScale, inkScale);
+                float baseWidth = 5f * density / inkScale;
+                for (int i = 0; i < strokes.size(); i++) {
+                    float scale = i < strokeWidths.size() ? strokeWidths.get(i) : 1f;
+                    paint.setStrokeWidth(baseWidth * scale);
+                    drawStroke(canvas, paths.get(i), strokes.get(i));
+                }
+                canvas.restore();
+            }
         }
         if (currentStroke != null) {
+            canvas.save();
+            canvas.scale(inkScale, inkScale);
+            float baseWidth = 5f * density / inkScale;
             paint.setStrokeWidth(baseWidth * currentStrokeWidthScale);
             drawStroke(canvas, currentPath, currentStroke);
+            canvas.restore();
         }
-        canvas.restore();
     }
 
     private void drawStroke(Canvas canvas, Path path, List<OfflineHandwritingRecognizer.Point> stroke) {
@@ -141,6 +214,7 @@ public final class HandwritingView extends View {
         float margin = 3f * density;
         inkScale = Math.min(1f, Math.min(Math.max(1f, width - margin) / right,
                 Math.max(1f, height - margin) / bottom));
+        committedDirty = true;
     }
 
     private static float stylusWidthScale(MotionEvent event, int pointerIndex) {
@@ -199,11 +273,36 @@ public final class HandwritingView extends View {
                     float sampleScale = stylusWidthScale(event, pointerIndex);
                     currentStrokeWidthScale = currentStrokeWidthScale * 0.7f + sampleScale * 0.3f;
                 }
-                for (int i = 0; i < event.getHistorySize(); i++) {
-                    addPoint(event.getHistoricalX(pointerIndex, i), event.getHistoricalY(pointerIndex, i));
+                int pad = (int) Math.ceil(5f * density * currentStrokeWidthScale) + 2;
+                float minX = Float.POSITIVE_INFINITY, minY = Float.POSITIVE_INFINITY;
+                float maxX = Float.NEGATIVE_INFINITY, maxY = Float.NEGATIVE_INFINITY;
+                if (!currentStroke.isEmpty()) {
+                    OfflineHandwritingRecognizer.Point prev = currentStroke.get(currentStroke.size() - 1);
+                    float px = prev.x * inkScale, py = prev.y * inkScale;
+                    minX = maxX = px;
+                    minY = maxY = py;
                 }
-                addPoint(event.getX(pointerIndex), event.getY(pointerIndex));
-                invalidate();
+                for (int i = 0; i < event.getHistorySize(); i++) {
+                    float hx = event.getHistoricalX(pointerIndex, i);
+                    float hy = event.getHistoricalY(pointerIndex, i);
+                    if (addPoint(hx, hy)) {
+                        minX = Math.min(minX, hx); maxX = Math.max(maxX, hx);
+                        minY = Math.min(minY, hy); maxY = Math.max(maxY, hy);
+                    }
+                }
+                float ex = event.getX(pointerIndex), ey = event.getY(pointerIndex);
+                if (addPoint(ex, ey)) {
+                    minX = Math.min(minX, ex); maxX = Math.max(maxX, ex);
+                    minY = Math.min(minY, ey); maxY = Math.max(maxY, ey);
+                }
+                if (minX <= maxX) {
+                    dirtyRect.set(
+                            Math.max(0, (int) Math.floor(minX) - pad),
+                            Math.max(0, (int) Math.floor(minY) - pad),
+                            Math.min(getWidth(), (int) Math.ceil(maxX) + pad),
+                            Math.min(getHeight(), (int) Math.ceil(maxY) + pad));
+                    invalidate(dirtyRect);
+                }
                 return true;
             case MotionEvent.ACTION_UP:
             case MotionEvent.ACTION_POINTER_UP:
@@ -217,6 +316,7 @@ public final class HandwritingView extends View {
                     strokes.add(currentStroke);
                     paths.add(currentPath);
                     strokeWidths.add(currentStrokeWidthScale);
+                    drawCommittedStroke(currentPath, currentStroke, currentStrokeWidthScale);
                     endStroke();
                     scheduleRecognition();
                     if (dot && action == MotionEvent.ACTION_UP) performClick();
@@ -242,14 +342,14 @@ public final class HandwritingView extends View {
         invalidate();
     }
 
-    private void addPoint(float x, float y) {
+    private boolean addPoint(float x, float y) {
         x = Math.max(0f, Math.min(getWidth(), x)) / inkScale;
         y = Math.max(0f, Math.min(getHeight(), y)) / inkScale;
         if (currentStroke.isEmpty()) {
             currentPath.moveTo(x, y);
         } else {
             OfflineHandwritingRecognizer.Point last = currentStroke.get(currentStroke.size() - 1);
-            if (Math.hypot(x - last.x, y - last.y) * inkScale < 1.5f * density) return;
+            if (Math.hypot(x - last.x, y - last.y) * inkScale < 1.5f * density) return false;
             currentPath.lineTo(x, y);
         }
         if (currentStroke.size() >= 2048) {
@@ -258,6 +358,7 @@ public final class HandwritingView extends View {
             currentStroke = compact;
         }
         currentStroke.add(new OfflineHandwritingRecognizer.Point(x, y));
+        return true;
     }
 
     private void cancelRecognition() {
@@ -347,6 +448,7 @@ public final class HandwritingView extends View {
             if (!strokeWidths.isEmpty()) strokeWidths.remove(strokeWidths.size() - 1);
             segmentEdits.remove(last);
             boundaries.removeIf(end -> end > strokes.size());
+            committedDirty = true;
             callback.onInkChanged(hasInk());
             invalidate();
         }
@@ -368,6 +470,7 @@ public final class HandwritingView extends View {
         strokeWidths.clear();
         boundaries.clear();
         inkScale = 1f;
+        committedDirty = true;
         clearEdits();
         endStroke();
         clearChoices();
@@ -521,6 +624,7 @@ public final class HandwritingView extends View {
         currentStroke = null;
         currentPath = null;
         activePointer = -1;
+        releaseCommittedCache();
         if (worker != null) {
             preloadTask.cancel(false);
             // Native inference may still be running. Close the model on its own worker.

@@ -7,6 +7,7 @@ pub mod dict;
 pub mod engine;
 mod fxhash;
 pub mod graph;
+pub mod handwriting;
 pub mod syllable;
 pub mod user;
 

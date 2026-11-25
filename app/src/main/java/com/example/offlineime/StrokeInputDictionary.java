@@ -100,12 +100,12 @@ final class StrokeInputDictionary {
     List<PinyinDictionary.Entry> suggest(String strokes, boolean traditional, int limit) {
         if (!isValidStrokeSequence(strokes) || limit <= 0)
             return Collections.emptyList();
-        int firstWildcard = strokes.indexOf('?');
-        if (useNative && firstWildcard < 0) {
+        if (useNative) {
             List<PinyinDictionary.Entry> nativeResult =
                     PinyinDictionary.suggestStrokeNative(strokes, traditional, limit);
             if (nativeResult != null) return nativeResult;
         }
+        int firstWildcard = strokes.indexOf('?');
         NavigableMap<String, String> seqMap = ensureSequences();
         Map<Integer, Integer> rank = ensureRanking(traditional);
         LinkedHashSet<Integer> exact = new LinkedHashSet<>();

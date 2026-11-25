@@ -4,6 +4,7 @@
 .idea/
 __pycache__/
 local.properties
+/analytics.settings
 build/
 app/build/
 .cxx/
@@ -22,6 +23,7 @@ test-artifacts/
 backups/
 .publish-staging/
 AGENTS.md
+/output/
 
 # Generated packages and machine-specific files
 *.apk

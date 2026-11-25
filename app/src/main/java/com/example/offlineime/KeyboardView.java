@@ -73,6 +73,8 @@ public final class KeyboardView extends LinearLayout {
     private boolean candidateListShown;
     private final TextView composing = new TextView(getContext());
     private final ArrayList<NinePathSlot> ninePathChoicePool = new ArrayList<>();
+    private final java.util.ArrayDeque<TextView> symbolTilePool = new java.util.ArrayDeque<>();
+    private int symbolTilePoolKey = Integer.MIN_VALUE;
     private HandwritingPanel handwritingPanel;
     private boolean handwritingFullscreen;
     private int baseLeftPadding;
@@ -707,6 +709,25 @@ public final class KeyboardView extends LinearLayout {
                     : null);
         }
         if (symbolContent == null || symbolGrid == null) return;
+        int tileStyleKey = theme.text * 31 + theme.key * 17 + theme.accent;
+        if (tileStyleKey != symbolTilePoolKey) {
+            symbolTilePool.clear();
+            symbolTilePoolKey = tileStyleKey;
+        } else {
+            for (int r = 0; r < symbolGrid.getChildCount(); r++) {
+                View rowView = symbolGrid.getChildAt(r);
+                if (rowView instanceof LinearLayout) {
+                    LinearLayout row = (LinearLayout) rowView;
+                    for (int c = row.getChildCount() - 1; c >= 0; c--) {
+                        View child = row.getChildAt(c);
+                        if (child instanceof TextView && symbolTilePool.size() < 160) {
+                            row.removeViewAt(c);
+                            symbolTilePool.addLast((TextView) child);
+                        }
+                    }
+                }
+            }
+        }
         symbolGrid.removeAllViews();
         int gridWidth = Math.max(200, KeyboardPlacement.width(getContext(), renderSettings) - 78);
         int columns = Math.max(5, Math.min(12, gridWidth / 50));
@@ -720,18 +741,21 @@ public final class KeyboardView extends LinearLayout {
             row.setOrientation(HORIZONTAL);
             for (int i = start; i < Math.min(start + columns, symbols.length); i++) {
                 String symbol = symbols[i];
-                TextView tile = new TextView(getContext());
+                TextView tile = symbolTilePool.pollFirst();
+                if (tile == null) {
+                    tile = new TextView(getContext());
+                    tile.setTextColor(theme.text);
+                    tile.setGravity(Gravity.CENTER);
+                    tile.setSingleLine(true);
+                    android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
+                    states.addState(new int[]{android.R.attr.state_pressed},
+                            roundRect(blendColor(theme.key, theme.accent, 0.22f), 10));
+                    states.addState(new int[]{}, roundRect(theme.key, 10));
+                    tile.setBackground(states);
+                }
                 tile.setText(symbol);
                 tile.setTextSize(symbol.codePointCount(0, symbol.length()) > 1 ? 17 : 22);
-                tile.setTextColor(theme.text);
-                tile.setGravity(Gravity.CENTER);
-                tile.setSingleLine(true);
                 tile.setContentDescription("输入符号 " + symbol);
-                android.graphics.drawable.StateListDrawable states = new android.graphics.drawable.StateListDrawable();
-                states.addState(new int[]{android.R.attr.state_pressed},
-                        roundRect(blendColor(theme.key, theme.accent, 0.22f), 10));
-                states.addState(new int[]{}, roundRect(theme.key, 10));
-                tile.setBackground(states);
                 tile.setOnClickListener(v -> callback.onKey("符号输入:" + symbol));
                 LayoutParams cell = new LayoutParams(0, dp(46), 1f);
                 cell.setMargins(dp(2), dp(2), dp(2), dp(2));

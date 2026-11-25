@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <cstdint>
 #include <stdexcept>
 #include "sherpa-ncnn/csrc/model.h"
 
@@ -124,6 +125,15 @@ static bool IsZipformerModel(const ncnn::Net &net) {
   return false;
 }
 
+Model::~Model() {
+#if __ANDROID_API__ >= 9
+  // Subclass ncnn::Net members have already been destroyed before ~Model() runs.
+  for (AAsset *asset : mapped_assets_) {
+    if (asset) AAsset_close(asset);
+  }
+#endif
+}
+
 void Model::InitNet(ncnn::Net &net, const std::string &param,
                     const std::string &bin) {
   if (net.load_param(param.c_str())) {
@@ -143,6 +153,25 @@ void Model::InitNet(AAssetManager *mgr, ncnn::Net &net,
   if (net.load_param(mgr, param.c_str())) {
     NCNN_LOGE("failed to load %s", param.c_str());
     throw std::runtime_error("sherpa-ncnn failure");
+  }
+
+  AAsset *asset = AAssetManager_open(mgr, bin.c_str(), AASSET_MODE_BUFFER);
+  if (asset) {
+    const void *buf = AAsset_getBuffer(asset);
+    if (buf && (reinterpret_cast<uintptr_t>(buf) & 3u) == 0u) {
+      if (net.load_model(static_cast<const unsigned char *>(buf)) > 0) {
+        mapped_assets_.push_back(asset);
+        return;
+      }
+      net.clear();
+      AAsset_close(asset);
+      if (net.load_param(mgr, param.c_str())) {
+        NCNN_LOGE("failed to reload %s", param.c_str());
+        throw std::runtime_error("sherpa-ncnn failure");
+      }
+    } else {
+      AAsset_close(asset);
+    }
   }
 
   if (net.load_model(mgr, bin.c_str())) {

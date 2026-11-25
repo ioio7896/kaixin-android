@@ -86,7 +86,17 @@ final class ExtendedHandwritingModel implements AutoCloseable {
         if (root.getInt("num_classes") != 18385 || root.getInt("blank_index") != 0 || characters.length() != 18385)
             throw new IOException("Invalid extended character map");
         labels = new String[characters.length()];
-        for (int i = 0; i < labels.length; i++) labels[i] = characters.getString(i);
+        byte[] allowedMask = new byte[labels.length];
+        for (int i = 0; i < labels.length; i++) {
+            String label = characters.getString(i);
+            labels[i] = label;
+            allowedMask[i] = CtcHandwritingDecoder.isAllowedLabel(label) ? (byte) 1 : (byte) 0;
+        }
+        try {
+            NativeEngine.setCtcAllowed(allowedMask);
+        } catch (LinkageError ignored) {
+            // Pure-Java CTC fallback handles decoding when the Rust library is absent.
+        }
         handle = nativeCreate(assets);
         if (handle == 0) throw new IOException("Unable to load extended model");
     }

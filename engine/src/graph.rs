@@ -99,7 +99,7 @@ impl<'a> Edge<'a> {
 }
 
 /// One explicit span of the composition handed over by the editor.
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum Part {
     Raw { start: usize, end: usize },
     Locked { start: usize, end: usize, reading: String },

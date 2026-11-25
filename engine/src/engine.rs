@@ -7,12 +7,14 @@
 //! context evidence subtract from the cost.
 
 use crate::cancellation::{QueryCancellation, QueryCancelled};
-use crate::dict::{Backing, Dict, SeqIndex, SylBuf, ALPHA_EMOJI, ALPHA_ENGLISH};
+use crate::dict::{Backing, Dict, SeqIndex, StrokeCandidate, SylBuf, ALPHA_EMOJI, ALPHA_ENGLISH};
 use crate::fxhash::{FxHashMap, FxHashSet};
 use crate::graph::{Edge, EdgeIds, Graph, Kind, Options, Part};
 use crate::syllable::{split_reading, to_t9, Syllables, MAX_SYLLABLE_LEN};
 use crate::user::{now, AliasIndex, NameIndex, UserModel, UserWord};
+use std::borrow::Cow;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 
 pub const TIER_USER: i32 = 0;
@@ -34,6 +36,7 @@ pub const F_CREATION: u32 = 128;
 pub const F_DOUBLE_INITIALS: u32 = 1 << 8;
 pub const F_NINE_COMPLETION: u32 = 1 << 9;
 pub const F_SPELLING_CORRECTION: u32 = 1 << 10;
+pub const F_TRADITIONAL: u32 = 1 << 11;
 pub const FUZZY_SHIFT: u32 = 16;
 
 pub const MODE_PINYIN: i32 = 0;
@@ -56,6 +59,7 @@ const MIN_DIRECT_RANGE_LIMIT: usize = 32;
 #[derive(Clone, Debug)]
 pub struct Candidate {
     pub word: String,
+    pub original_word: Option<String>,
     pub reading: String,
     pub consumed: usize,
     pub tier: i32,
@@ -219,31 +223,34 @@ impl<I: SeqIndex> Walker<'_, I> {
                 *self.budget -= 1;
                 let sub_lo = self.idx.lower(exact_end, hi, depth, target as i32);
                 if sub_lo < hi && self.idx.syllable(sub_lo, depth) == target as i32 {
-                    let up = self.idx.lower(sub_lo, hi, depth, target as i32 + 1);
+                    let up = self.idx.lower_gallop(sub_lo + 1, hi, depth, target as i32 + 1);
                     self.walk(edge.to, depth + 1, sub_lo, up, info.add(edge.kind, g.numeric))?;
                 }
                 continue;
             }
             let ids = edge.ids.as_slice();
             let mut pos = exact_end;
-            while pos < hi {
+            let mut id_idx = 0usize;
+            while pos < hi && id_idx < ids.len() {
                 if *self.budget == 0 {
                     return Ok(());
                 }
                 self.cancel.step()?;
                 *self.budget -= 1;
                 let value = self.idx.syllable(pos, depth) as u16;
-                match ids.binary_search(&value) {
-                    Ok(_) => {
-                        let up = self.idx.lower(pos, hi, depth, value as i32 + 1);
+                match ids[id_idx..].binary_search(&value) {
+                    Ok(rel) => {
+                        id_idx += rel + 1;
+                        let up = self.idx.lower_gallop(pos + 1, hi, depth, value as i32 + 1);
                         self.walk(edge.to, depth + 1, pos, up, info.add(edge.kind, g.numeric))?;
                         pos = up;
                     }
-                    Err(k) => {
-                        if k >= ids.len() {
+                    Err(rel) => {
+                        id_idx += rel;
+                        if id_idx >= ids.len() {
                             break;
                         }
-                        pos = self.idx.lower(pos, hi, depth, ids[k] as i32);
+                        pos = self.idx.lower_gallop(pos + 1, hi, depth, ids[id_idx] as i32);
                     }
                 }
             }
@@ -281,6 +288,7 @@ struct QueryCache {
     mode: i32,
     flags: u32,
     raw: String,
+    parts: Option<Vec<Part>>,
     words_revision: u64,
     custom_words_revision: u64,
     hits: Vec<RangeHit>,
@@ -304,6 +312,7 @@ pub struct Engine {
     pub user: RwLock<UserModel>,
     names: OnceLock<NameIndex>,
     cache: Mutex<Option<Arc<QueryCache>>>,
+    cancel_gen: AtomicU64,
 }
 
 impl Engine {
@@ -313,7 +322,16 @@ impl Engine {
             user: RwLock::new(UserModel::default()),
             names: OnceLock::new(),
             cache: Mutex::new(None),
+            cancel_gen: AtomicU64::new(1),
         })
+    }
+
+    pub fn cancel_queries(&self) -> u64 {
+        self.cancel_gen.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    pub(crate) fn cancellation(&self, expected: u64) -> QueryCancellation<'_> {
+        QueryCancellation::from_atomic(&self.cancel_gen, expected)
     }
 
     pub fn syllables(&self) -> &Syllables {
@@ -337,18 +355,46 @@ impl Engine {
     }
 
     pub fn query(&self, req: &Request) -> Vec<Candidate> {
-        self.query_cancellable(req, &QueryCancellation::new(None)).unwrap_or_default()
+        self.query_cancellable(req, &QueryCancellation::none()).unwrap_or_default().0
     }
 
-    pub(crate) fn query_cancellable(&self, req: &Request, cancel: &QueryCancellation<'_>) -> Result<Vec<Candidate>, QueryCancelled> {
+    pub(crate) fn query_cancellable(
+        &self, req: &Request, cancel: &QueryCancellation<'_>,
+    ) -> Result<(Vec<Candidate>, bool), QueryCancelled> {
         cancel.check()?;
-        let candidates = if req.mode == MODE_ENGLISH {
-            self.english(req.raw, req.limit, cancel)?
+        let (mut candidates, may_have_more) = if req.mode == MODE_ENGLISH {
+            let rows = self.english(req.raw, req.limit, cancel)?;
+            let at_limit = rows.len() >= req.limit.max(1);
+            (rows, at_limit)
         } else {
             self.chinese(req, cancel)?
         };
+        if req.flags & F_TRADITIONAL != 0 && req.mode != MODE_ENGLISH {
+            let user = self.user();
+            for c in &mut candidates {
+                cancel.step()?;
+                if c.word.bytes().any(|b| b >= 0x80) {
+                    if let Some(converted) = self.dict.convert_han(&c.word, true) {
+                        if converted != c.word {
+                            let orig = std::mem::replace(&mut c.word, converted);
+                            c.original_word = Some(orig);
+                        }
+                    }
+                }
+            }
+            if user.blocked_set().is_some() {
+                candidates.retain(|c| !user.is_blocked(&c.word));
+            }
+        }
         cancel.check()?;
-        Ok(candidates)
+        Ok((candidates, may_have_more))
+    }
+
+    pub(crate) fn suggest_stroke_cancellable(
+        &self, strokes: &str, traditional: bool, limit: usize, cancel: &QueryCancellation<'_>,
+    ) -> Result<Option<Vec<StrokeCandidate>>, QueryCancelled> {
+        let user = self.user();
+        self.dict.suggest_stroke_cancellable(strokes, traditional, limit, user.blocked_set(), cancel)
     }
 
     fn options(&self, flags: u32, numeric: bool) -> Options {
@@ -456,6 +502,9 @@ impl Engine {
                     cancel.step()?;
                     let e = self.dict.entry(i);
                     let word = self.dict.word(e.word);
+                    if user.is_blocked(word) {
+                        continue;
+                    }
                     let seq = self.dict.entry_syllables_buf(&e);
                     let personal = user.bonus(word, seq.as_slice(), ctx.query_time);
                     let cost = base_cost(e.score) + base_penalty - personal - ctx.bonus(user, word);
@@ -466,6 +515,9 @@ impl Engine {
                 for i in hit.lo..hit.hi {
                     cancel.step()?;
                     let w: &UserWord = user.word_at(i);
+                    if user.is_blocked(&w.word) {
+                        continue;
+                    }
                     let seq = SylBuf::from_slice(&w.seq);
                     let personal = user.bonus(&w.word, seq.as_slice(), ctx.query_time);
                     let cost = base_cost(3_000) + base_penalty - personal - ctx.bonus(user, &w.word);
@@ -477,6 +529,9 @@ impl Engine {
                 for i in hit.lo..hit.hi.min(hit.lo.saturating_add(take)) {
                     cancel.step()?;
                     let (word, seq_vec, score) = &names.rows[i];
+                    if user.is_blocked(word) {
+                        continue;
+                    }
                     let seq = SylBuf::from_slice(seq_vec);
                     let cost = base_cost(*score) + base_penalty - 500 - user.bonus(word, seq.as_slice(), ctx.query_time);
                     emit(word, seq, cost, false);
@@ -487,14 +542,11 @@ impl Engine {
     }
 
     /// Keep rows whose learned reading or context can make them outrank their corpus frequency.
-    fn bonus_rows<'a>(
-        &self, personal: impl IntoIterator<Item = &'a str>, user: &'a UserModel, ctx: &Context<'a>,
-        cancel: &QueryCancellation<'_>,
+    fn rows_for_words<'a>(
+        &self, words_iter: impl IntoIterator<Item = &'a str>, cancel: &QueryCancellation<'_>,
     ) -> Result<Vec<usize>, QueryCancelled> {
-        let basic = ctx.collocations.keys().copied();
-        let context = user.context_words(ctx.prev2, ctx.prev);
         let mut words = FxHashSet::default();
-        for word in basic.chain(personal).chain(context) {
+        for word in words_iter {
             cancel.step()?;
             if let Some(id) = self.dict.word_id(word) {
                 words.insert(id);
@@ -508,6 +560,15 @@ impl Engine {
         cancel.check()?;
         rows.sort_unstable();
         Ok(rows)
+    }
+
+    fn bonus_rows<'a>(
+        &self, personal: impl IntoIterator<Item = &'a str>, user: &'a UserModel, ctx: &Context<'a>,
+        cancel: &QueryCancellation<'_>,
+    ) -> Result<Vec<usize>, QueryCancelled> {
+        let basic = ctx.collocations.keys().copied();
+        let context = user.context_words(ctx.prev2, ctx.prev);
+        self.rows_for_words(basic.chain(personal).chain(context), cancel)
     }
 
     fn frequency_take(&self, hit: &RangeHit, limit: usize, cancel: &QueryCancellation<'_>) -> Result<usize, QueryCancelled> {
@@ -524,9 +585,9 @@ impl Engine {
         Ok(end - hit.lo)
     }
 
-    fn chinese(&self, req: &Request, cancel: &QueryCancellation<'_>) -> Result<Vec<Candidate>, QueryCancelled> {
-        struct RawCandidate {
-            word: String,
+    fn chinese(&self, req: &Request, cancel: &QueryCancellation<'_>) -> Result<(Vec<Candidate>, bool), QueryCancelled> {
+        struct RawCandidate<'a> {
+            word: Cow<'a, str>,
             word_chars: u16,
             seq: SylBuf,
             reading: Option<String>,
@@ -544,59 +605,65 @@ impl Engine {
         let g = Graph::build(&self.dict.syllables, req.raw, numeric, req.parts.clone(), opt);
         let n = g.len;
         if g.start >= n {
-            return Ok(Vec::new());
+            return Ok((Vec::new(), false));
         }
         let user = self.user();
         cancel.check()?;
         let ctx = Context::new(req, &self.dict);
         let sentence = !creation && req.flags & F_SENTENCE != 0;
-        let starts = if sentence { g.reachable() } else { vec![g.start] };
         let names = !creation && req.flags & F_NAMES != 0;
         let complete_nine = numeric && !creation && req.flags & (F_NINE_COMPLETION | F_FULL) == (F_NINE_COMPLETION | F_FULL);
-        let cacheable = !constrained && !creation && !complete_nine;
+        // Walks whose start cannot reach the tail never emit completion hits, so T9 completion can reuse QueryCache.
+        let cache_flags = req.flags & !F_TRADITIONAL;
 
-        let previous = if cacheable {
+        let previous = if !creation {
             let guard = self.cache.lock().unwrap_or_else(|p| p.into_inner());
             guard.as_ref().filter(|cached| {
                 cached.mode == req.mode
-                    && cached.flags == req.flags
+                    && cached.flags == cache_flags
                     && cached.words_revision == user.words_revision
                     && cached.custom_words_revision == user.custom_words_revision
-                    && g.raw.len() > cached.raw.len()
-                    && g.raw.starts_with(&cached.raw)
+                    && cached.parts == req.parts
+                    && (g.raw == cached.raw || !constrained && g.raw.starts_with(&cached.raw))
             }).cloned()
         } else {
             None
         };
-        let mut hits = Vec::new();
-        let mut completed = cacheable.then(CompletedWalks::default);
-        self.collect_hits(
-            &g, &user, &starts, names, complete_nine, &mut hits, cancel,
-            previous.as_deref(), &mut completed,
-        )?;
-        cancel.check()?;
-        if let Some(completed) = completed {
-            // Appending can change syllables near the end or edges that skip trailing apostrophes.
-            // An unchanged walk stays outside that tail, including after following separator skips.
-            let boundary = n.saturating_sub(MAX_SYLLABLE_LEN);
-            let can_reach_tail = g.can_reach_tail(boundary);
-            let next = Arc::new(QueryCache {
-                mode: req.mode,
-                flags: req.flags,
-                raw: g.raw.clone(),
-                words_revision: user.words_revision,
-                custom_words_revision: user.custom_words_revision,
-                hits: hits.clone(),
-                can_reach_tail,
-                completed,
-            });
-            let mut guard = self.cache.lock().unwrap_or_else(|p| p.into_inner());
-            *guard = Some(next);
-        }
+        let mut hits: Cow<'_, [RangeHit]> = if let Some(cached) = previous.as_ref().filter(|cached| cached.raw == g.raw) {
+            Cow::Borrowed(&cached.hits)
+        } else {
+            let starts = if sentence { g.reachable() } else { vec![g.start] };
+            let mut hits = Vec::new();
+            let mut completed = (!creation && !constrained).then(CompletedWalks::default);
+            self.collect_hits(
+                &g, &user, &starts, names, complete_nine, &mut hits, cancel,
+                previous.as_deref(), &mut completed,
+            )?;
+            if !creation {
+                // Appending can change syllables near the end, even after skipped apostrophes.
+                let can_reach_tail = if constrained { Vec::new() }
+                    else { g.can_reach_tail(n.saturating_sub(MAX_SYLLABLE_LEN)) };
+                let next = Arc::new(QueryCache {
+                    mode: req.mode,
+                    flags: cache_flags,
+                    raw: g.raw.clone(),
+                    parts: req.parts.clone(),
+                    words_revision: user.words_revision,
+                    custom_words_revision: user.custom_words_revision,
+                    hits: hits.clone(),
+                    can_reach_tail,
+                    completed: completed.unwrap_or_default(),
+                });
+                let mut guard = self.cache.lock().unwrap_or_else(|p| p.into_inner());
+                cancel.check()?;
+                *guard = Some(next);
+            }
+            Cow::Owned(hits)
+        };
 
         if numeric && !creation {
             // After two complete syllables, a partial third or fourth syllable is also an early completion.
-            for hit in &mut hits {
+            for hit in hits.to_mut() {
                 cancel.step()?;
                 if hit.src == Src::Dict && hit.start == g.start && hit.end == n
                     && (2..=3).contains(&hit.info.full) && hit.info.abbr == 0
@@ -643,19 +710,28 @@ impl Engine {
             new_cost < old_cost
         };
 
-        let mut by_word: FxHashMap<String, usize> = FxHashMap::default();
-        let mut list: Vec<RawCandidate> = Vec::new();
-        let push_raw = |list: &mut Vec<RawCandidate>, by_word: &mut FxHashMap<String, usize>, c: RawCandidate| {
-            if let Some(&i) = by_word.get(&c.word) {
+        let mut by_word: FxHashMap<Cow<'_, str>, usize> = FxHashMap::default();
+        let mut list: Vec<RawCandidate<'_>> = Vec::new();
+        fn push_raw<'a>(
+            list: &mut Vec<RawCandidate<'a>>,
+            by_word: &mut FxHashMap<Cow<'a, str>, usize>,
+            c: RawCandidate<'a>,
+            better: &impl Fn(usize, i32, i32, usize, i32, i32) -> bool,
+        ) {
+            if let Some(&i) = by_word.get(c.word.as_ref()) {
                 let old = &list[i];
-                if better_candidate(old.consumed, old.tier, old.cost, c.consumed, c.tier, c.cost) {
+                if better(old.consumed, old.tier, old.cost, c.consumed, c.tier, c.cost) {
                     list[i] = c;
                 }
             } else {
-                by_word.insert(c.word.clone(), list.len());
+                let key = match &c.word {
+                    Cow::Borrowed(s) => Cow::Borrowed(*s),
+                    Cow::Owned(s) => Cow::Owned(s.clone()),
+                };
+                by_word.insert(key, list.len());
                 list.push(c);
             }
-        };
+        }
 
         let direct = || hits.iter().filter(|h| h.start == g.start && !h.completion);
         // Completion filters against all direct words, including those outside the returned list.
@@ -667,9 +743,11 @@ impl Engine {
         } else {
             Vec::new()
         };
+        let mut may_have_more = false;
         for hit in direct() {
             let hit_limit = if single_full_dict_hit(hit) { usize::MAX } else { range_limit };
             let take = self.frequency_take(hit, hit_limit, cancel)?;
+            may_have_more |= take < hit.hi - hit.lo;
             let tier_base = hit.info.tier();
             let end = hit.end;
             self.for_each_expanded(hit, &user, take, &ctx, &bonus_rows, cancel, |word, seq, cost, pinned| {
@@ -685,11 +763,10 @@ impl Engine {
                         list[i].segments.clear();
                     }
                 } else {
-                    let word_str = word.to_string();
-                    let word_chars = word_str.chars().count() as u16;
-                    by_word.insert(word_str.clone(), list.len());
+                    let word_chars = word.chars().count() as u16;
+                    by_word.insert(Cow::Borrowed(word), list.len());
                     list.push(RawCandidate {
-                        word: word_str,
+                        word: Cow::Borrowed(word),
                         word_chars,
                         seq,
                         reading: None,
@@ -705,11 +782,11 @@ impl Engine {
         if sentence {
             let basic_ctx = req.flags & F_BASIC_CONTEXT != 0;
             if let Some(c) = self.compose(&g, &hits, &user, &ctx, basic_ctx, cancel)? {
-                let duplicate = by_word.get(&c.word).is_some_and(|&i| list[i].consumed == n);
-                if !duplicate {
+                let duplicate = by_word.get(c.word.as_str()).is_some_and(|&i| list[i].consumed == n);
+                if !duplicate && !user.is_blocked(&c.word) {
                     let word_chars = c.word.chars().count() as u16;
                     push_raw(&mut list, &mut by_word, RawCandidate {
-                        word: c.word,
+                        word: Cow::Owned(c.word),
                         word_chars,
                         seq: SylBuf::empty(),
                         reading: Some(c.reading),
@@ -717,7 +794,7 @@ impl Engine {
                         tier: c.tier,
                         cost: c.cost,
                         segments: c.segments,
-                    });
+                    }, &better_candidate);
                 }
             }
         }
@@ -726,9 +803,12 @@ impl Engine {
             let lower = &g.raw;
             for (word, pinned) in user.aliases(lower, numeric) {
                 cancel.step()?;
+                if user.is_blocked(word) {
+                    continue;
+                }
                 let word_chars = word.chars().count() as u16;
                 push_raw(&mut list, &mut by_word, RawCandidate {
-                    word: word.clone(),
+                    word: Cow::Borrowed(word.as_str()),
                     word_chars,
                     seq: SylBuf::empty(),
                     reading: Some(String::new()),
@@ -736,7 +816,7 @@ impl Engine {
                     tier: if *pinned { TIER_USER } else { TIER_EXACT_SHORT },
                     cost: if *pinned { -3_000 } else { 0 },
                     segments: Vec::new(),
-                });
+                }, &better_candidate);
             }
             let letters = lower.len() >= 2 && lower.bytes().all(|b| b.is_ascii_lowercase());
             if !numeric && letters && req.flags & F_MIXED_ENGLISH != 0 {
@@ -745,7 +825,7 @@ impl Engine {
                     cancel.step()?;
                     let word_chars = c.word.chars().count() as u16;
                     push_raw(&mut list, &mut by_word, RawCandidate {
-                        word: c.word,
+                        word: Cow::Owned(c.word),
                         word_chars,
                         seq: SylBuf::empty(),
                         reading: Some(c.reading),
@@ -753,7 +833,7 @@ impl Engine {
                         tier: c.tier,
                         cost: c.cost,
                         segments: c.segments,
-                    });
+                    }, &better_candidate);
                 }
             }
         }
@@ -796,9 +876,10 @@ impl Engine {
         }
         cancel.check()?;
         let mut final_list: Vec<Candidate> = Vec::with_capacity(limit.min(list.len()) + CORRECTION_LIMIT);
-        let materialize = |raw: RawCandidate| Candidate {
+        let materialize = |raw: RawCandidate<'_>| Candidate {
             reading: raw.reading.unwrap_or_else(|| self.reading_of(raw.seq.as_slice())),
-            word: raw.word,
+            word: raw.word.into_owned(),
+            original_word: None,
             consumed: raw.consumed,
             tier: raw.tier,
             cost: raw.cost,
@@ -814,14 +895,14 @@ impl Engine {
             let existing_full: FxHashSet<&str> = list
                 .iter()
                 .filter(|c| c.consumed == n)
-                .map(|c| c.word.as_str())
+                .map(|c| c.word.as_ref())
                 .collect();
             let corrections = self.corrected(req, &user, &ctx, &existing_full, correct_spelling, cancel)?;
             if !corrections.is_empty() {
                 let words: FxHashSet<&str> = corrections.iter().map(|c| c.word.as_str()).collect();
                 let mut inserted = false;
                 for raw in list {
-                    if words.contains(raw.word.as_str()) {
+                    if words.contains(raw.word.as_ref()) {
                         continue;
                     }
                     if !inserted && raw.consumed < n {
@@ -857,7 +938,9 @@ impl Engine {
             final_list.extend(completions);
         }
         final_list.truncate(limit);
-        Ok(final_list)
+        // Check the limit before conversion can filter out blocked display forms.
+        may_have_more |= final_list.len() >= limit;
+        Ok((final_list, may_have_more))
     }
 
     fn corrected(
@@ -895,7 +978,7 @@ impl Engine {
                     cancel.step()?;
                     let entry = self.dict.entry(i);
                     let word = self.dict.word(entry.word);
-                    if entry.score < 1_000 || existing.contains(word) {
+                    if entry.score < 1_000 || existing.contains(word) || user.is_blocked(word) {
                         continue;
                     }
                     let seq = self.dict.entry_syllables_buf(&entry);
@@ -904,6 +987,7 @@ impl Engine {
                     if best.get(word).is_none_or(|old| cost < old.cost) {
                         best.insert(word.to_string(), Candidate {
                             word: word.to_string(),
+                            original_word: None,
                             reading: self.reading_of(seq.as_slice()),
                             consumed: req.raw.len(),
                             tier: TIER_FUZZY,
@@ -925,7 +1009,7 @@ impl Engine {
     }
 
     fn nine_completions(
-        &self, hits: &[RangeHit], user: &UserModel, ctx: &Context, existing: &FxHashMap<String, usize>, limit: usize,
+        &self, hits: &[RangeHit], user: &UserModel, ctx: &Context, existing: &FxHashMap<Cow<'_, str>, usize>, limit: usize,
         cancel: &QueryCancellation<'_>,
     ) -> Result<Vec<Candidate>, QueryCancelled> {
         if limit == 0 {
@@ -940,7 +1024,7 @@ impl Engine {
                     continue;
                 }
                 let word = self.dict.word(entry.word);
-                if existing.contains_key(word) || word.chars().count() != entry.len as usize {
+                if existing.contains_key(word) || user.is_blocked(word) || word.chars().count() != entry.len as usize {
                     continue;
                 }
                 let seq = self.dict.entry_syllables_buf(&entry);
@@ -956,6 +1040,7 @@ impl Engine {
                 }
                 best.push(Candidate {
                     word: word.to_string(),
+                    original_word: None,
                     reading: self.reading_of(seq.as_slice()),
                     consumed: hit.end,
                     tier: TIER_PREFIX,
@@ -1035,7 +1120,15 @@ impl Engine {
                 }
             }
 
+            // Precompute personal rows once per node instead of repeating dict lookups for every beam state.
+            let personal_rows = if truncated.is_empty() || personal.is_empty() {
+                Vec::new()
+            } else {
+                self.rows_for_words(personal.iter().copied(), cancel)?
+            };
+
             let mut top: Vec<SpanWord> = Vec::with_capacity(COMPOSE_SPAN_LIMIT + 1);
+            let mut merged_bonus: Vec<usize> = Vec::new();
             for (si, state) in states.iter().enumerate() {
                 let following;
                 let rank_ctx = if node == g.start {
@@ -1044,17 +1137,34 @@ impl Engine {
                     following = Context::for_previous("", state.word, ctx.query_time, &self.dict, basic_ctx);
                     &following
                 };
-                let bonus_rows = if truncated.is_empty() {
-                    Vec::new()
+                let bonus_rows: &[usize] = if truncated.is_empty() {
+                    &[]
                 } else {
-                    self.bonus_rows(personal.iter().copied(), user, rank_ctx, cancel)?
+                    let ctx_rows = self.rows_for_words(
+                        rank_ctx.collocations.keys().copied().chain(user.context_words(rank_ctx.prev2, rank_ctx.prev)),
+                        cancel,
+                    )?;
+                    if ctx_rows.is_empty() {
+                        &personal_rows
+                    } else if personal_rows.is_empty() {
+                        merged_bonus = ctx_rows;
+                        &merged_bonus
+                    } else {
+                        merged_bonus.clear();
+                        merged_bonus.reserve(personal_rows.len() + ctx_rows.len());
+                        merged_bonus.extend_from_slice(&personal_rows);
+                        merged_bonus.extend_from_slice(&ctx_rows);
+                        merged_bonus.sort_unstable();
+                        merged_bonus.dedup();
+                        &merged_bonus
+                    }
                 };
 
                 for span in ranges.chunk_by(|a, b| a.0.end == b.0.end) {
                     top.clear();
                     for &(hit, take) in span {
                         // A lower-frequency row can compete if it receives a personal or contextual bonus.
-                        self.for_each_expanded(hit, user, take, rank_ctx, &bonus_rows, cancel, |word, seq, cost, _| {
+                        self.for_each_expanded(hit, user, take, rank_ctx, bonus_rows, cancel, |word, seq, cost, _| {
                             let cost = if hit.src == Src::Names { cost - rank_ctx.bonus(user, word) } else { cost };
                             if let Some(slot) = top.iter_mut().find(|slot| slot.word == word) {
                                 if (cost, seq.as_slice()) >= (slot.cost, slot.seq.as_slice()) {
@@ -1126,6 +1236,7 @@ impl Engine {
         readings.reverse();
         Ok(Some(Candidate {
             word: words.concat(),
+            original_word: None,
             reading: readings.join(" "),
             consumed: n,
             tier: TIER_COMPOSED,
@@ -1147,7 +1258,11 @@ impl Engine {
                 continue;
             }
             let row_code = self.dict.word(code_id);
-            let word = self.dict.word(word_id).to_string();
+            let word_ref = self.dict.word(word_id);
+            if user.is_blocked(word_ref) {
+                continue;
+            }
+            let word = word_ref.to_string();
             let english = kind == ALPHA_ENGLISH;
             let personal = user.english_bonus_lower(row_code, query_time);
             if row_code == code {
@@ -1158,6 +1273,7 @@ impl Engine {
                     cost: base_cost(score) + extra + WORD_COST - personal,
                     reading: String::new(),
                     segments: Vec::new(),
+                    original_word: None,
                     word,
                 });
             } else if completions {
@@ -1167,6 +1283,7 @@ impl Engine {
                     cost: base_cost(score) + 500 + WORD_COST - personal,
                     reading: String::new(),
                     segments: Vec::new(),
+                    original_word: None,
                     word,
                 });
             }
@@ -1225,7 +1342,11 @@ impl Engine {
                 continue;
             }
             let row_code = self.dict.word(code_id);
-            let word = self.dict.word(word_id).to_string();
+            let word_ref = self.dict.word(word_id);
+            if user.is_blocked(word_ref) {
+                continue;
+            }
+            let word = word_ref.to_string();
             let extra = if row_code == code { 0 } else { 200 + 10 * (row_code.len() - code.len()) as i32 };
             add(Candidate {
                 cost: base_cost(score) + extra - user.english_bonus_lower(row_code, query_time),
@@ -1233,11 +1354,15 @@ impl Engine {
                 tier: if extra == 0 { TIER_EXACT_FULL } else { TIER_PREFIX },
                 reading: String::new(),
                 segments: Vec::new(),
+                original_word: None,
                 word,
             });
         }
         for (word, bonus) in user.english_prefix(&code, query_time) {
             cancel.step()?;
+            if user.is_blocked(&word) {
+                continue;
+            }
             let exact = word.to_lowercase() == code;
             add(Candidate {
                 cost: base_cost(3_000) + if exact { 0 } else { 200 } - bonus,
@@ -1245,6 +1370,7 @@ impl Engine {
                 tier: if exact { TIER_EXACT_FULL } else { TIER_PREFIX },
                 reading: String::new(),
                 segments: Vec::new(),
+                original_word: None,
                 word,
             });
         }
@@ -1260,12 +1386,19 @@ impl Engine {
         let user = self.user();
         let mut scores: FxHashMap<String, u32> = FxHashMap::default();
         for (word, weight) in user.predict(prev2, prev) {
+            if user.is_blocked(&word) {
+                continue;
+            }
             *scores.entry(word).or_default() += weight * 100;
         }
         if basic {
             if let Some(id) = self.dict.word_id(prev) {
                 for (next, weight) in self.dict.collocations(id) {
-                    *scores.entry(self.dict.word(next).to_string()).or_default() += weight;
+                    let next_word = self.dict.word(next);
+                    if user.is_blocked(next_word) {
+                        continue;
+                    }
+                    *scores.entry(next_word.to_string()).or_default() += weight;
                 }
             }
         }
@@ -1364,20 +1497,23 @@ impl Engine {
         }
         let ids = edge.ids.as_slice();
         let mut pos = exact_end;
-        while pos < hi && *budget > 0 {
+        let mut id_idx = 0usize;
+        while pos < hi && id_idx < ids.len() && *budget > 0 {
             *budget -= 1;
             let value = self.dict.syllable(pos, depth) as u16;
-            match ids.binary_search(&value) {
-                Ok(_) => {
-                    let up = self.dict.lower(pos, hi, depth, value as i32 + 1);
+            match ids[id_idx..].binary_search(&value) {
+                Ok(rel) => {
+                    id_idx += rel + 1;
+                    let up = self.dict.lower_gallop(pos + 1, hi, depth, value as i32 + 1);
                     self.walk_fixed(edges, depth + 1, pos, up, found, budget);
                     pos = up;
                 }
-                Err(k) => {
-                    if k >= ids.len() {
+                Err(rel) => {
+                    id_idx += rel;
+                    if id_idx >= ids.len() {
                         break;
                     }
-                    pos = self.dict.lower(pos, hi, depth, ids[k] as i32);
+                    pos = self.dict.lower_gallop(pos + 1, hi, depth, ids[id_idx] as i32);
                 }
             }
         }

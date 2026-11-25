@@ -47,7 +47,7 @@ struct ModelConfig {
 
 class Model {
  public:
-  virtual ~Model() = default;
+  virtual ~Model();
 
   static void RegisterCustomLayers(ncnn::Net &net);
 
@@ -137,8 +137,11 @@ class Model {
                       const std::string &bin);
 
 #if __ANDROID_API__ >= 9
-  static void InitNet(AAssetManager *mgr, ncnn::Net &net,
-                      const std::string &param, const std::string &bin);
+  void InitNet(AAssetManager *mgr, ncnn::Net &net,
+               const std::string &param, const std::string &bin);
+
+ private:
+  std::vector<AAsset *> mapped_assets_;
 #endif
 };
 
