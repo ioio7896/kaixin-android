@@ -187,6 +187,8 @@
     <string name="settings_pref_performance_logging_detail">仅记录耗时，不记录文本</string>
     <string name="settings_pref_clipboard_enabled">剪贴板历史</string>
     <string name="settings_pref_clipboard_capture_while_typing">后台自动记录新复制文本</string>
+    <string name="settings_clipboard_auto_capture_summary">默认关闭。开启后可自动保存新复制的文字到本机。</string>
+    <string name="settings_clipboard_auto_capture_prompt">同时开启剪贴板历史时，输入法服务可以在运行期间读取新复制的文字，键盘隐藏时也可能记录。记录加密保存在本机。普通记录默认保留 7 天，固定记录可手动删除。\n\n你可以随时关闭自动记录，或在剪贴板面板清除已有历史。暂不开启仍可正常打字。</string>
     <string name="settings_pref_clipboard_limit">普通历史数量</string>
     <string name="settings_pref_clipboard_retention_days">普通历史保留时间</string>
     <string name="settings_dictionary_learning">词库学习</string>
@@ -196,9 +198,10 @@
     <string name="settings_clipboard_history">历史记录</string>
     <string name="settings_clipboard_description">记录说明</string>
     <string name="settings_about_version">版本信息</string>
-    <string name="settings_about_privacy">隐私说明</string>
-    <string name="settings_help_clipboard_history">默认在输入法服务运行时记录新复制的纯文本。</string>
-    <string name="settings_help_clipboard_history_detail">本输入法作为默认输入法且服务正在运行时，默认监听新复制的纯文本；即使键盘隐藏也可记录。关闭上方开关后，只在打开剪贴板面板时补录尚未保存的当前文本。隐私模式、密码输入和系统敏感标记会阻止保存。单条最多 8192 字、16 KB；固定内容最多 30 条，全部历史最多 256 KB。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。</string>
+    <string name="settings_help_clipboard_history">打开面板可读取当前文字，后台自动记录默认关闭。</string>
+    <string name="settings_help_clipboard_history_detail">开启剪贴板历史后，打开面板时会尝试保存当前文本。确认开启自动记录后，本输入法作为默认输入法且服务运行时，也可记录新复制的纯文本，键盘隐藏时仍可能记录。隐私模式、密码输入和系统敏感标记会阻止保存。单条最多 8192 字、16 KB；固定内容最多 30 条，全部历史最多 256 KB。\n\n快捷短语独立加密保存，不受剪贴板历史开关或清空操作影响。剪贴板页面支持固定分组、搜索、批量选择和删除。清空历史后可在键盘上撤销 10 秒。</string>
+    <string name="voice_permission_explanation">使用语音输入时，开心输入法需要麦克风获取声音并在本机转成文字。原始录音不保存、不上传。暂不开启仍可用键盘打字。</string>
+    <string name="voice_permission_continue">继续申请权限</string>
     <string-array name="settings_pref_output_script_options">
         <item>简体中文</item>
         <item>繁体中文</item>

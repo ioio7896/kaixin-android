@@ -1,5 +1,6 @@
 package com.example.offlineime;
 
+import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
@@ -30,6 +31,11 @@ final class SettingsRows {
     }
 
     void addSwitch(LinearLayout parent, String label, String summary, String key, boolean def) {
+        addSwitch(parent, label, summary, key, def, 0);
+    }
+
+    void addSwitch(LinearLayout parent, String label, String summary, String key, boolean def,
+                   int enablePrompt) {
         LinearLayout row = new LinearLayout(host);
         row.setTag("setting-choice");
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -56,16 +62,31 @@ final class SettingsRows {
         control.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         control.setClickable(false);
         control.setFocusable(false);
-        control.setOnCheckedChangeListener((button, checked) -> {
-            preferences.edit().putBoolean(key, checked).apply();
-            row.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
-        });
+        control.setOnCheckedChangeListener((button, checked) ->
+                control.setChecked(preferences.getBoolean(key, def)));
         SettingsUi.styleCapsuleSwitch(control, host, palette);
         row.addView(control, new LinearLayout.LayoutParams(host.dp(SettingsUi.SWITCH_WIDTH), host.dp(32)));
         row.setBackground(host.pressableRoundRect(Color.TRANSPARENT, palette.surfaceMuted, SettingsUi.CONTROL_RADIUS));
         row.setContentDescription(summary == null ? label
                 : host.getString(R.string.settings_label_summary, label, summary));
-        row.setOnClickListener(v -> control.toggle());
+        row.setOnClickListener(v -> {
+            boolean checked = !control.isChecked();
+            Runnable apply = () -> {
+                preferences.edit().putBoolean(key, checked).apply();
+                control.setChecked(checked);
+                row.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED);
+            };
+            if (checked && enablePrompt != 0) {
+                RoundedCardPopup.showDialog(new AlertDialog.Builder(host)
+                        .setTitle(label)
+                        .setMessage(enablePrompt)
+                        .setNegativeButton(R.string.optional_feature_not_now, null)
+                        .setPositiveButton(R.string.optional_feature_enable, (dialog, which) -> apply.run())
+                        .create());
+            } else {
+                apply.run();
+            }
+        });
         row.setFocusable(true);
         labels.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         row.setAccessibilityDelegate(new View.AccessibilityDelegate() {

@@ -36,6 +36,8 @@ final class SettingsDataPages {
     void buildPrivacySection(LinearLayout content) {
         SharedPreferences preferences = host.preferences();
         UiTokens.Palette palette = host.palette();
+        host.addSubheading(content, host.getString(R.string.legal_section_title));
+        SettingsLegalDocuments.addLinks(host, content);
         host.addSubheading(content, host.getString(R.string.settings_privacy_protection));
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_privacy_mode), host.getString(R.string.settings_pref_privacy_mode_detail), "privacy_mode", false);
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_sensitive_filter), host.getString(R.string.settings_pref_sensitive_filter_detail), "sensitive_filter", true);
@@ -83,7 +85,9 @@ final class SettingsDataPages {
     void buildClipboardSection(LinearLayout content) {
         host.addSubheading(content, host.getString(R.string.settings_clipboard_history));
         host.rows.addSwitch(content, host.getString(R.string.settings_pref_clipboard_enabled), "clipboard_enabled", true);
-        host.rows.addSwitch(content, host.getString(R.string.settings_pref_clipboard_capture_while_typing), "clipboard_capture_while_typing", true);
+        host.rows.addSwitch(content, host.getString(R.string.settings_pref_clipboard_capture_while_typing),
+                host.getString(R.string.settings_clipboard_auto_capture_summary),
+                SettingsRepository.CLIPBOARD_AUTO_CAPTURE, false, R.string.settings_clipboard_auto_capture_prompt);
         host.rows.addChoice(content, host.getString(R.string.settings_pref_clipboard_limit), "clipboard_limit",
                 host.getResources().getStringArray(R.array.settings_pref_clipboard_limit_options),
                 new String[]{"10", "20", "50", "100"});
@@ -105,11 +109,8 @@ final class SettingsDataPages {
         licenses.setText("词库与表情来源");
         licenses.setOnClickListener(v -> showLexiconLicenses());
         content.addView(licenses, new LinearLayout.LayoutParams(-1, host.dp(48)));
-        host.addSubheading(content, host.getString(R.string.settings_about_privacy));
-        TextView privacy = host.text("隐私说明\n\n本应用只在当前输入框中完成本地组合和候选。密码、支付和验证码输入不会写入用户词库。语音输入需要录音权限，识别在本机完成，不保存录音。应用没有网络权限、联系人权限、存储权限和无障碍服务。",
-                14, palette.textSecondary);
-        privacy.setPadding(0, host.dp(18), 0, 0);
-        content.addView(privacy, new LinearLayout.LayoutParams(-1, -2));
+        host.addSubheading(content, host.getString(R.string.legal_section_title));
+        SettingsLegalDocuments.addLinks(host, content);
     }
 
     private void addCustomWordControls(LinearLayout parent) {

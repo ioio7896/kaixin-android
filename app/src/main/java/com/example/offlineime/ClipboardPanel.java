@@ -424,7 +424,7 @@ final class ClipboardPanel extends LinearLayout {
         explanation.setOrientation(VERTICAL);
         explanation.setGravity(Gravity.CENTER);
         explanation.setPadding(dp(16), dp(8), dp(16), dp(8));
-        addClipboardEmptyState(explanation, "剪贴板历史默认关闭", "开启后，复制的文字可在这里再次粘贴");
+        addClipboardEmptyState(explanation, "剪贴板历史已关闭", "开启后，打开面板时可将当前复制的文字保存到历史");
         TextView privacy = new TextView(getContext());
         int limit = getIntPreference(renderSettings, "clipboard_limit", 10);
         int days = getIntPreference(renderSettings, "clipboard_retention_days", 7);

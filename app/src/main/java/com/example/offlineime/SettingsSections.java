@@ -74,7 +74,7 @@ enum SettingsSections {
             case LAYOUT: return LAYOUT_KEYS;
             case DICTIONARY: return new String[]{"learn_words", "learn_long_press", "blocked_words"};
             case CLIPBOARD:
-                return new String[]{"clipboard_enabled", "clipboard_capture_while_typing",
+                return new String[]{"clipboard_enabled", SettingsRepository.CLIPBOARD_AUTO_CAPTURE,
                         "clipboard_limit", "clipboard_retention_days"};
             case PRIVACY: return new String[]{"privacy_mode", "sensitive_filter", "performance_logging"};
             default: return new String[0];

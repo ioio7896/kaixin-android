@@ -256,7 +256,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
             if (clipboardHistory != null) clipboardHistory.releaseMemory(); previousCommittedWord = previousPreviousCommittedWord = "";
             lastChineseCommitAt = 0; stopClipboardListener();
         }
-        if ("clipboard_enabled".equals(name) || "clipboard_capture_while_typing".equals(name)
+        if ("clipboard_enabled".equals(name) || SettingsRepository.CLIPBOARD_AUTO_CAPTURE.equals(name)
                 || "privacy_mode".equals(name)) {
             stopClipboardListener();
             mainHandler.post(this::startClipboardListenerIfNeeded);
@@ -2526,7 +2526,8 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
     }
 
     private void captureClipboardWhileActive() {
-        if (!clipboardListenerRegistered || !canUseClipboard()) return;
+        if (!clipboardListenerRegistered || !canUseClipboard()
+                || !settingsPreferences.getBoolean(SettingsRepository.CLIPBOARD_AUTO_CAPTURE, false)) return;
         captureCurrentClipboard(false, true);
     }
 
@@ -2575,7 +2576,7 @@ public class OfflineImeService extends InputMethodService implements KeyboardVie
         if (clipboardSearchDialogOpen || clipboardSearchResumePending) return;
         android.content.SharedPreferences settings = getSharedPreferences("settings", Context.MODE_PRIVATE);
         boolean enabled = settings.getBoolean("clipboard_enabled", true)
-                && settings.getBoolean("clipboard_capture_while_typing", true)
+                && settings.getBoolean(SettingsRepository.CLIPBOARD_AUTO_CAPTURE, false)
                 && !settings.getBoolean("privacy_mode", false) && !editorSession.sensitive;
         if (!enabled || clipboardListenerRegistered) return;
         ClipboardManager manager = getClipboardManager();

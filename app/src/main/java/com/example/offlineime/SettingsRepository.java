@@ -6,6 +6,9 @@ import java.util.Map;
 
 /** Shared settings storage and compatibility readers for existing installations. */
 final class SettingsRepository {
+    // A legacy switch was on by default. Only confirmation of the new prompt writes this key.
+    static final String CLIPBOARD_AUTO_CAPTURE = "clipboard_auto_capture_opt_in";
+
     private SettingsRepository() {}
 
     static SharedPreferences preferences(Context context) {
